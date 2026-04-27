@@ -78,7 +78,3 @@ podplane deploy web --name test --image caddy
 This will print a URL you can use to view the [Caddy server](https://caddyserver.com/) "Your web server is working" default page.
 
 Note: The `deploy` template may require specific addon components to be installed in the cluster. If they aren't installed, the CLI will prompt you to install them e.g. web apps require Traefik ingress controller.
-
-## Further Reading
-
-Learn about how Podplane works in the [System Design](../design) docs.

@@ -1,6 +1,6 @@
 ---
 title: "CLI Overview"
-weight: 30
+weight: 70
 description: "Podplane CLI design and command overview"
 ---
 
@@ -52,35 +52,37 @@ We recommend setting up a Git repository for storing all of your cluster and OID
 │       └── podplane.cluster.jsonc  # config file
 ```
 
-## `cluster` commands
+## Commands Summary
+
+### `cluster` commands
 
 - `create` generates or reads a cluster config file, generates infra-as-code files, and (for AWS/Google Cloud) deploys the cluster via OpenTofu/Terraform
 - `delete` for (on AWS/Google Cloud) removing deployed infrastructure and deleting generated files created by `create`.
 
-## `oidc` commands
+### `oidc` commands
 
 - `create` generates or reads an OIDC config file, generates infra-as-code files, and (for AWS/Google Cloud) deploys the OIDC via OpenTofu/Terraform
 - `delete` for (on AWS/Google Cloud) removing deployed infrastructure and deleting generated files created by `create`.
 
-## authentication commands
+### authentication commands
 
 - `login` for authenticating via kubectl using the auth URL specified in the cluster configuration file
 - `logout` to remove the previously authenticated cluster from your kubeconfig via kubectl
 
-## `hooks` commands
+### `hooks` commands
 
 - `kubectl-auth` to be used as a kubectl exec auth plugin
 
-## app commands
+### app commands
 
 These commands help you deploy workloads using templates such as the `web` or `worker` app template.
 
-- `deploy <template> --name <name> --image <image>` deploy an app using a template. The CLI will prompt to install addon components if they required dependencies which are not installed.
+- `deploy <template> --name <name> --image <image>` deploy an app using a template. The CLI will prompt to install addon components if they have required dependencies which are not installed.
 - `remove <template> --name <name>` remove a previously deployed app.
 
 Both of these commands are convenience functions which wrap `helm` commands.
 
-## `install` / `uninstall` commands
+### `install` / `uninstall` commands
 
 Addon components extend your cluster's capabilities, such as Traefik ingress controller or CSI drivers.
 
@@ -89,7 +91,7 @@ Addon components extend your cluster's capabilities, such as Traefik ingress con
 
 These components are installed and managed by Flux CD.
 
-## `local` commands
+### `local` commands
 
 You can run multiple single-node cluster VMs. If a name is omitted, `default` is used as the name.
 
@@ -103,7 +105,7 @@ The following commands exist primarily for Podplane development work on the `vmc
 - `shell [name]` open a shell into the local cluster VM or run a command via ssh
 - `sync [name]` rsync files into the local cluster VM
 
-## `package` commands
+### `package` commands
 
 The `local` commands automatically download and cache packages. These commands exist primarily for debugging that cache.
 
@@ -113,6 +115,6 @@ The `local` commands automatically download and cache packages. These commands e
 
 Note `server` is run automatically in the background when `local start` is used, and stopped on `local stop` of the last running VM.
 
-## informational commands
+### informational commands
 
 - `version` reports the current CLI version

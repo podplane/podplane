@@ -1,6 +1,6 @@
 ---
 title: "CLI Reference"
-weight: 40
+weight: 80
 description: "Podplane CLI reference"
 ---
 

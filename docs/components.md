@@ -1,0 +1,101 @@
+---
+title: "Components"
+weight: 50
+description: "How Podplane manages cluster components"
+---
+
+# Components
+
+The "Containers Layer" of the Podplane [Architecture](architecture.md) is designed as a set of "Components", categorised into:
+
+1. __Core Components__ required for minimal cluster operation, so you can deploy and schedule Pods.
+
+2. __Addon Components__ for optional functionality to extend cluster capabilities - things like an ingress controller, CSI drivers, and more.
+
+During cluster creation, users are given three initial state options to choose from:
+
+1. __Recommended__ - which includes all Core Components + a small selection of commonly used Addon Components such as Traefik ingress controller. The goal is that deployment templates such as "web" do not require any additional Addon Components to be installed.
+
+2. __Minimal__ - deploys just the Core Components. From there, users can manually install Components using `podplane install` as required.
+
+3. __None__ - does not install any Podplane Components, meaning you get a bare Kubernetes cluster and Nodes will be `NotReady` until a CNI is installed and they can become `Ready` and able to schedule Pods. For advanced users only.
+
+Components are deployed with an opinionated, tested configuration — not the full surface area of each component's underlying official Helm chart.
+
+### Core Components
+
+- `coredns` for cluster DNS
+- `cilium` for cluster CNI
+    - `cilium-crds` for Cilium CNI
+- `fluxcd` for automated Podplane container-layer upgrades
+    - `fluxcd-crds` for Flux CD
+- `gateway-api-crds` for any ingress controller using Gateway API, particularly Traefik
+- `platform`: Podplane reserved namespaces, components management, default trust bundles (enabled when trust-manager is installed), etc.
+- `rbac`: default RBAC configuration
+
+### Addon Components
+
+Recommended components which can also be installed via `podplane install` atop the Minimal set:
+
+- `cluster-api` for the [Cluster API](https://cluster-api.sigs.k8s.io/) core controller
+    - `cluster-api-crds`
+- `nstance` for the [Nstance Operator](https://nstance.dev/docs/components/nstance-operator/) (requires `cluster-api`)
+    - `nstance-crds`
+- `cert-manager`: [cert-manager](https://cert-manager.io/docs/) and [cert-manager-csi-driver](https://cert-manager.io/docs/usage/csi-driver/)
+    - `cert-manager-crds`
+- `trust-manager`: [trust-manager](https://cert-manager.io/docs/trust/trust-manager/) by the cert-manager project
+    - `trust-manager-crds`
+- `traefik`: [Traefik](https://doc.traefik.io/traefik/) ingress controller
+
+Addon components which can only be installed via `podplane install`:
+
+- `secrets-store-csi-driver`: [Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/)
+    - `secrets-store-csi-driver-crds`
+- `snapshot`: [Snapshot controller](https://kubernetes-csi.github.io/docs/snapshot-controller.html)
+    - `snapshot-crds`
+- Cloud Provider CSI Drivers:
+    - `csi-aws-ebs`: [AWS EBS CSI Drivers](https://github.com/kubernetes-sigs/aws-ebs-csi-driver)
+- `metrics-server`: [Kubernetes Metrics Server](https://github.com/kubernetes-sigs/metrics-server)
+- `cluster-autoscaler`: [Kubernetes Cluster Autoscaler](https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler) for automatic node scaling via Cluster API
+- `node-problem-detector`: [Node Problem Detector](https://github.com/kubernetes/node-problem-detector) for surfacing node hardware/kernel/runtime issues
+
+## How It Works
+
+### Cluster State Initialization
+
+Cluster state is initialised via a Podplane provider for OpenTofu/Terraform.
+
+The provider invokes the Podplane CLI to generate a Netsy snapshot file, and uploads it to its provider-specific object storage (S3 for AWS, GCS for Google Cloud). During this process, the provider ensures a new state file is only uploaded if the cluster is new and has no existing data.
+
+The **Recommended** and **Minimal** options each have their own snapshot files used as initial state templates. The CLI interpolates these files with cluster-specific settings — name/slug, network configuration (IPv6 enabled, cluster CIDR, services CIDR), etc.
+
+The **None** option skips component initialization entirely.
+
+### The Platform Component
+
+A core component called `platform` is a Helm chart that holds all Podplane-related configuration - reserved namespaces, components management, default trust bundles (enabled when trust-manager is installed), etc.
+
+It acts as the single control point for all component installations. The platform chart's values file is the canonical list of enabled components and their configuration. Flux CD watches the platform chart and reconciles HelmRelease resources for each enabled component:
+
+- `podplane install <component>` updates the platform chart values to enable a component; Flux CD then deploys it.
+- `podplane uninstall <component>` disables a component in the platform chart values; Flux CD removes it.
+- Core components cannot be uninstalled.
+
+### Component Dependencies
+
+Component dependency metadata lives in the platform chart within the cluster itself — not hardcoded in the CLI. The CLI queries the Kubernetes API to read the platform chart's metadata to determine what's installed and what dependencies exist.
+
+This means the CLI doesn't need to bundle or fetch dependency information from the [components](https://github.com/podplane/components) repo at runtime. The `components` repo is where charts are authored, but the cluster is the runtime source of truth.
+
+Dependency examples:
+
+- Some addon components depend on other addon components (e.g. snapshot requires snapshot-crds).
+- App templates (used by `podplane deploy`) also have component dependencies (e.g. the `web` template requires traefik).
+
+When running `podplane deploy` or `podplane install`, the CLI checks dependencies and prompts the user to install missing ones.
+
+### Relationship to Cluster Config
+
+`podplane.cluster.jsonc` is the user-facing projection of cluster configuration, including configuration values like cluster name/slug, and which components and features are enabled.
+
+Conceptually, the cluster config file syncs its component/feature settings into the platform chart's values.

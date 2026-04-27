@@ -6,7 +6,7 @@ Want an easy-to-use container platform, without vendor lock-in? Use Podplane to:
 
 1. __Save Time__: Deploy everything you need for a container platform in minutes.
 
-2. __Lower Costs__: Use battle tested infrastructure primitives like VMs, not overpriced managed services.
+2. __Lower Costs__: Use battle-tested infrastructure primitives like VMs, not overpriced managed services.
 
 3. __Be In Control__: Podplane is Apache 2.0 licensed, and only uses components with OSI-approved licenses.
 
