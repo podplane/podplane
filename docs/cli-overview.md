@@ -108,15 +108,18 @@ The following commands exist primarily for Podplane development work on the `vmc
 - `shell [name]` open a shell into the local cluster VM or run a command via ssh
 - `sync [name]` rsync files into the local cluster VM
 
+The following command exists primarily for debugging:
+
+- `server` runs a local background webserver that serves cached packages to VMs and hosts a fake OIDC server for local clusters
+
+Note `server` is run automatically in the background when `local start` is used, and stopped on `local stop` of the last running VM.
+
 ### `package` commands
 
 The `local` commands automatically download and cache packages. These commands exist primarily for debugging that cache.
 
 - `status` reports current state of the cache and if any new package versions are available to download
 - `download` force-downloads the latest package versions
-- `server` runs a local webserver serving packages from cache
-
-Note `server` is run automatically in the background when `local start` is used, and stopped on `local stop` of the last running VM.
 
 ### informational commands
 

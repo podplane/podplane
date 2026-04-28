@@ -6,7 +6,7 @@ description: "Stop a local cluster VM"
 
 ## Overview
 
-Stops a local cluster VM. If this is the last running VM, the background package server is also stopped.
+Stops a local cluster VM. If this is the last running VM, the background local server is also stopped.
 
 If a name is omitted, `default` is used.
 

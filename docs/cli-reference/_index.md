@@ -43,12 +43,12 @@ description: "Podplane CLI reference"
 - [podplane local delete](local-delete.md) – Delete a local cluster VM and its state files.
 - [podplane local shell](local-shell.md) – Open a shell into a local cluster VM.
 - [podplane local sync](local-sync.md) – Sync files into a local cluster VM.
+- [podplane local server](local-server.md) – Run a local background server for VMs.
 
 ## Package Commands
 
 - [podplane package status](package-status.md) – Report package cache status.
 - [podplane package download](package-download.md) – Download latest package versions.
-- [podplane package server](package-server.md) – Run a local package server.
 
 ## Informational Commands
 

@@ -30,7 +30,7 @@ The flow for clusters you create via Podplane CLI is:
 
 For local VMs run via the Podplane CLI, the same `vmconfig` configuration is used to run a single `knc` VM per local cluster.
 
-The CLI itself is responsible for downloading/caching package dependencies and serving them to the VM via a webserver it runs in the background via the [local start](cli-reference/local-start.md) command. You can also use [package server](cli-reference/package-server.md) to run the webserver directly.
+The CLI itself is responsible for downloading/caching package dependencies and serving them to the VM via a webserver it runs in the background via the [local start](cli-reference/local-start.md) command. The same webserver also hosts a fake OIDC server for local clusters. You can also use [local server](cli-reference/local-server.md) to run the webserver directly.
 
 ## Package Dependencies
 
