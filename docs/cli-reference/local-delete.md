@@ -8,8 +8,14 @@ description: "Delete a local cluster VM and its state files"
 
 Deletes a local cluster VM and its state files.
 
-If a name is omitted, `default` is used.
+Use `--id` to select a non-default local cluster.
 
 ```
-podplane local delete [name] [flags]
+podplane local delete [flags]
 ```
+
+## Options
+
+| Flag | Description |
+| --- | --- |
+| `--id string` | Local cluster ID (default: `default`) |

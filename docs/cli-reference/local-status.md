@@ -8,8 +8,14 @@ description: "Report the status of a local cluster VM"
 
 Reports the status of a local cluster VM.
 
-If a name is omitted, `default` is used.
+Use `--id` to select a non-default local cluster.
 
 ```
-podplane local status [name] [flags]
+podplane local status [flags]
 ```
+
+## Options
+
+| Flag | Description |
+| --- | --- |
+| `--id string` | Local cluster ID (default: `default`) |

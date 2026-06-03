@@ -8,8 +8,15 @@ description: "Stop a local cluster VM"
 
 Stops a local cluster VM. If this is the last running VM, the background local server is also stopped.
 
-If a name is omitted, `default` is used.
+Use `--id` to select a non-default local cluster. Pass `--rm` to delete the cluster after stopping it.
 
 ```
-podplane local stop [name] [flags]
+podplane local stop [flags]
 ```
+
+## Options
+
+| Flag | Description |
+| --- | --- |
+| `--rm` | Remove (delete) the cluster after stopping |
+| `--id string` | Local cluster ID (default: `default`) |

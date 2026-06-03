@@ -16,14 +16,14 @@ Provider-specific dependencies are opt-in. By default, `deps download` downloads
 
 The local components images mirror only downloads images for the target architecture, such as `arm64` or `amd64`.
 
-- You can specify one or both architectures with the `--arch` flag e.g. `--arch arm64,arm64` 
+- You can specify one or both architectures with the `--arch` flag e.g. `--arch arm64,amd64`.
 - For component images:
   - Some registry views may still show the full list of architectures from the original upstream image, but architectures you did not download are not actually available in the local mirror.
   - Use the mirror for the local VM architecture you downloaded, not as a complete copy of the upstream registry.
 
 For development, pass `--vmconfig <path>`, `--components <path>`, or `--templates <path>` to use local manifest JSON files instead of fetching published manifests from `cli.podplane.dev`. See [Development](../development.md) for more information.
 
-Pass `--skip-seeds` when to skip seed file downloads while still downloading VMConfig artifacts, component images, and template charts.
+Pass `--skip-seeds` to skip seed file downloads while still downloading VMConfig artifacts, component images, and template charts.
 
 ```
 podplane deps download [flags]
@@ -33,6 +33,11 @@ podplane deps download [flags]
 
 | Flag | Description |
 | --- | --- |
+| `--dry-run` | Print what would be downloaded without actually downloading anything |
+| `--arch string` | Comma-separated target architectures to download (`amd64`, `arm64`). Defaults to the configured architecture |
+| `--providers string` | Comma-separated provider-specific dependencies and component images to include, for example `aws`, `google`, or `all` |
+| `--addons string` | Comma-separated addon component images to include in addition to the recommended addons, or `all` |
+| `-f, --cluster-config string` | Path to a cluster config file to infer providers |
 | `--vmconfig string` | Path to a local vmconfig manifest JSON file |
 | `--components string` | Path to a local components manifest JSON file |
 | `--templates string` | Path to a local templates manifest JSON file |

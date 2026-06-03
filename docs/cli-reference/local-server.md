@@ -21,3 +21,12 @@ The fake S3 service exposes durable local-cluster buckets such as `<cluster-id>-
 ```
 podplane local server [flags]
 ```
+
+## Options
+
+| Flag | Description |
+| --- | --- |
+| `-a, --addr string` | Address to bind server to (default: `0.0.0.0`) |
+| `-b, --background` | Run the server in the background; set when `podplane local start` invokes this command |
+| `-q, --stop` | Stop the existing server process instead of starting one |
+| `--id string` | Local cluster ID (default: `default`) |

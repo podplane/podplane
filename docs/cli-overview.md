@@ -41,7 +41,7 @@ Podplane commands use different config/context sources depending on the command:
   For Commands: `oidc *`
 
 - __Kubernetes Context__ 
-  Flags: `--context` / `--kubeconfig`, default `kubectl config current-contex`
+  Flags: `--context` / `--kubeconfig`, default `kubectl config current-context`
   For Commands: `deploy`, `remove`, `install`, `uninstall`, `logout`.
   Exceptions:
   - `logout` optionally also accepts `--cluster` or `-f` / `--cluster-config`
@@ -50,6 +50,7 @@ Podplane commands use different config/context sources depending on the command:
   For Commands: `local *`, `deps *`, `version`, `completion`, `help`
   Exceptions:
   - `deps download` optionally accepts `--cluster-config` for auto-detecting providers
+  - `local *` commands use `--id` to select the local cluster, defaulting to `default`
 
 The CLI uses the current working directory to find the relevant `podplane.cluster.jsonc` or `podplane.oidc.jsonc` config file. See [Config Reference](config-reference.md) for the full file format documentation.
 
@@ -111,7 +112,7 @@ See [CLI Storage](cli-storage.md) for more details about these files and how the
 These commands help you deploy workloads using templates such as the `web` or `worker` app template.
 
 - `deploy <template> --name <name> --image <image> [-e KEY=value]` deploy an app using a template. The CLI will prompt to install addon components if they have required dependencies which are not installed. Repeat `-e` / `--env` to set non-secret environment variables on the app container.
-- `remove <template> --name <name>` remove a previously deployed app.
+- `remove --name <name>` remove a previously deployed app.
 - `logs <name>` tail logs for a deployed app.
 
 The `deploy` and `remove` commands are convenience functions which wrap `helm` commands. The `logs` command wraps `kubectl logs`.
@@ -127,18 +128,18 @@ These components are installed and managed by Flux CD.
 
 ### `local` commands
 
-You can run multiple single-node cluster VMs. If a name is omitted, `default` is used as the name.
+You can run multiple single-node cluster VMs. Use `--id` to select a cluster; when omitted, `default` is used.
 
-- `start [name]` start a local cluster VM, and creates it if it doesn't exist
-- `status [name]` report the status of a local cluster VM
-- `stop [name]` stop a local cluster VM
-- `delete [name]` delete a local cluster VM and its state files
+- `start` start a local cluster VM, and creates it if it doesn't exist
+- `status` report the status of a local cluster VM
+- `stop` stop a local cluster VM
+- `delete` delete a local cluster VM and its state files
 
 The following commands exist primarily for Podplane development work on the `vmconfig` package:
 
-- `shell [name]` open a shell into the local cluster VM or run a command via SSH
-- `console [name]` attach to the local cluster VM serial console for boot/login debugging; press `Ctrl-]` to detach
-- `sync [name]` rsync files into the local cluster VM
+- `shell [command]` open a shell into the local cluster VM or run a command via SSH
+- `console` attach to the local cluster VM serial console for boot/login debugging; press `Ctrl-]` to detach
+- `sync [from] [to]` rsync files into the local cluster VM
 
 The following command exists primarily for debugging:
 

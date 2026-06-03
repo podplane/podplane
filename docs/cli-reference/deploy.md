@@ -37,6 +37,7 @@ Environment variable names must use Kubernetes-compatible names such as `HELLO_M
 | `--hostname string` | External hostname for routing, when supported by the template |
 | `--path string` | URL path prefix for routing, when supported by the template |
 | `--set stringArray` | Set a template value using Helm `--set` syntax. May be specified multiple times. |
+| `-n, --namespace string` | Kubernetes namespace to deploy into; created if missing |
 | `--context string` | The name of the kubeconfig context to use (default: current kubeconfig context) |
 | `--kubeconfig string` | Path to the kubeconfig file (default: `$KUBECONFIG` or `~/.kube/config`) |
 | `-y, --auto-approve` | Skip confirmation prompts |

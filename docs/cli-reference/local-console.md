@@ -17,3 +17,9 @@ Use `--id` to select a non-default local cluster.
 ```
 podplane local console [flags]
 ```
+
+## Options
+
+| Flag | Description |
+| --- | --- |
+| `--id string` | Local cluster ID (default: `default`) |

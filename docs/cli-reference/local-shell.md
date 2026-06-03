@@ -10,8 +10,14 @@ Opens a shell into the local cluster VM or runs a command via SSH. This command 
 
 This requires SSH access inside the guest. For boot debugging or before SSH is configured, use [`podplane local console`](local-console.md).
 
-If a name is omitted, `default` is used.
+Use `--id` to select a non-default local cluster. Pass an optional command argument to run that command over SSH instead of opening an interactive shell.
 
 ```
-podplane local shell [name] [flags]
+podplane local shell [command] [flags]
 ```
+
+## Options
+
+| Flag | Description |
+| --- | --- |
+| `--id string` | Local cluster ID (default: `default`) |

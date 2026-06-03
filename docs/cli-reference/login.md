@@ -16,4 +16,7 @@ podplane login [flags]
 
 | Flag | Description |
 | --- | --- |
-| `-f, --cluster-config string` | Path to the cluster config file (default: `podplane.cluster.jsonc` in the current directory) |
+| `-f, --cluster-config string` | Path to a podplane.cluster.jsonc file (default: `./podplane.cluster.jsonc`) |
+| `--ca-cert string` | Path, URL, or inline PEM for the Kubernetes API server CA certificate |
+| `--callback-port int` | Port for the local OIDC callback HTTP server (default: `8000`) |
+| `--headless` | Skip opening a browser; follow the authorize redirect non-interactively |

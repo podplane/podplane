@@ -11,3 +11,10 @@ Used as a kubectl exec auth plugin for cluster authentication. This command is t
 ```
 podplane hooks kubectl-auth [flags]
 ```
+
+## Options
+
+| Flag | Description |
+| --- | --- |
+| `-c, --cluster string` | Cluster ID (required) |
+| `-u, --user string` | User sub (required) |

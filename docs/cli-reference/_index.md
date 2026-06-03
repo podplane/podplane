@@ -4,6 +4,15 @@ weight: 80
 description: "Podplane CLI reference"
 ---
 
+## Global Options
+
+These options are available on all commands:
+
+| Flag | Description |
+| --- | --- |
+| `-v, --verbose` | Enable verbose output |
+| `--version` | Show version information |
+
 ## Cluster Commands
 
 - [podplane cluster create](cluster-create.md) – Generate cluster configuration and deploy infrastructure.
