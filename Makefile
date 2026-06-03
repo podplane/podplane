@@ -65,7 +65,7 @@ fmt: ## Format Go source files
 
 lint: ## Run linters
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint is required but not installed"; exit 1; }
-	@golangci-lint run
+	@golangci-lint run --timeout=5m
 
 precommit: ## Check formatting and run linters (read-only)
 	@echo "Checking formatting..."
