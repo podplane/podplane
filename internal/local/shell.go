@@ -24,11 +24,15 @@ func (m *Local) Shell(command string) error {
 	if sshPort == 0 {
 		return fmt.Errorf("state is missing ssh port")
 	}
+	privateKeyPath, err := SSHPrivateKeyPath(m.dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to prepare SSH key for local VM: %w", err)
+	}
 	opts := vm.ShellOptions{}
 	if command != "" {
 		opts.Stdout = os.Stdout
 		opts.Stderr = os.Stderr
 	}
-	_, err = m.vm.Shell(context.Background(), command, sshPort, opts)
+	_, err = m.vm.Shell(context.Background(), command, sshPort, privateKeyPath, opts)
 	return err
 }

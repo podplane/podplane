@@ -14,7 +14,7 @@ import (
 )
 
 // Sync rsync's files into the running local cluster qemu VM.
-func (m *Qemu) Sync(from, to, chown string, excludes []string, sshPort int) error {
+func (m *Qemu) Sync(from, to, chown string, excludes []string, sshPort int, identityFile string) error {
 	// Check if VM is running
 	running, err := m.Running()
 	if err != nil {
@@ -35,21 +35,27 @@ func (m *Qemu) Sync(from, to, chown string, excludes []string, sshPort int) erro
 		excludeFlags = append(excludeFlags, "--exclude", exclude)
 	}
 
+	// build SSH arguments
+	sshArgs := []string{
+		// configure port
+		"-p", strconv.Itoa(sshPort),
+		// trust any server key, prevent prompts and warnings when connecting
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "LogLevel=ERROR",
+	}
+	// add identity (public key) file if set
+	if identityFile != "" {
+		sshArgs = append(sshArgs, "-i", identityFile)
+	}
+
 	// Run rsync into the VM
 	args := []string{
 		"rsync",
 		//
 		"-av",
 		// configure ssh options ....
-		"-e", `ssh ` + strings.Join([]string{
-			// configure port
-			"-p", strconv.Itoa(sshPort),
-			// trust any server key, prevent prompts and warnings when connecting
-			"-o", "StrictHostKeyChecking=accept-new",
-			"-o", "UserKnownHostsFile=/dev/null",
-			"-o", "LogLevel=ERROR",
-		}, " ",
-		),
+		"-e", `ssh ` + strings.Join(sshArgs, " "),
 	}
 	if chownFlag != "" {
 		args = append(args, chownFlag)

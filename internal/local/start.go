@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -264,10 +263,10 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 		}
 	}
 
-	// Get one key for ssh authorized_keys file
-	sshAuthorizedKey, err := PubkeyForSshAuthorizedKey()
+	// Get one key for ssh authorized_keys file.
+	sshAuthorizedKey, err := SSHPublicKey(m.dataDir)
 	if err != nil {
-		sshAuthorizedKey = ""
+		return "", fmt.Errorf("failed to prepare SSH key for local VM: %w", err)
 	}
 
 	// Read and base64-encode the local OIDC CA certificate.
@@ -387,56 +386,52 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	if !progressOutput {
 		color.Green("✓ VM started successfully")
 	}
-	if sshAuthorizedKey != "" {
-		if !vmExisted {
-			progress.Started("cloud-init", "cloud-init user-data", "")
-			if err := m.WaitForReadiness(context.Background(), ReadinessOptions{
-				StreamUserdataLogs: opts.StreamUserdataLogs,
-				Quiet:              progressOutput,
-			}); err != nil {
-				progress.Failed("cloud-init", "cloud-init user-data", err)
-				return "", fmt.Errorf("local VM readiness check failed: %w", err)
-			}
-			progress.Done("cloud-init", "cloud-init user-data", "")
+	if !vmExisted {
+		progress.Started("cloud-init", "cloud-init user-data", "")
+		if err := m.WaitForReadiness(context.Background(), ReadinessOptions{
+			StreamUserdataLogs: opts.StreamUserdataLogs,
+			Quiet:              progressOutput,
+		}); err != nil {
+			progress.Failed("cloud-init", "cloud-init user-data", err)
+			return "", fmt.Errorf("local VM readiness check failed: %w", err)
 		}
-		progress.Started("system-services", "systemd services", "")
-		if err := m.WaitForSystemServices(context.Background(), WaitOptions{Quiet: progressOutput}); err != nil {
-			progress.Failed("system-services", "system services", err)
-			return "", fmt.Errorf("local VM system service readiness check failed: %w", err)
-		}
-		progress.Done("system-services", "system services", "")
-		if vmExisted && mutableEnvChanged {
-			if err := m.repairExistingNstanceAgentEnv(context.Background(), vmPorts.SSH, nstanceBootstrap.ServerRegistrationAddr, nstanceBootstrap.ServerAgentAddr, progressOutput); err != nil {
-				return "", fmt.Errorf("failed to repair local nstance agent endpoint config: %w", err)
-			}
-		}
-		progress.Started("nstance-agent", "nstance", "registration")
-		if err := m.WaitForNstanceAgentRegistration(context.Background(), WaitOptions{Quiet: progressOutput}); err != nil {
-			progress.Failed("nstance-agent", "Nstance agent", err)
-			return "", fmt.Errorf("local VM nstance-agent readiness check failed: %w", err)
-		}
-		progress.Done("nstance-agent", "Nstance agent", "")
-		progress.Started("netsy", "netsy", "health")
-		if err := m.WaitForNetsyHealth(context.Background(), WaitOptions{Quiet: progressOutput}); err != nil {
-			progress.Failed("netsy", "Netsy", err)
-			return "", fmt.Errorf("local VM Netsy health check failed: %w", err)
-		}
-		progress.Done("netsy", "Netsy", "")
-		progress.Started("api-live", "kubernetes live", "")
-		if err := m.waitForAPIServerEndpoint(context.Background(), "live", progressOutput, m.ProbeAPIServerLive); err != nil {
-			progress.Failed("api-live", "Kubernetes API live", err)
-			return "", fmt.Errorf("local VM Kubernetes API readiness check failed: %w", err)
-		}
-		progress.Done("api-live", "Kubernetes API live", "")
-		progress.Started("api-ready", "kubernetes ready", "")
-		if err := m.waitForAPIServerEndpoint(context.Background(), "ready", progressOutput, m.ProbeAPIServerReady); err != nil {
-			progress.Failed("api-ready", "Kubernetes API ready", err)
-			return "", fmt.Errorf("local VM Kubernetes API readiness check failed: %w", err)
-		}
-		progress.Done("api-ready", "Kubernetes API ready", "")
-	} else {
-		slog.Warn("skipping local VM readiness check because no SSH public key was available")
+		progress.Done("cloud-init", "cloud-init user-data", "")
 	}
+	progress.Started("system-services", "systemd services", "")
+	if err := m.WaitForSystemServices(context.Background(), WaitOptions{Quiet: progressOutput}); err != nil {
+		progress.Failed("system-services", "system services", err)
+		return "", fmt.Errorf("local VM system service readiness check failed: %w", err)
+	}
+	progress.Done("system-services", "system services", "")
+	if vmExisted && mutableEnvChanged {
+		if err := m.repairExistingNstanceAgentEnv(context.Background(), vmPorts.SSH, nstanceBootstrap.ServerRegistrationAddr, nstanceBootstrap.ServerAgentAddr, progressOutput); err != nil {
+			return "", fmt.Errorf("failed to repair local nstance agent endpoint config: %w", err)
+		}
+	}
+	progress.Started("nstance-agent", "nstance", "registration")
+	if err := m.WaitForNstanceAgentRegistration(context.Background(), WaitOptions{Quiet: progressOutput}); err != nil {
+		progress.Failed("nstance-agent", "Nstance agent", err)
+		return "", fmt.Errorf("local VM nstance-agent readiness check failed: %w", err)
+	}
+	progress.Done("nstance-agent", "Nstance agent", "")
+	progress.Started("netsy", "netsy", "health")
+	if err := m.WaitForNetsyHealth(context.Background(), WaitOptions{Quiet: progressOutput}); err != nil {
+		progress.Failed("netsy", "Netsy", err)
+		return "", fmt.Errorf("local VM Netsy health check failed: %w", err)
+	}
+	progress.Done("netsy", "Netsy", "")
+	progress.Started("api-live", "kubernetes live", "")
+	if err := m.waitForAPIServerEndpoint(context.Background(), "live", progressOutput, m.ProbeAPIServerLive); err != nil {
+		progress.Failed("api-live", "Kubernetes API live", err)
+		return "", fmt.Errorf("local VM Kubernetes API readiness check failed: %w", err)
+	}
+	progress.Done("api-live", "Kubernetes API live", "")
+	progress.Started("api-ready", "kubernetes ready", "")
+	if err := m.waitForAPIServerEndpoint(context.Background(), "ready", progressOutput, m.ProbeAPIServerReady); err != nil {
+		progress.Failed("api-ready", "Kubernetes API ready", err)
+		return "", fmt.Errorf("local VM Kubernetes API readiness check failed: %w", err)
+	}
+	progress.Done("api-ready", "Kubernetes API ready", "")
 
 	// Print any pending update nudge. Non-blocking: if the goroutine hasn't
 	// produced a result yet (e.g. fast-fail before its 2s timeout), we drop
@@ -466,7 +461,11 @@ func (m *Local) repairExistingNstanceAgentEnv(ctx context.Context, sshPort int, 
 		quoteLocalEnvValue(registrationExpr),
 		quoteLocalEnvValue(agentExpr),
 	)
-	output, err := m.vm.Shell(ctx, command, sshPort, vm.ShellOptions{Timeout: 30 * time.Second})
+	privateKeyPath, err := SSHPrivateKeyPath(m.dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to prepare SSH key for local VM: %w", err)
+	}
+	output, err := m.vm.Shell(ctx, command, sshPort, privateKeyPath, vm.ShellOptions{Timeout: 30 * time.Second})
 	if err != nil {
 		return fmt.Errorf("restart nstance-agent with current endpoints: %w: %s", err, string(output))
 	}

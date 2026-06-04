@@ -66,13 +66,13 @@ type Manager interface {
 
 	// Shell opens a shell session into the VM, or if a command is provided,
 	// executes that command instead of opening an interactive shell.
-	Shell(ctx context.Context, command string, sshPort int, opts ShellOptions) ([]byte, error)
+	Shell(ctx context.Context, command string, sshPort int, identityFile string, opts ShellOptions) ([]byte, error)
 
 	// Console attaches to the VM's serial console for boot/login debugging.
 	Console() error
 
 	// Sync runs rsync to the VM.
-	Sync(from, to, chown string, excludes []string, sshPort int) error
+	Sync(from, to, chown string, excludes []string, sshPort int, identityFile string) error
 
 	// Stop stops a running VM instance
 	Stop() error

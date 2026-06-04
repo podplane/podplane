@@ -20,7 +20,7 @@ import (
 
 // Shell opens a shell session into a qemu VM, or if a command is provided,
 // executes that command instead of opening interactive shell
-func (m *Qemu) Shell(ctx context.Context, command string, sshPort int, opts vm.ShellOptions) ([]byte, error) {
+func (m *Qemu) Shell(ctx context.Context, command string, sshPort int, identityFile string, opts vm.ShellOptions) ([]byte, error) {
 	// Check if VM is running
 	running, err := m.Running()
 	if err != nil {
@@ -36,9 +36,13 @@ func (m *Qemu) Shell(ctx context.Context, command string, sshPort int, opts vm.S
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "LogLevel=ERROR",
 		"-o", "ConnectTimeout=5",
-		// set user and host
-		"debian@127.0.0.1",
 	}
+	// add identity (public key) file if set
+	if identityFile != "" {
+		args = append(args, "-i", identityFile)
+	}
+	// set user and host
+	args = append(args, "debian@127.0.0.1")
 	if command != "" {
 		args = append(args, command)
 	}
