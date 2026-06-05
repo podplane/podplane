@@ -170,7 +170,6 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	}
 	if vmExisted {
 		progress.Omitted("vm-image", "VM image")
-		progress.Omitted("cloud-init", "cloud-init user-data")
 	}
 
 	// Existing local clusters keep the seed recorded in cluster.jsonc. Only new
@@ -386,17 +385,15 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	if !progressOutput {
 		color.Green("✓ VM started successfully")
 	}
-	if !vmExisted {
-		progress.Started("cloud-init", "cloud-init user-data", "")
-		if err := m.WaitForReadiness(context.Background(), ReadinessOptions{
-			StreamUserdataLogs: opts.StreamUserdataLogs,
-			Quiet:              progressOutput,
-		}); err != nil {
-			progress.Failed("cloud-init", "cloud-init user-data", err)
-			return "", fmt.Errorf("local VM readiness check failed: %w", err)
-		}
-		progress.Done("cloud-init", "cloud-init user-data", "")
+	progress.Started("cloud-init", "cloud-init user-data", "")
+	if err := m.WaitForReadiness(context.Background(), ReadinessOptions{
+		StreamUserdataLogs: opts.StreamUserdataLogs,
+		Quiet:              progressOutput,
+	}); err != nil {
+		progress.Failed("cloud-init", "cloud-init user-data", err)
+		return "", fmt.Errorf("local VM readiness check failed: %w", err)
 	}
+	progress.Done("cloud-init", "cloud-init user-data", "")
 	progress.Started("system-services", "systemd services", "")
 	if err := m.WaitForSystemServices(context.Background(), WaitOptions{Quiet: progressOutput}); err != nil {
 		progress.Failed("system-services", "system services", err)

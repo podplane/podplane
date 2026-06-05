@@ -153,6 +153,12 @@ func TestRender_Local_HasDebianPasswordLine(t *testing.T) {
 	if !strings.Contains(out, "cat > /opt/nstance-agent/identity/nonce.jwt <<'NSTANCE_NONCE_JWT'\nnonce.jwt.value\nNSTANCE_NONCE_JWT") {
 		t.Errorf("expected nstance registration nonce to be written directly to nonce.jwt; got:\n%s", out)
 	}
+	if !strings.Contains(out, "VMCONFIG_ALREADY_INSTALLED=false") || !strings.Contains(out, "Skipping install.sh, configure.sh, and restart.sh because vmconfig is already installed.") {
+		t.Errorf("expected installed vmconfig rerun guard; got:\n%s", out)
+	}
+	if !strings.Contains(out, "ensure_nstance_nonce_permissions") || !strings.Contains(out, "systemctl restart nstance-agent || true") {
+		t.Errorf("expected installed vmconfig nonce refresh; got:\n%s", out)
+	}
 	// install.sh and configure.sh invoked
 	if !strings.Contains(out, "/opt/podplane/bin/install.sh") {
 		t.Errorf("expected install.sh invocation; got:\n%s", out)

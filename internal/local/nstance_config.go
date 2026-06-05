@@ -10,6 +10,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -75,14 +76,30 @@ func configureLocalNstance(ctx context.Context, dataDir, clusterID, instanceID, 
 	}
 
 	// ConfigureInstance persists the fake Nstance instance and registration nonce.
-	// Only do this before the first registration. After an existing local VM has
-	// registered, fake Nstance has authoritative hostname/IP values reported by
-	// nstance-agent; overwriting the instance on a later `local start` would erase
-	// those dynamic values even though the VM will not re-register.
+	// Do this before the first registration, including retries for an unregistered
+	// existing VM: registration nonces expire and a previously failed first boot
+	// needs a fresh nonce when local start re-renders user-data. After an existing
+	// local VM has registered, fake Nstance has authoritative hostname/IP values
+	// reported by nstance-agent; overwriting the instance on a later `local start`
+	// would erase those dynamic values even though the VM will not re-register.
 	// InstanceEnvWithAddrs renders agent env vars using addresses published
 	// by the already-running background local server.
 	instanceKey := filepath.ToSlash(filepath.Join("fakeserver", "instances", instanceID, "instance.json"))
-	if _, err := store.Get(ctx, instanceKey); errors.Is(err, fakeserver.ErrNotFound) {
+	configureInstance := false
+	if data, err := store.Get(ctx, instanceKey); errors.Is(err, fakeserver.ErrNotFound) {
+		configureInstance = true
+	} else if err != nil {
+		return nstanceAgentUserData{}, fmt.Errorf("load fake nstance instance state: %w", err)
+	} else {
+		var instance struct {
+			Registered bool `json:"registered"`
+		}
+		if err := json.Unmarshal(data, &instance); err != nil {
+			return nstanceAgentUserData{}, fmt.Errorf("decode fake nstance instance state: %w", err)
+		}
+		configureInstance = !instance.Registered
+	}
+	if configureInstance {
 		if err := server.ConfigureInstance(ctx, fakeserver.InstanceRequest{
 			TenantID:     clusterID,
 			InstanceID:   instanceID,
@@ -90,8 +107,6 @@ func configureLocalNstance(ctx context.Context, dataDir, clusterID, instanceID, 
 		}); err != nil {
 			return nstanceAgentUserData{}, fmt.Errorf("configure fake nstance instance: %w", err)
 		}
-	} else if err != nil {
-		return nstanceAgentUserData{}, fmt.Errorf("load fake nstance instance state: %w", err)
 	}
 	instanceEnv, err := server.InstanceEnvWithAddrs(ctx, instanceID, fakeserver.ServerAddrs{
 		RegistrationAddr: registrationAddr,

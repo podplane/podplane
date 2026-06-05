@@ -47,7 +47,7 @@ func (m *Qemu) Start(userData, cpus, memory, sshAuthorizedKey string, monitor bo
 
 	// Generate the cloud-init data ISO
 	cloudInitDataISO := m.CloudInitDataDiskPath()
-	metaData := fmt.Sprintf("instance-id: %q\nlocal-hostname: %q\n", m.clusterID, m.clusterID)
+	metaData := fmt.Sprintf("instance-id: %q\nlocal-hostname: %q\n", qemuNoCloudInstanceID(m.clusterID, m.arch), m.clusterID)
 	if sshAuthorizedKey != "" {
 		metaData += fmt.Sprintf("public-keys:\n  - %s\n", sshAuthorizedKey)
 	}
@@ -98,4 +98,15 @@ ethernets:
 	}
 
 	return nil
+}
+
+func qemuNoCloudInstanceID(clusterID, arch string) string {
+	if arch == "amd64" {
+		// Bump the NoCloud instance-id for x86_64 VMs so cloud-init treats
+		// pre-existing local VMs as new once and applies the virtio DHCP
+		// network-config. Keep arm64 unchanged to avoid re-running user-data
+		// for existing ARM local clusters.
+		return clusterID + "-amd64-virtio-net-v1"
+	}
+	return clusterID
 }
