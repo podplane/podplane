@@ -40,22 +40,23 @@ Podplane's configuration aims to cover ~80% of infrastructure use cases. For the
 
 ### Generated vs Custom Code
 
-The CLI generates `podplane.*.tf` files alongside the `podplane.cluster.jsonc` config file. These files are fully managed by the CLI - `podplane cluster create` generates them and `podplane cluster upgrade` will regenerate them in the future. Users should never edit generated `.tf` files directly, instead tune the `podplane.cluster.jsonc` file or create additional custom `.tf` files.
+The CLI generates `podplane.cluster.*.tf` files alongside the `podplane.cluster.jsonc` config file. These files are fully managed by the CLI - `podplane cluster create` generates them and `podplane cluster upgrade` will regenerate them in the future. Users should never edit generated `.tf` files directly, instead tune the `podplane.cluster.jsonc` file, set generated variables in `terraform.tfvars` or `*.auto.tfvars`, or create additional custom `.tf` files.
 
-Generated files prefer composition of published [Nstance Terraform modules](https://github.com/nstance-dev/nstance/tree/main/deploy/tf) (`cluster`, `account`, `network`, `shard`) over defining raw cloud resources. The `podplane.main.tf` file contains the cluster module (hosted on the first provider) and shared outputs. Each provider gets its own file containing the provider configuration, account, network, and shard module calls.
+Generated files prefer composition of published [Nstance Terraform modules](https://github.com/nstance-dev/nstance/tree/main/deploy/tf) (`cluster`, `account`, `network`, `shard`) over defining raw cloud resources. `podplane.cluster.main.tf` contains the Terraform/provider configuration, locals, module calls, and supporting resources. `podplane.cluster.variables.tf` contains generated variable declarations. `podplane.cluster.outputs.tf` contains generated outputs.
 
-To add custom infrastructure (e.g. lifecycle rules on a bucket, additional IAM policies, extra cloud resources), create separate `.tf` files in the same directory. These files can reference outputs from the generated modules. The CLI will never modify files it didn't generate.
+To set generated variables, create a user-owned `terraform.tfvars` or `*.auto.tfvars` file in the same directory. To add custom infrastructure (e.g. lifecycle rules on a bucket, additional IAM policies, extra cloud resources), create separate `.tf` files in the same directory. These files can reference outputs from the generated modules. The CLI will never modify files it didn't generate.
 
 ```
 ├── internaltools-production/
 │   ├── podplane.cluster.jsonc              # cluster config
-│   ├── podplane.main.tf                    # generated - cluster module, outputs
-│   ├── podplane.aws_123456789012_us-east-1.tf          # generated - provider, account, network, shards
-│   ├── podplane.google_my-project_us-central1.tf       # generated - provider, account, network, shards
+│   ├── podplane.cluster.main.tf            # generated - providers, locals, modules, resources
+│   ├── podplane.cluster.variables.tf       # generated - variable declarations
+│   ├── podplane.cluster.outputs.tf         # generated - outputs
+│   ├── terraform.tfvars                    # user-owned variable values
 │   └── custom.tf                           # your custom infrastructure
 ```
 
-`podplane cluster upgrade` will regenerate all `podplane.*.tf` files without touching any other files in the directory.
+`podplane cluster upgrade` will regenerate all `podplane.cluster.*.tf` files without touching any other files in the directory.
 
 ## Dependencies
 

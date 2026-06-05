@@ -84,14 +84,23 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCluster returned error: %v", err)
 	}
-	if len(files) != 1 {
-		t.Fatalf("len(files) = %d, want 1", len(files))
+	if len(files) != 3 {
+		t.Fatalf("len(files) = %d, want 3", len(files))
 	}
-	if files[0].Name != "podplane.cluster.tf" {
-		t.Fatalf("files[0].Name = %q, want podplane.cluster.tf", files[0].Name)
+	contents := fileContents(files)
+	for _, name := range []string{
+		"podplane.cluster.main.tf",
+		"podplane.cluster.variables.tf",
+		"podplane.cluster.outputs.tf",
+	} {
+		if _, ok := contents[name]; !ok {
+			t.Fatalf("generated files missing %s: %#v", name, files)
+		}
 	}
-	got := files[0].Content
-	assertExpectedTerraform(t, "podplane.cluster.expected.tf", got)
+	assertExpectedTerraform(t, "podplane.cluster.main.expected.tf", contents["podplane.cluster.main.tf"])
+	assertExpectedTerraform(t, "podplane.cluster.variables.expected.tf", contents["podplane.cluster.variables.tf"])
+	assertExpectedTerraform(t, "podplane.cluster.outputs.expected.tf", contents["podplane.cluster.outputs.tf"])
+	got := contents["podplane.cluster.main.tf"] + contents["podplane.cluster.variables.tf"] + contents["podplane.cluster.outputs.tf"]
 	for _, want := range []string{
 		`provider "aws"`,
 		`module "network_123456789012_us_east_1"`,
@@ -108,6 +117,15 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 			t.Fatalf("generated cluster tf missing %q:\n%s", want, got)
 		}
 	}
+}
+
+// fileContents indexes generated Terraform files by name.
+func fileContents(files []File) map[string]string {
+	contents := map[string]string{}
+	for _, file := range files {
+		contents[file.Name] = file.Content
+	}
+	return contents
 }
 
 // TestGenerateAWSClusterTerraformWithoutSeed verifies bare clusters do not
@@ -134,8 +152,9 @@ func TestGenerateAWSClusterTerraformWithoutSeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCluster returned error: %v", err)
 	}
-	if strings.Contains(files[0].Content, `resource "podplane_netsy_seed_s3" "cluster"`) {
-		t.Fatalf("generated cluster tf unexpectedly contains seed resource:\n%s", files[0].Content)
+	got := fileContents(files)["podplane.cluster.main.tf"]
+	if strings.Contains(got, `resource "podplane_netsy_seed_s3" "cluster"`) {
+		t.Fatalf("generated cluster tf unexpectedly contains seed resource:\n%s", got)
 	}
 }
 
@@ -204,7 +223,7 @@ func TestWriteFilesPreservesCustomTF(t *testing.T) {
 	if err := os.WriteFile(customPath, []byte("custom"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteFiles(dir, []File{{Name: "podplane.cluster.tf", Content: "locals {}\n"}}); err != nil {
+	if err := WriteFiles(dir, []File{{Name: "podplane.cluster.main.tf", Content: "locals {}\n"}}); err != nil {
 		t.Fatalf("WriteFiles returned error: %v", err)
 	}
 	custom, err := os.ReadFile(customPath)

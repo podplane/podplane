@@ -31,9 +31,7 @@ func GenerateCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts C
 	if provider.Kind != "aws" {
 		return nil, fmt.Errorf("cluster provider %q is not supported", provider.Kind)
 	}
-	return []File{
-		{Name: "podplane.cluster.tf", Content: renderAWSCluster(configPath, cfg, provider, opts)},
-	}, nil
+	return renderAWSCluster(configPath, cfg, provider, opts), nil
 }
 
 // WriteCluster writes managed Terraform files for a cluster config path.
@@ -45,9 +43,11 @@ func WriteCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts Clus
 	return WriteFiles(filepath.Dir(configPath), files)
 }
 
-// renderAWSCluster renders the AWS cluster Terraform file.
-func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provider, opts ClusterOptions) string {
-	var doc hclDocument
+// renderAWSCluster renders the AWS cluster Terraform files.
+func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provider, opts ClusterOptions) []File {
+	var mainDoc hclDocument
+	var variablesDoc hclDocument
+	var outputsDoc hclDocument
 
 	terraform := block("terraform")
 	terraform.Body.Attr("required_version", str(">= 1.6.0"))
@@ -61,7 +61,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 			identField("version", str(">= 1.0.0")),
 		)),
 	))
-	doc.AddBlock(terraform)
+	mainDoc.AddBlock(terraform)
 
 	awsProvider := block("provider", "aws")
 	awsProvider.Body.Attr("region", str(provider.Region))
@@ -76,13 +76,13 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		defaultTags.Body.Attr("tags", stringMapValue(provider.Tags))
 		awsProvider.Body.Block(defaultTags)
 	}
-	doc.AddBlock(awsProvider)
+	mainDoc.AddBlock(awsProvider)
 
 	caller := block("data", "aws_caller_identity", "current")
-	doc.AddBlock(caller)
+	mainDoc.AddBlock(caller)
 
 	region := block("data", "aws_region", "current")
-	doc.AddBlock(region)
+	mainDoc.AddBlock(region)
 
 	mutableVars := []struct {
 		name        string
@@ -119,7 +119,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		variable.Body.Attr("description", str(item.description))
 		variable.Body.Attr("type", expr(item.typeExpr))
 		variable.Body.Attr("default", item.defaultVal)
-		doc.AddBlock(variable)
+		variablesDoc.AddBlock(variable)
 	}
 
 	locals := block("locals")
@@ -143,7 +143,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	locals.Body.Attr("kubernetes_cluster_cidr", stringValueList(cfg.Cluster.Kubernetes.ClusterCIDR))
 	locals.Body.Attr("kubernetes_service_cidr", stringValueList(cfg.Cluster.Kubernetes.ServiceCIDR))
 	locals.Body.Attr("mutable_env", mutableEnvValue())
-	doc.AddBlock(locals)
+	mainDoc.AddBlock(locals)
 
 	cluster := block("module", "cluster")
 	cluster.Body.Attr("source", str("nstance-dev/nstance/aws//modules/cluster"))
@@ -155,24 +155,24 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	if len(provider.Tags) > 0 {
 		cluster.Body.Attr("tags", stringMapValue(provider.Tags))
 	}
-	doc.AddBlock(cluster)
+	mainDoc.AddBlock(cluster)
 
 	clusterID := block("output", "cluster_id")
 	clusterID.Body.Attr("value", expr("local.cluster_id"))
-	doc.AddBlock(clusterID)
+	outputsDoc.AddBlock(clusterID)
 
 	apiURL := block("output", "kubernetes_api_url")
 	apiURL.Body.Attr("value", str("https://${local.kubernetes_api_hostname}:${local.kubernetes_api_port}"))
-	doc.AddBlock(apiURL)
+	outputsDoc.AddBlock(apiURL)
 
 	accountName := safeName("account", provider.Account, provider.Region)
 	networkName := safeName("network", provider.Account, provider.Region)
 	account := block("module", accountName)
 	account.Body.Attr("source", str("nstance-dev/nstance/aws//modules/account"))
 	account.Body.Attr("cluster", expr("module.cluster"))
-	doc.AddBlock(account)
+	mainDoc.AddBlock(account)
 
-	addPodplaneAWSStorageAndRoles(&doc, accountName)
+	addPodplaneAWSStorageAndRoles(&mainDoc, accountName)
 
 	network := block("module", networkName)
 	network.Body.Attr("source", str("nstance-dev/nstance/aws//modules/network"))
@@ -189,7 +189,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	if lbs := loadBalancersValue(provider); len(lbs) > 0 {
 		network.Body.Attr("load_balancers", lbs)
 	}
-	doc.AddBlock(network)
+	mainDoc.AddBlock(network)
 
 	for _, zone := range sortedKeys(provider.Zones) {
 		moduleName := safeName("shard", zone)
@@ -202,7 +202,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		shard.Body.Attr("zone", str(zone))
 		shard.Body.Attr("templates", templatesValue(cfg, opts, provider.Kind))
 		shard.Body.Attr("groups", groupsValue(cfg, provider))
-		doc.AddBlock(shard)
+		mainDoc.AddBlock(shard)
 	}
 
 	if cfg.Cluster.Seed.Name != "" && cfg.Cluster.Seed.Name != seeds.None {
@@ -214,33 +214,37 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 			seed.Body.Attr("profile", str(provider.Profile))
 		}
 		seed.Body.Attr("depends_on", list(expr("aws_s3_bucket.netsy")))
-		doc.AddBlock(seed)
+		mainDoc.AddBlock(seed)
 	}
 
 	bucket := block("output", "nstance_bucket")
 	bucket.Body.Attr("value", expr("module.cluster.bucket"))
-	doc.AddBlock(bucket)
+	outputsDoc.AddBlock(bucket)
 
 	shards := block("output", "nstance_shards")
 	shards.Body.Attr("value", nstanceShardsValue(provider))
-	doc.AddBlock(shards)
+	outputsDoc.AddBlock(shards)
 
 	mutableEnv := block("output", "mutable_env")
 	mutableEnv.Body.Attr("value", expr("local.mutable_env"))
-	doc.AddBlock(mutableEnv)
+	outputsDoc.AddBlock(mutableEnv)
 
 	registryReadOnlyRole := block("output", "registry_read_only_role_arn")
 	registryReadOnlyRole.Body.Attr("value", expr("aws_iam_role.registry_read_only.arn"))
-	doc.AddBlock(registryReadOnlyRole)
+	outputsDoc.AddBlock(registryReadOnlyRole)
 
 	registryReadWriteRole := block("output", "registry_read_write_role_arn")
 	registryReadWriteRole.Body.Attr("value", expr("aws_iam_role.registry_read_write.arn"))
-	doc.AddBlock(registryReadWriteRole)
+	outputsDoc.AddBlock(registryReadWriteRole)
 
 	netsyRole := block("output", "netsy_role_arn")
 	netsyRole.Body.Attr("value", expr("aws_iam_role.netsy.arn"))
-	doc.AddBlock(netsyRole)
-	return doc.String()
+	outputsDoc.AddBlock(netsyRole)
+	return []File{
+		{Name: "podplane.cluster.main.tf", Content: mainDoc.String()},
+		{Name: "podplane.cluster.variables.tf", Content: variablesDoc.String()},
+		{Name: "podplane.cluster.outputs.tf", Content: outputsDoc.String()},
+	}
 }
 
 // addPodplaneAWSStorageAndRoles adds Podplane-owned S3 buckets and workload
