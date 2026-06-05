@@ -60,6 +60,13 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 		}
 		if running {
 			fmt.Fprintln(os.Stdout, "VM is already running")
+			stashPath := local.ClusterConfigPath(c.DataDirectory(), localClusterID)
+			if err := configureKubectlForLocalCluster(manager, stashPath); err != nil {
+				return fmt.Errorf("configure kubectl for running local cluster: %w", err)
+			}
+			if ingressURL, err := manager.LocalIngressURL(); err == nil {
+				fmt.Printf("Local ingress proxy: %s\n", ingressURL)
+			}
 			if localStartConsole {
 				if err := manager.Console(); err != nil {
 					return fmt.Errorf("attach console: %w", err)
@@ -89,7 +96,7 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 				{Key: "server", Name: "Local server", Expected: 2 * time.Second, Timeout: 10 * time.Second},
 				{Key: "vm-image", Name: "VM image", Exclude: vmExists, Success: "created", Expected: time.Second, Timeout: 30 * time.Second},
 				{Key: "vm", Name: "VM", Success: "started", Expected: 2 * time.Second, Timeout: 30 * time.Second},
-				{Key: "cloud-init", Name: "cloud-init user-data", Exclude: vmExists, Success: "completed", Expected: 15 * time.Second, Timeout: 10 * time.Minute},
+				{Key: "cloud-init", Name: "cloud-init user-data", Success: "completed", Expected: 15 * time.Second, Timeout: 10 * time.Minute},
 				{Key: "system-services", Name: "systemd services", Success: "started", Expected: 7 * time.Second, Timeout: 2 * time.Minute},
 				{Key: "nstance-agent", Name: "nstance", Success: "registered", Expected: 2 * time.Second, Timeout: 2 * time.Minute},
 				{Key: "netsy", Name: "netsy", Success: "healthy", Expected: 12 * time.Second, Timeout: 2 * time.Minute},
@@ -108,6 +115,10 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 		if err != nil {
 			if errors.Is(err, vm.ErrAlreadyRunning) {
 				fmt.Fprintln(os.Stdout, "VM is already running")
+				stashPath := local.ClusterConfigPath(c.DataDirectory(), localClusterID)
+				if err := configureKubectlForLocalCluster(manager, stashPath); err != nil {
+					return fmt.Errorf("configure kubectl for running local cluster: %w", err)
+				}
 				return nil
 			}
 			return fmt.Errorf("failed to start: %w", err)
@@ -115,41 +126,9 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 		if stashPath == "" {
 			return nil
 		}
-		cluster, err := clusterconfig.Load(stashPath)
-		if err != nil {
-			return fmt.Errorf("load local cluster config: %w", err)
-		}
-		// Local OIDC always issues tokens with sub == oidcserver.LocalSub, so we
-		// can configure kubectl now without first performing a login. We also
-		// refresh the cached token too, as local server ports can change across
-		// restarts, making an old-but-unexpired token's issuer stale.
-		key, err := oidcserver.LoadOrCreateKeypair(manager.OIDCKeyPath())
-		if err != nil {
-			return fmt.Errorf("load local OIDC keypair: %w", err)
-		}
-		idToken, err := oidcserver.IssueLocalToken(key, cluster.Cluster.OIDC.IssuerURL, cluster.Cluster.ID)
-		if err != nil {
-			return fmt.Errorf("issue local kubectl token: %w", err)
-		}
-		localAuthConfig, restoreKeyringPass, err := config.InitWithLocalKeyring()
-		if err != nil {
-			return err
-		}
-		defer restoreKeyringPass()
-		if err := localAuthConfig.AuthSet(config.AuthMetadata{
-			Sub:         oidcserver.LocalSub,
-			ClusterID:   cluster.Cluster.ID,
-			ClusterName: cluster.Cluster.Name,
-			Issuer:      cluster.Cluster.OIDC.IssuerURL,
-			ClientID:    cluster.ResolvedClientID(),
-			UserEmail:   "test@localhost",
-		}, config.AuthSecrets{IDToken: idToken}); err != nil {
-			return fmt.Errorf("cache local kubectl token: %w", err)
-		}
-		if err := kubectl.ConfigureClusterAccess(os.Stdout, cluster.Cluster.ID, cluster.ResolvedKubernetesAPIURL(), oidcserver.LocalSub, "", true); err != nil {
+		if err := configureKubectlForLocalCluster(manager, stashPath); err != nil {
 			return fmt.Errorf("configure kubectl: %w", err)
 		}
-		fmt.Printf("✓ kubectl configured for local cluster using %q context\n", kubectl.ContextKey(cluster.Cluster.ID, true))
 		if ingressURL, err := manager.LocalIngressURL(); err == nil {
 			fmt.Printf("Local ingress proxy: %s\n", ingressURL)
 			if trusted, err := local.MkcertTrustInstalled(); err == nil && !trusted {
@@ -165,4 +144,47 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 	}
 
 	return localStartCmd
+}
+
+func configureKubectlForLocalCluster(manager *local.Local, stashPath string) error {
+	cluster, err := clusterconfig.Load(stashPath)
+	if err != nil {
+		return fmt.Errorf("load local cluster config: %w", err)
+	}
+	// Local OIDC always issues tokens with sub == oidcserver.LocalSub, so we
+	// can configure kubectl now without first performing a login. We also
+	// refresh the cached token too, as local server ports can change across
+	// restarts, making an old-but-unexpired token's issuer stale.
+	key, err := oidcserver.LoadOrCreateKeypair(manager.OIDCKeyPath())
+	if err != nil {
+		return fmt.Errorf("load local OIDC keypair: %w", err)
+	}
+	idToken, err := oidcserver.IssueLocalToken(key, cluster.Cluster.OIDC.IssuerURL, cluster.Cluster.ID)
+	if err != nil {
+		return fmt.Errorf("issue local kubectl token: %w", err)
+	}
+	localAuthConfig, restoreKeyringPass, err := config.InitWithLocalKeyring()
+	if err != nil {
+		return err
+	}
+	defer restoreKeyringPass()
+	if err := localAuthConfig.AuthSet(config.AuthMetadata{
+		Sub:         oidcserver.LocalSub,
+		ClusterID:   cluster.Cluster.ID,
+		ClusterName: cluster.Cluster.Name,
+		Issuer:      cluster.Cluster.OIDC.IssuerURL,
+		ClientID:    cluster.ResolvedClientID(),
+		UserEmail:   "test@localhost",
+	}, config.AuthSecrets{IDToken: idToken}); err != nil {
+		return fmt.Errorf("cache local kubectl token: %w", err)
+	}
+	kubeAPICAPath, err := local.MkcertRootCAPath()
+	if err != nil {
+		return fmt.Errorf("locate local ingress CA certificate: %w", err)
+	}
+	if err := kubectl.ConfigureClusterAccess(os.Stdout, cluster.Cluster.ID, cluster.ResolvedKubernetesAPIURL(), oidcserver.LocalSub, kubeAPICAPath, true); err != nil {
+		return err
+	}
+	fmt.Printf("✓ kubectl configured for local cluster using %q context\n", kubectl.ContextKey(cluster.Cluster.ID, true))
+	return nil
 }
