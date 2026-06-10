@@ -28,6 +28,7 @@ type configForm struct {
 	fields         []configField
 	index          int
 	input          textinput.Model
+	oidcIssuerURL  string
 	err            error
 	showNetworking bool
 	cancel         bool
@@ -70,7 +71,6 @@ func newConfigForm(oidcIssuerURL string) configForm {
 	fields := []configField{
 		{label: "Cluster name", value: draft.Cluster.Name, validate: tui.Required("cluster name")},
 		{label: "Cluster ID / slug", value: draft.Cluster.ID, validate: validateClusterID},
-		{label: "OIDC issuer URL", value: draft.Cluster.OIDC.IssuerURL, validate: tui.Required("OIDC issuer URL")},
 		{label: "AWS region", value: provider.Region, validate: tui.Required("AWS region")},
 		{label: "AWS profile (optional)", value: provider.Profile},
 		{label: "Configure networking options?", value: "no", validate: validateYesNo},
@@ -80,12 +80,16 @@ func newConfigForm(oidcIssuerURL string) configForm {
 		{label: "Control-plane instance type", value: pool.InstanceType, validate: tui.Required("instance type")},
 		{label: "Control-plane size", value: strconv.Itoa(pool.Size), validate: validatePositiveInt},
 	}
+	if oidcIssuerURL == "" {
+		oidcField := configField{label: "OIDC issuer URL", value: draft.Cluster.OIDC.IssuerURL, validate: tui.Required("OIDC issuer URL")}
+		fields = append(fields[:2], append([]configField{oidcField}, fields[2:]...)...)
+	}
 	input := textinput.New()
 	input.Focus()
 	input.CharLimit = 256
 	input.SetValue(fields[0].value)
 	input.CursorEnd()
-	return configForm{fields: fields, input: input}
+	return configForm{fields: fields, input: input, oidcIssuerURL: oidcIssuerURL}
 }
 
 // Init starts cursor blinking for the cluster config form.
@@ -174,7 +178,10 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 	cfg := clusterconfig.NewDraftConfig("aws")
 	cfg.Cluster.Name = values["Cluster name"]
 	cfg.Cluster.ID = values["Cluster ID / slug"]
-	cfg.Cluster.OIDC.IssuerURL = values["OIDC issuer URL"]
+	cfg.Cluster.OIDC.IssuerURL = m.oidcIssuerURL
+	if cfg.Cluster.OIDC.IssuerURL == "" {
+		cfg.Cluster.OIDC.IssuerURL = values["OIDC issuer URL"]
+	}
 	cfg.Cluster.Pools["control-plane"] = clusterconfig.Pool{
 		Arch:         values["Control-plane architecture"],
 		InstanceType: values["Control-plane instance type"],
