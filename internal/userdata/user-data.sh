@@ -25,26 +25,42 @@ hostnamectl set-hostname {{.Instance.ID}}
 {{if eq .Provider.Kind "local"}}echo "debian:devonly" | chpasswd
 {{end}}
 
+VMCONFIG_ALREADY_INSTALLED=false
+if [ -f /opt/podplane/share/vmconfig-installed.json ]; then
+  VMCONFIG_ALREADY_INSTALLED=true
+  echo "vmconfig is already installed; refreshing bootstrap files only."
+fi
+
+ensure_nstance_nonce_permissions() {
+  if [ -f /opt/nstance-agent/identity/nonce.jwt ]; then
+    chmod 0600 /opt/nstance-agent/identity/nonce.jwt
+    chown nstance-agent:nstance-agent /opt/nstance-agent/identity/nonce.jwt
+  fi
+}
+
 # --- 2. Download and verify dependencies ------------------------------------
 
-ARTIFACTS_DIR="/opt/podplane/artifacts"
-mkdir -p "$ARTIFACTS_DIR"
+if [ "$VMCONFIG_ALREADY_INSTALLED" = "true" ]; then
+  echo "Skipping dependency download; vmconfig is already installed."
+else
+  ARTIFACTS_DIR="/opt/podplane/artifacts"
+  mkdir -p "$ARTIFACTS_DIR"
 
-echo "Downloading {{len (.Manifest.InstallItems .ManifestFilter)}} dependencies..."
-curl -sfL --parallel --parallel-max 10 --parallel-immediate \
+  echo "Downloading {{len (.Manifest.InstallItems .ManifestFilter)}} dependencies..."
+  curl -sfL --parallel --parallel-max 10 --parallel-immediate \
 {{- range (.Manifest.InstallItems .ManifestFilter)}}
-  -o "${ARTIFACTS_DIR}/{{.LocalFilename}}" "{{.ResolveURL $.DepsMirrorURL}}" \
+    -o "${ARTIFACTS_DIR}/{{.LocalFilename}}" "{{.ResolveURL $.DepsMirrorURL}}" \
 {{- end}}
-  >/dev/null
+    >/dev/null
 
-echo "Verifying checksums..."
-while read -r digest filename; do
-  case "$digest" in
-    sha256:*) echo "${digest#sha256:}  ${filename}" | sha256sum -c --quiet ;;
-    sha512:*) echo "${digest#sha512:}  ${filename}" | sha512sum -c --quiet ;;
-    *) echo "Unsupported digest algorithm for ${filename}: ${digest}" >&2; exit 1 ;;
-  esac
-done <<CHECKSUMS
+  echo "Verifying checksums..."
+  while read -r digest filename; do
+    case "$digest" in
+      sha256:*) echo "${digest#sha256:}  ${filename}" | sha256sum -c --quiet ;;
+      sha512:*) echo "${digest#sha512:}  ${filename}" | sha512sum -c --quiet ;;
+      *) echo "Unsupported digest algorithm for ${filename}: ${digest}" >&2; exit 1 ;;
+    esac
+  done <<CHECKSUMS
 {{- range (.Manifest.InstallItems .ManifestFilter)}}
 {{.Dep.Digest}}  ${ARTIFACTS_DIR}/{{.LocalFilename}}
 {{- end}}
@@ -52,11 +68,12 @@ CHECKSUMS
 
 # --- 3. Extract vmconfig tarball --------------------------------------------
 {{if .Manifest.HasVMConfigDep .ManifestFilter}}
-echo "Extracting vmconfig.tar.gz..."
-tar -xzf "${ARTIFACTS_DIR}/vmconfig.tar.gz" -C /
+  echo "Extracting vmconfig.tar.gz..."
+  tar -xzf "${ARTIFACTS_DIR}/vmconfig.tar.gz" -C /
 {{else}}
 # skipped
 {{- end}}
+fi
 
 # --- 4. Write user-data environment file ------------------------------------
 
@@ -136,6 +153,16 @@ chmod 0600 /opt/nstance-agent/identity/nonce.jwt /opt/nstance-agent/identity/ca.
 {{- end}}
 
 # -- 6. Run install.sh -------------------------------------------------------
+
+if [ "$VMCONFIG_ALREADY_INSTALLED" = "true" ]; then
+  echo "Skipping install.sh, configure.sh, and restart.sh because vmconfig is already installed."
+  ensure_nstance_nonce_permissions
+  if systemctl list-unit-files nstance-agent.service >/dev/null 2>&1; then
+    systemctl restart nstance-agent || true
+  fi
+  echo "Podplane cloud-init user-data script has completed successfully."
+  exit 0
+fi
 
 {{if not (.Manifest.HasVMConfigDep .ManifestFilter)}}
 {{if eq .Provider.Kind "local"}}

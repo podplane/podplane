@@ -22,6 +22,7 @@ func SetContext(stdout io.Writer, sub string, clusterID string, local bool) erro
 	key := ContextKey(clusterID, local)
 	clusterKey := ClusterKey(clusterID, local)
 	credentialsKey := CredentialsKey(sub, clusterID, local)
+	contextReady := false
 	// run kubectl to check if context already exists
 	var outBuf bytes.Buffer
 	var errBuf bytes.Buffer
@@ -55,20 +56,33 @@ func SetContext(stdout io.Writer, sub string, clusterID string, local bool) erro
 				return nil
 			} else if outJson.User == credentialsKey {
 				fmt.Fprintf(stdout, "Context already exist for %s\n", key)
-				return nil
+				contextReady = true
 			}
 		}
 	}
 	// run kubectl to configure context
-	cmd = execwrap.Command(
-		"kubectl",
-		"config",
-		"set-context",
-		key,
-		"--cluster="+clusterKey,
-		"--user="+credentialsKey,
-		"--namespace=default",
-	)
+	if !contextReady {
+		cmd = execwrap.Command(
+			"kubectl",
+			"config",
+			"set-context",
+			key,
+			"--cluster="+clusterKey,
+			"--user="+credentialsKey,
+			"--namespace=default",
+		)
+		cmd.Stdout = stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+	}
+	return UseContext(stdout, key)
+}
+
+// UseContext selects an existing kubeconfig context as the current context.
+func UseContext(stdout io.Writer, key string) error {
+	cmd := execwrap.Command("kubectl", "config", "use-context", key)
 	cmd.Stdout = stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

@@ -69,6 +69,15 @@ func TestQemuArgumentsUsesQ35ForAMD64(t *testing.T) {
 	assertNotContains(t, args, "virt,accel=kvm,highmem=on")
 }
 
+func TestQemuNoCloudInstanceID(t *testing.T) {
+	if got, want := qemuNoCloudInstanceID("dev", "amd64"), "dev-amd64-virtio-net-v1"; got != want {
+		t.Fatalf("amd64 NoCloud instance-id = %q, want %q", got, want)
+	}
+	if got, want := qemuNoCloudInstanceID("dev", "arm64"), "dev"; got != want {
+		t.Fatalf("arm64 NoCloud instance-id = %q, want %q", got, want)
+	}
+}
+
 func assertContainsPair(t *testing.T, args []string, key, value string) {
 	t.Helper()
 	for i := 0; i < len(args)-1; i++ {
