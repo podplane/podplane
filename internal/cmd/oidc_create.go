@@ -6,9 +6,11 @@ package cmd
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 
 	"github.com/podplane/podplane/internal/config"
+	"github.com/podplane/podplane/internal/infrafiles"
 	"github.com/podplane/podplane/internal/oidccreate"
 	"github.com/spf13/cobra"
 )
@@ -28,6 +30,18 @@ func newOIDCCreateCmd(c *config.Config) *cobra.Command {
 			}
 			path, err := filepath.Abs(cfgPath)
 			if err != nil {
+				return err
+			}
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				originDir, err := os.Getwd()
+				if err != nil {
+					return err
+				}
+				path, err = infrafiles.ConfirmConfigPath(path, originDir, "OIDC config and OpenTofu/Terraform", "my-oidc-server")
+				if err != nil {
+					return err
+				}
+			} else if err != nil {
 				return err
 			}
 			_, err = oidccreate.Run(context.Background(), oidccreate.Options{

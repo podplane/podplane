@@ -15,6 +15,7 @@ import (
 	"github.com/podplane/podplane/internal/clustercreate"
 	"github.com/podplane/podplane/internal/config"
 	"github.com/podplane/podplane/internal/deps"
+	"github.com/podplane/podplane/internal/infrafiles"
 	"github.com/podplane/podplane/internal/oidccreate"
 	"github.com/podplane/podplane/internal/tfexec"
 	"github.com/podplane/podplane/internal/tfgen"
@@ -44,12 +45,20 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 			// the command can operate on a single resolved config value.
 			var cfg *clusterconfig.ClusterConfig
 			if _, err := os.Stat(path); os.IsNotExist(err) {
+				originDir, err := os.Getwd()
+				if err != nil {
+					return err
+				}
 				// Triggers `oidc create` flow if no existing issuer
-				issuerURL, err := clusterCreateOIDCIssuer(noApply, autoApprove)
+				issuerURL, err := clusterCreateOIDCIssuer(originDir, noApply, autoApprove)
 				if err != nil {
 					return err
 				}
 				cfg, err = clustercreate.RunConfigWizard(issuerURL)
+				if err != nil {
+					return err
+				}
+				path, err = infrafiles.ConfirmConfigPath(path, originDir, "cluster config and OpenTofu/Terraform", cfg.Cluster.ID)
 				if err != nil {
 					return err
 				}
@@ -125,7 +134,7 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 
 // clusterCreateOIDCIssuer collects or creates the OIDC issuer URL needed by a
 // new cluster config.
-func clusterCreateOIDCIssuer(noApply bool, autoApprove bool) (string, error) {
+func clusterCreateOIDCIssuer(originDir string, noApply bool, autoApprove bool) (string, error) {
 	hasOIDC, err := tui.Confirm("Do you already have an OIDC issuer for this cluster?", false)
 	if err != nil {
 		return "", err
@@ -141,6 +150,10 @@ func clusterCreateOIDCIssuer(noApply bool, autoApprove bool) (string, error) {
 		return "", fmt.Errorf("cluster creation requires an OIDC issuer URL; provide an existing issuer or run podplane oidc create first")
 	}
 	oidcPath, err := filepath.Abs(defaultOIDCConfigName)
+	if err != nil {
+		return "", err
+	}
+	oidcPath, err = infrafiles.ConfirmConfigPath(oidcPath, originDir, "OIDC config and OpenTofu/Terraform", "my-oidc-server")
 	if err != nil {
 		return "", err
 	}
