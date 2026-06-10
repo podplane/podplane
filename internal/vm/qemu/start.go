@@ -51,7 +51,18 @@ func (m *Qemu) Start(userData, cpus, memory, sshAuthorizedKey string, monitor bo
 	if sshAuthorizedKey != "" {
 		metaData += fmt.Sprintf("public-keys:\n  - %s\n", sshAuthorizedKey)
 	}
-	if err := cloudinit.WriteCloudInitDataISO(cloudInitDataISO, userData, metaData); err != nil {
+	networkConfig := ""
+	if m.arch == "amd64" {
+		networkConfig = `version: 2
+ethernets:
+  primary:
+    match:
+      driver: virtio_net
+    dhcp4: true
+    dhcp6: false
+`
+	}
+	if err := cloudinit.WriteCloudInitDataISO(cloudInitDataISO, userData, metaData, networkConfig); err != nil {
 		return fmt.Errorf("failed to generate cloud-init data ISO: %w", err)
 	}
 

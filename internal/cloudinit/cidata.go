@@ -20,9 +20,10 @@ import (
 const seedISOSize = 10 * 1024 * 1024
 
 // WriteCloudInitDataISO generates a NoCloud ISO image at outputPath containing
-// the provided user-data and meta-data strings. The ISO is labelled "cidata"
-// so that cloud-init's NoCloud datasource discovers it automatically.
-func WriteCloudInitDataISO(outputPath, userData, metaData string) error {
+// the provided user-data, meta-data, and network-config strings. The ISO is
+// labelled "cidata" so that cloud-init's NoCloud datasource discovers it
+// automatically.
+func WriteCloudInitDataISO(outputPath, userData, metaData, networkConfig string) error {
 	// Ensure parent directory exists
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
 		return fmt.Errorf("failed to create seed ISO directory: %w", err)
@@ -53,6 +54,9 @@ func WriteCloudInitDataISO(outputPath, userData, metaData string) error {
 		return err
 	}
 	if err := writeSeedFile(fs, "meta-data", metaData); err != nil {
+		return err
+	}
+	if err := writeSeedFile(fs, "network-config", networkConfig); err != nil {
 		return err
 	}
 

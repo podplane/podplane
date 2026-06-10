@@ -67,8 +67,8 @@ func QemuArguments(monitor bool, arch, vmImage, cloudInitDataISOPath, serialCons
 		biosImagePath = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 		args = []string{
 			// use virtualisation (not emulation) with KVM hardware
-			// acceleration and support phyiscal memory over 4GB
-			"-machine", "virt,accel=kvm,highmem=on",
+			// acceleration. `virt` is an ARM machine type; x86_64 uses Q35.
+			"-machine", "q35,accel=kvm",
 			// networking: TODO
 		}
 	case "arm64":
@@ -104,7 +104,7 @@ func QemuArguments(monitor bool, arch, vmImage, cloudInitDataISOPath, serialCons
 	// Arch-agnostic options
 	args = append(args,
 		// networking via user mode
-		"-nic", qemuUserNetwork(ports),
+		"-nic", qemuUserNetwork(arch, ports),
 		// suppress QEMU's default graphical window; guest console is exposed via
 		// the serial socket used by `podplane local console`
 		"-display", "none",
@@ -154,8 +154,11 @@ func QemuArguments(monitor bool, arch, vmImage, cloudInitDataISOPath, serialCons
 	return args
 }
 
-func qemuUserNetwork(ports []vm.PortForward) string {
+func qemuUserNetwork(arch string, ports []vm.PortForward) string {
 	arg := "user"
+	if arch == "amd64" {
+		arg += ",model=virtio-net-pci"
+	}
 	for _, forward := range ports {
 		arg += fmt.Sprintf(
 			",hostfwd=tcp:%s:%d-:%d",

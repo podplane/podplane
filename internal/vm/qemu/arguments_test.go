@@ -61,6 +61,14 @@ func TestQemuArgumentsUsesSelectedLocalPorts(t *testing.T) {
 	assertContainsPair(t, args, "-nic", "user,hostfwd=tcp:127.0.0.1:3222-:22,hostfwd=tcp:127.0.0.1:16443-:6443,hostfwd=tcp:127.0.0.1:18081-:8080,hostfwd=tcp:127.0.0.1:15001-:5000,hostfwd=tcp:127.0.0.1:18443-:443")
 }
 
+func TestQemuArgumentsUsesQ35ForAMD64(t *testing.T) {
+	args := QemuArguments(false, "amd64", "/vms/os.qcow2", "/vms/cidata.iso", "/run/vms/console.sock", "2", "4G", nil, nil)
+
+	assertContainsPair(t, args, "-machine", "q35,accel=kvm")
+	assertContainsPair(t, args, "-nic", "user,model=virtio-net-pci")
+	assertNotContains(t, args, "virt,accel=kvm,highmem=on")
+}
+
 func assertContainsPair(t *testing.T, args []string, key, value string) {
 	t.Helper()
 	for i := 0; i < len(args)-1; i++ {
