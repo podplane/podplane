@@ -144,5 +144,8 @@ func checkLocalIngressProxy(ctx context.Context, localIngressURL func() (string,
 		return Result{Exists: true, Status: StatusPending, Message: fmt.Sprintf("waiting for Traefik via %s: %v", url, err)}
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+		return Result{Exists: true, Status: StatusPending, Message: fmt.Sprintf("waiting for Traefik via %s: HTTP %d", url, resp.StatusCode)}
+	}
 	return Result{Exists: true, Ready: true, Status: StatusReady, Message: fmt.Sprintf("%s returned HTTP %d", url, resp.StatusCode)}
 }
