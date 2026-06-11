@@ -169,44 +169,12 @@ func (e *HelmError) Unwrap() error {
 	return e.Err
 }
 
-// KubectlError is returned when a kubectl invocation fails.
-type KubectlError struct {
-	Stage  string
-	Err    error
-	Stderr string
-}
-
-// Error implements the error interface.
-func (e *KubectlError) Error() string {
-	if e.Stderr == "" {
-		return fmt.Sprintf("kubectl %s: %v", e.Stage, e.Err)
-	}
-	return fmt.Sprintf("kubectl %s: %v: %s", e.Stage, e.Err, e.Stderr)
-}
-
-// Unwrap returns the underlying exec error.
-func (e *KubectlError) Unwrap() error {
-	return e.Err
-}
-
 // helmArgs returns the leading helm flags for context/kubeconfig. helm uses
 // --kube-context, not --context.
 func helmArgs(kubeContext, kubeconfig string) []string {
 	args := []string{}
 	if kubeContext != "" {
 		args = append(args, "--kube-context", kubeContext)
-	}
-	if kubeconfig != "" {
-		args = append(args, "--kubeconfig", kubeconfig)
-	}
-	return args
-}
-
-// kubectlArgs returns the leading kubectl flags for context/kubeconfig.
-func kubectlArgs(kubeContext, kubeconfig string) []string {
-	args := []string{}
-	if kubeContext != "" {
-		args = append(args, "--context", kubeContext)
 	}
 	if kubeconfig != "" {
 		args = append(args, "--kubeconfig", kubeconfig)

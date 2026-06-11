@@ -83,7 +83,7 @@ first if you have not yet logged in.`,
 				return err
 			}
 
-			items := cfg.InstallItems(plan)
+			items := cfg.HelmReleaseRefs(plan)
 			required := make([]tui.StatusProgressItem, 0, len(items))
 			for _, item := range items {
 				required = append(required, componentStatusProgressItem(item))

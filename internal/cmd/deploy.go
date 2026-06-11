@@ -16,6 +16,7 @@ import (
 	"github.com/podplane/podplane/internal/config"
 	"github.com/podplane/podplane/internal/deploy"
 	"github.com/podplane/podplane/internal/deps"
+	"github.com/podplane/podplane/internal/health"
 	"github.com/podplane/podplane/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -133,10 +134,10 @@ func ensureTemplateDependencies(required []string) error {
 		return err
 	}
 
-	componentItems := cfg.InstallItems(plan)
+	componentItems := cfg.HelmReleaseRefs(plan)
 	requiredBeforeDeploy := []tui.StatusProgressItem{}
 	for _, item := range componentItems {
-		if item.Kind == components.InstallItemCRD {
+		if item.Kind == "crd" {
 			requiredBeforeDeploy = append(requiredBeforeDeploy, componentStatusProgressItem(item))
 		}
 	}
@@ -173,13 +174,13 @@ func resolveTemplateEnablePlan(cfg *components.Config, required []string) (compo
 
 // runComponentStatusProgress renders generic status progress for component
 // HelmReleases and exits when the required progress items are ready.
-func runComponentStatusProgress(ctx context.Context, title, kubeContext, kubeconfig string, componentItems []components.InstallItem, required []tui.StatusProgressItem) error {
+func runComponentStatusProgress(ctx context.Context, title, kubeContext, kubeconfig string, componentItems []health.HelmReleaseRef, required []tui.StatusProgressItem) error {
 	items := make([]tui.StatusProgressItem, 0, len(componentItems))
 	for _, item := range componentItems {
 		items = append(items, componentStatusProgressItem(item))
 	}
 	return tui.RunStatusProgress(title, items, required, func() (map[string]tui.StatusProgressStatus, error) {
-		statuses, err := components.ReadInstallStatuses(ctx, kubeContext, kubeconfig, componentItems)
+		statuses, err := health.ReadHelmReleaseStatuses(ctx, kubeContext, kubeconfig, componentItems)
 		if err != nil {
 			return nil, err
 		}
@@ -189,9 +190,9 @@ func runComponentStatusProgress(ctx context.Context, title, kubeContext, kubecon
 
 // componentStatusProgressItem converts a component install item into a generic
 // TUI status-progress item.
-func componentStatusProgressItem(item components.InstallItem) tui.StatusProgressItem {
+func componentStatusProgressItem(item health.HelmReleaseRef) tui.StatusProgressItem {
 	return tui.StatusProgressItem{
-		Key:  item.Namespace + "/" + item.Name,
+		Key:  item.Namespace + "/helmrelease/" + item.Name,
 		Name: item.Name,
 		Kind: string(item.Kind),
 	}
@@ -199,7 +200,7 @@ func componentStatusProgressItem(item components.InstallItem) tui.StatusProgress
 
 // componentStatusProgressStatuses converts component install statuses into the
 // generic status map consumed by the TUI progress renderer.
-func componentStatusProgressStatuses(statuses map[string]components.InstallStatus) map[string]tui.StatusProgressStatus {
+func componentStatusProgressStatuses(statuses map[string]health.HelmReleaseStatus) map[string]tui.StatusProgressStatus {
 	out := map[string]tui.StatusProgressStatus{}
 	for key, status := range statuses {
 		out[key] = tui.StatusProgressStatus{

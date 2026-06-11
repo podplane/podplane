@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 
 	"github.com/podplane/podplane/internal/execwrap"
+	"github.com/podplane/podplane/internal/kubectl"
 )
 
 // SetEnabled patches the platform-components HelmRelease so the given apps
@@ -32,13 +33,13 @@ func SetEnabled(ctx context.Context, kubeContext, kubeconfig string, apps, crds 
 		"--type", "merge",
 		"-p", string(raw),
 	}
-	args = append(kubectlArgs(kubeContext, kubeconfig), args...)
+	args = append(kubectl.Args(kubeContext, kubeconfig), args...)
 	var stdout, stderr bytes.Buffer
 	cmd := execwrap.Command("kubectl", args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return &KubectlError{Stage: "patch helmrelease", Err: err, Stderr: stderr.String()}
+		return &kubectl.Error{Stage: "patch helmrelease", Err: err, Stderr: stderr.String()}
 	}
 	_ = ctx
 	return nil

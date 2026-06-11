@@ -201,8 +201,12 @@ func renderStatusProgressLine(item StatusProgressItem, status StatusProgressStat
 	message := status.Message
 	if !status.Exists {
 		marker = "…"
-		state = "Pending"
-		message = "waiting for HelmRelease to be created"
+		if state == "" {
+			state = "Pending"
+		}
+		if message == "" {
+			message = "waiting for item to be created"
+		}
 	} else if status.Ready {
 		marker = "✓"
 	}

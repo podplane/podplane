@@ -5,6 +5,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/config"
 	"github.com/podplane/podplane/internal/deps"
+	"github.com/podplane/podplane/internal/health"
 	"github.com/podplane/podplane/internal/kubectl"
 	"github.com/podplane/podplane/internal/local"
 	"github.com/podplane/podplane/internal/oidcserver"
@@ -149,12 +151,30 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 		if err := kubectl.ConfigureClusterAccess(os.Stdout, cluster.Cluster.ID, cluster.ResolvedKubernetesAPIURL(), oidcserver.LocalSub, "", true); err != nil {
 			return fmt.Errorf("configure kubectl: %w", err)
 		}
-		fmt.Printf("✓ kubectl configured for local cluster using %q context\n", kubectl.ContextKey(cluster.Cluster.ID, true))
-		if ingressURL, err := manager.LocalIngressURL(); err == nil {
+		kubeContext := kubectl.ContextKey(cluster.Cluster.ID, true)
+		fmt.Printf("✓ kubectl configured for local cluster using %q context\n", kubeContext)
+		fmt.Println("You can now use kubectl with this cluster.")
+		checks := health.LocalStartChecks(health.LocalStartOptions{SeedName: cluster.Cluster.Seed.Name, KubeContext: kubeContext, LocalIngressURL: manager.LocalIngressURL})
+		if len(checks) > 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			if err := tui.RunHealthProgress("Checking local cluster components", checks, func() (map[string]health.Result, error) {
+				return health.RunChecks(ctx, checks)
+			}); err != nil {
+				return fmt.Errorf("local cluster health check failed: %w", err)
+			}
+		}
+		if cluster.Cluster.Seed.Name == seeds.Recommended {
+			ingressURL, err := manager.LocalIngressURL()
+			if err != nil {
+				return fmt.Errorf("get local ingress URL: %w", err)
+			}
 			fmt.Printf("Local ingress proxy: %s\n", ingressURL)
 			if trusted, err := local.MkcertTrustInstalled(); err == nil && !trusted {
 				fmt.Println("For browsers to trust local ingress HTTPS certificates, run `mkcert -install` once.")
 			}
+			fmt.Printf("Deploy example:\n\tpodplane deploy web --name hello --image ghcr.io/podplane/hello:latest --hostname hello.%s.localhost\n", cluster.Cluster.ID)
+			fmt.Println("✓ Recommended local cluster components are ready; ingress, kubectl, and podplane deploy are ready to use.")
 		}
 		if localStartConsole {
 			if err := manager.Console(); err != nil {
