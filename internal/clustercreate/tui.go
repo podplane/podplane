@@ -106,8 +106,10 @@ func (m configForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc":
 			m.cancel = true
 			return m, tea.Quit
-		case "enter":
-			return m.submit()
+		case "enter", "tab":
+			return m.moveNext()
+		case "shift+tab":
+			return m.movePrevious()
 		}
 	}
 	var cmd tea.Cmd
@@ -127,12 +129,16 @@ func (m configForm) View() string {
 	if m.err != nil {
 		errText = "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("#d20f39")).Render(m.err.Error())
 	}
-	return fmt.Sprintf("\n%s %s\n\n%s\n%s%s\n\nenter: next  esc: cancel\n", title, progress, label, m.input.View(), errText)
+	help := "enter/tab: next  esc: cancel"
+	if m.canMovePrevious() {
+		help = "enter/tab: next  shift+tab: back  esc: cancel"
+	}
+	return fmt.Sprintf("\n%s %s\n\n%s\n%s%s\n\n%s\n", title, progress, label, m.input.View(), errText, help)
 }
 
-// submit validates and stores the active field, advancing to the next field or
-// completing the form.
-func (m configForm) submit() (tea.Model, tea.Cmd) {
+// moveNext validates and stores the active field, advancing to the next field
+// or completing the form.
+func (m configForm) moveNext() (tea.Model, tea.Cmd) {
 	value := strings.TrimSpace(m.input.Value())
 	field := m.fields[m.index]
 	if field.validate != nil {
@@ -156,11 +162,50 @@ func (m configForm) submit() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// movePrevious stores the active field and returns to the previous visible
+// field without validating the active field.
+func (m configForm) movePrevious() (tea.Model, tea.Cmd) {
+	m.storeCurrentValue()
+	m.err = nil
+	m.index = m.previousIndex(m.index - 1)
+	if m.index < 0 {
+		m.index = 0
+	}
+	m.input.SetValue(m.fields[m.index].value)
+	m.input.CursorEnd()
+	return m, nil
+}
+
+// canMovePrevious reports whether there is a previous visible field in the
+// current wizard.
+func (m configForm) canMovePrevious() bool {
+	return m.previousIndex(m.index-1) >= 0
+}
+
+// storeCurrentValue saves the input value for the active field so navigation
+// never discards partially edited answers.
+func (m *configForm) storeCurrentValue() {
+	value := strings.TrimSpace(m.input.Value())
+	m.fields[m.index].value = value
+	if m.fields[m.index].label == "Configure networking options?" {
+		m.showNetworking = strings.EqualFold(value, "yes") || strings.EqualFold(value, "y")
+	}
+}
+
 // nextIndex returns the next visible field index, skipping advanced networking
 // fields unless the user requested them.
 func (m configForm) nextIndex(index int) int {
 	for index < len(m.fields) && m.fields[index].advanced && !m.showNetworking {
 		index++
+	}
+	return index
+}
+
+// previousIndex returns the previous visible field index, skipping advanced
+// networking fields unless the user requested them.
+func (m configForm) previousIndex(index int) int {
+	for index >= 0 && m.fields[index].advanced && !m.showNetworking {
+		index--
 	}
 	return index
 }
