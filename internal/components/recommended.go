@@ -4,7 +4,7 @@
 
 package components
 
-var recommendedAddons = []string{"cert-manager", "platform-certs", "traefik"}
+var recommendedAddons = []string{"agent-sandbox", "cert-manager", "platform-certs", "traefik", "trust-manager"}
 
 // RecommendedAddons returns addon components included by the recommended
 // platform-components seed.
