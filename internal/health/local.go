@@ -8,7 +8,9 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/podplane/podplane/pkg/seeds"
@@ -156,8 +158,17 @@ func checkLocalIngressProxy(ctx context.Context, localIngressURL func() (string,
 		return Result{Status: StatusPending, Message: err.Error()}
 	}
 	client := &http.Client{
-		Timeout:   5 * time.Second,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				host, port, err := net.SplitHostPort(addr)
+				if err == nil && (host == "localhost" || strings.HasSuffix(host, ".localhost")) {
+					addr = net.JoinHostPort("127.0.0.1", port)
+				}
+				return (&net.Dialer{}).DialContext(ctx, network, addr)
+			},
+		},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

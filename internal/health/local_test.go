@@ -8,6 +8,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/podplane/podplane/pkg/seeds"
@@ -51,6 +52,21 @@ func TestCheckLocalIngressProxyAcceptsTraefikNotFound(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	result := checkLocalIngressProxy(context.Background(), func() (string, error) { return server.URL, nil })
+	if !result.Ready || result.Status != StatusReady {
+		t.Fatalf("checkLocalIngressProxy = %#v, want ready", result)
+	}
+}
+
+// TestCheckLocalIngressProxyDialsLocalhostOnLoopback verifies local ingress
+// checks do not depend on host DNS resolving wildcard .localhost names.
+func TestCheckLocalIngressProxyDialsLocalhostOnLoopback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	url := strings.Replace(server.URL, "127.0.0.1", "default.localhost", 1)
+	result := checkLocalIngressProxy(context.Background(), func() (string, error) { return url, nil })
 	if !result.Ready || result.Status != StatusReady {
 		t.Fatalf("checkLocalIngressProxy = %#v, want ready", result)
 	}
