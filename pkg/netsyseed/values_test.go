@@ -18,7 +18,7 @@ func TestBuildPlatformComponentsValuesLocalDomain(t *testing.T) {
 	}
 	ingress := componentValues(values, "traefik")["platform"].(map[string]any)["traefik"].(map[string]any)["ingress"].(map[string]any)
 	issuer := ingress["issuerRef"].(map[string]any)
-	if got, want := issuer["name"], "platform-selfsigned-clusterissuer"; got != want {
+	if got, want := issuer["name"], "platform-ingress-selfsigned-clusterissuer"; got != want {
 		t.Fatalf("issuerRef.name = %v, want %v", got, want)
 	}
 	domains := ingress["domains"].([]map[string]any)
@@ -82,7 +82,7 @@ func TestBuildPlatformComponentsValuesGroupsAWSSolvers(t *testing.T) {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
 	certs := componentValues(values, "platform-certs")["platform"].(map[string]any)["certs"].(map[string]any)
-	acme := certs["acme"].(map[string]any)
+	acme := certs["ingress"].(map[string]any)["acme"].(map[string]any)
 	solvers := acme["solvers"].([]map[string]any)
 	if got, want := len(solvers), 1; got != want {
 		t.Fatalf("solver count = %d, want %d", got, want)
@@ -115,7 +115,7 @@ func TestBuildPlatformComponentsValuesCloudflareSecretSync(t *testing.T) {
 	if certs["secretSync"] == nil {
 		t.Fatalf("expected secretSync values")
 	}
-	solver := certs["acme"].(map[string]any)["solvers"].([]map[string]any)[0]
+	solver := certs["ingress"].(map[string]any)["acme"].(map[string]any)["solvers"].([]map[string]any)[0]
 	ref := solver["cloudflare"].(map[string]any)["apiTokenSecretRef"].(map[string]any)
 	if got, want := ref["name"], "cloudflare-dns01"; got != want {
 		t.Fatalf("cloudflare secret name = %v, want %v", got, want)

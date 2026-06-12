@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	acmeIssuerName  = "platform-acme-clusterissuer"
-	localIssuerName = "platform-selfsigned-clusterissuer"
+	acmeIssuerName       = "platform-ingress-acme-clusterissuer"
+	selfsignedIssuerName = "platform-ingress-selfsigned-clusterissuer"
 )
 
 // buildPlatformComponentsValues derives platform-components Helm values from
@@ -37,7 +37,7 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig) (map[string
 		return values, nil
 	}
 
-	issuerName := localIssuerName
+	issuerName := selfsignedIssuerName
 	platformCerts := map[string]any{
 		"platform": map[string]any{
 			"certs": map[string]any{},
@@ -49,7 +49,9 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig) (map[string
 		if err != nil {
 			return nil, err
 		}
-		platformCerts["platform"].(map[string]any)["certs"].(map[string]any)["acme"] = acme
+		platformCerts["platform"].(map[string]any)["certs"].(map[string]any)["ingress"] = map[string]any{
+			"acme": acme,
+		}
 	}
 
 	components["crds"] = map[string]any{
