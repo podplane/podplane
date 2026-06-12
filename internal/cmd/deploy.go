@@ -39,6 +39,8 @@ var (
 	deployNamespace   string
 	deployContext     string
 	deployKubeconfig  string
+	deployWait        bool
+	deployTimeout     time.Duration
 	deployAutoApprove bool
 )
 
@@ -52,6 +54,8 @@ func init() {
 	deployCmd.Flags().StringVarP(&deployNamespace, "namespace", "n", "", "Kubernetes namespace to deploy into (created if missing)")
 	deployCmd.Flags().StringVar(&deployContext, "context", "", "The name of the kubeconfig context to use")
 	deployCmd.Flags().StringVar(&deployKubeconfig, "kubeconfig", "", "Path to the kubeconfig file")
+	deployCmd.Flags().BoolVar(&deployWait, "wait", true, "Wait for Kubernetes resources to become ready before printing Helm notes")
+	deployCmd.Flags().DurationVar(&deployTimeout, "timeout", 2*time.Minute, "Time to wait for Kubernetes resources to become ready")
 	deployCmd.Flags().BoolVarP(&deployAutoApprove, "auto-approve", "y", false, "Skip confirmation prompts")
 	_ = deployCmd.MarkFlagRequired("name")
 	_ = deployCmd.MarkFlagRequired("image")
@@ -81,6 +85,8 @@ func newDeployCmd(c *config.Config) *cobra.Command {
 			Namespace:  deployNamespace,
 			Context:    deployContext,
 			Kubeconfig: deployKubeconfig,
+			Wait:       deployWait,
+			Timeout:    deployTimeout,
 		})
 	}
 	return deployCmd

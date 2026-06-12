@@ -14,7 +14,7 @@ To update an existing app (e.g. to deploy a new image version), re-run this comm
 podplane deploy <template> --name <name> --image <image> [flags]
 ```
 
-Under the hood this resolves the template from the local dependency cache and runs `helm upgrade --install`. If the template chart is not cached, the command first runs the same download path used by `podplane deps download`.
+Under the hood this resolves the template from the local dependency cache and runs `helm upgrade --install --wait --timeout 2m` by default. If the template chart is not cached, the command first runs the same download path used by `podplane deps download`. Helm waits for the rendered Kubernetes resources to become ready before printing the chart notes, so messages such as "Your app is available" are only shown after the workload is ready or the deploy has timed out. Use `--wait=false` to skip readiness waiting or `--timeout` to allow more time.
 
 Environment variables can be passed with Docker-style `-e` / `--env` flags. Use `KEY=value` to pass an explicit value, or `KEY` to read the value from the local environment. Repeating the flag sets multiple variables; if the same key is provided more than once, the last value wins.
 
@@ -40,4 +40,6 @@ Environment variable names must use Kubernetes-compatible names such as `HELLO_M
 | `-n, --namespace string` | Kubernetes namespace to deploy into; created if missing |
 | `--context string` | The name of the kubeconfig context to use (default: current kubeconfig context) |
 | `--kubeconfig string` | Path to the kubeconfig file (default: `$KUBECONFIG` or `~/.kube/config`) |
+| `--wait bool` | Wait for Kubernetes resources to become ready before printing Helm notes (default: `true`) |
+| `--timeout duration` | Time to wait for Kubernetes resources to become ready (default: `2m0s`) |
 | `-y, --auto-approve` | Skip confirmation prompts |

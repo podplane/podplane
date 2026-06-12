@@ -25,7 +25,7 @@ Templates may have component dependencies. If the required addon components aren
 
 To update an existing app (e.g. to deploy a new image version), simply re-run `podplane deploy` with the same `--name`.
 
-Under the hood deploy runs `helm upgrade --install`.
+Under the hood deploy runs `helm upgrade --install --wait --timeout 2m` by default, so Helm waits for rendered resources to become ready before printing chart notes. Use `--wait=false` to skip readiness waiting or `--timeout` to allow more time.
 
 ## `web`
 
