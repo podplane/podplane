@@ -610,7 +610,8 @@ func (m *Local) WriteLocalClusterConfig(clusterID, oidcIssuerURL, oidcCACertPath
 }
 
 // localComponentsSource returns the components Git source pinned to the cached
-// components manifest version used by local seeded clusters.
+// components manifest version used by local seeded clusters. Development
+// manifests are intentionally not released as Git tags, so they track main.
 func localComponentsSource(depsManager *deps.Manager, seed clusterconfig.Seed) (*clusterconfig.ComponentsSource, error) {
 	if seed.Name == seeds.None {
 		return nil, nil
@@ -618,6 +619,12 @@ func localComponentsSource(depsManager *deps.Manager, seed clusterconfig.Seed) (
 	version, err := depsManager.CachedComponentsVersion()
 	if err != nil {
 		return nil, fmt.Errorf("determine Podplane components version: %w", err)
+	}
+	if version == "dev" {
+		return &clusterconfig.ComponentsSource{
+			URL: "https://github.com/podplane/components.git",
+			Ref: clusterconfig.ComponentsSourceRef{Branch: "main"},
+		}, nil
 	}
 	return &clusterconfig.ComponentsSource{
 		URL: "https://github.com/podplane/components.git",

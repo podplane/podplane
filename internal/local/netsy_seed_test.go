@@ -17,12 +17,59 @@ import (
 
 	"github.com/netsy-dev/netsy/pkg/datafile"
 	"github.com/podplane/podplane/internal/clusterconfig"
+	"github.com/podplane/podplane/internal/deps"
 	"github.com/podplane/podplane/pkg/seeds"
 )
 
 const componentsHelmReleaseKey = "/registry/helm.toolkit.fluxcd.io/helmreleases/platform-components/platform-components"
 
 const testSeedVersion = "v1.2.3-1"
+
+// TestLocalComponentsSourceUsesBranchForDevManifest verifies development
+// components manifests track the main branch instead of a nonexistent vdev tag.
+func TestLocalComponentsSourceUsesBranchForDevManifest(t *testing.T) {
+	manager := deps.NewManager("https://example.invalid", t.TempDir())
+	if err := manager.WriteCachedComponentsManifest([]byte(`{"components":{"version":"dev"}}`)); err != nil {
+		t.Fatalf("WriteCachedComponentsManifest: %v", err)
+	}
+
+	source, err := localComponentsSource(manager, clusterconfig.Seed{Name: seeds.Recommended, Version: testSeedVersion})
+	if err != nil {
+		t.Fatalf("localComponentsSource: %v", err)
+	}
+	if source == nil {
+		t.Fatalf("source is nil")
+	}
+	if got, want := source.Ref.Branch, "main"; got != want {
+		t.Fatalf("source.Ref.Branch = %q, want %q", got, want)
+	}
+	if source.Ref.Tag != "" {
+		t.Fatalf("source.Ref.Tag = %q, want empty", source.Ref.Tag)
+	}
+}
+
+// TestLocalComponentsSourceUsesTagForReleasedManifest verifies released
+// components manifests keep using matching version tags for reproducibility.
+func TestLocalComponentsSourceUsesTagForReleasedManifest(t *testing.T) {
+	manager := deps.NewManager("https://example.invalid", t.TempDir())
+	if err := manager.WriteCachedComponentsManifest([]byte(`{"components":{"version":"1.2.1"}}`)); err != nil {
+		t.Fatalf("WriteCachedComponentsManifest: %v", err)
+	}
+
+	source, err := localComponentsSource(manager, clusterconfig.Seed{Name: seeds.Recommended, Version: testSeedVersion})
+	if err != nil {
+		t.Fatalf("localComponentsSource: %v", err)
+	}
+	if source == nil {
+		t.Fatalf("source is nil")
+	}
+	if got, want := source.Ref.Tag, "v1.2.1"; got != want {
+		t.Fatalf("source.Ref.Tag = %q, want %q", got, want)
+	}
+	if source.Ref.Branch != "" {
+		t.Fatalf("source.Ref.Branch = %q, want empty", source.Ref.Branch)
+	}
+}
 
 // TestEnsureInitialNetsySnapshotNoneSkips verifies that seed name "none" leaves
 // the local Netsy bucket uncreated.
