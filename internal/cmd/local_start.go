@@ -91,11 +91,11 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 				{Key: "server", Name: "Local server", Expected: 2 * time.Second, Timeout: 10 * time.Second},
 				{Key: "vm-image", Name: "VM image", Exclude: vmExists, Success: "created", Expected: time.Second, Timeout: 30 * time.Second},
 				{Key: "vm", Name: "VM", Success: "started", Expected: 2 * time.Second, Timeout: 30 * time.Second},
-				{Key: "cloud-init", Name: "cloud-init user-data", Exclude: vmExists, Success: "completed", Expected: 15 * time.Second, Timeout: 10 * time.Minute},
-				{Key: "system-services", Name: "systemd services", Success: "started", Expected: 7 * time.Second, Timeout: 2 * time.Minute},
-				{Key: "nstance-agent", Name: "nstance", Success: "registered", Expected: 2 * time.Second, Timeout: 2 * time.Minute},
-				{Key: "netsy", Name: "netsy", Success: "healthy", Expected: 12 * time.Second, Timeout: 2 * time.Minute},
-				{Key: "api-live", Name: "kubernetes live", Success: "live", Expected: 6 * time.Second, Timeout: 2 * time.Minute},
+				{Key: "cloud-init", Name: "cloud-init user-data", Exclude: vmExists, Success: "completed", Expected: 12 * time.Second, Timeout: 10 * time.Minute},
+				{Key: "system-services", Name: "systemd services", Success: "started", Expected: 2 * time.Second, Timeout: 2 * time.Minute},
+				{Key: "nstance-agent", Name: "nstance", Success: "registered", Expected: 5 * time.Second, Timeout: 2 * time.Minute},
+				{Key: "netsy", Name: "netsy", Success: "healthy", Expected: 5 * time.Second, Timeout: 2 * time.Minute},
+				{Key: "api-live", Name: "kubernetes live", Success: "live", Expected: 4 * time.Second, Timeout: 2 * time.Minute},
 				{Key: "api-ready", Name: "kubernetes ready", Success: "ready", Expected: 2 * time.Second, Timeout: 2 * time.Minute},
 			}
 			err = tui.RunTaskProgress("Podplane local start", items, func(progress tui.TaskProgress) error {

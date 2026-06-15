@@ -60,7 +60,7 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 				Kind:      "deployment",
 				Required:  true,
 				DependsOn: []string{"cilium"},
-				Expected:  30 * time.Second,
+				Expected:  20 * time.Second,
 				Timeout:   3 * time.Minute,
 				Run: func(ctx context.Context) Result {
 					return readWorkload(ctx, opts.KubeContext, opts.Kubeconfig, "platform-cert-manager", "deployment", "platform-cert-manager-webhook")
@@ -72,7 +72,7 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 				Kind:      "webhook",
 				Required:  true,
 				DependsOn: []string{"cert-manager"},
-				Expected:  10 * time.Second,
+				Expected:  5 * time.Second,
 				Timeout:   2 * time.Minute,
 				Run: func(ctx context.Context) Result {
 					return checkCertManagerAdmission(ctx, opts.KubeContext, opts.Kubeconfig)
@@ -96,7 +96,7 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 				Kind:      "configmap",
 				Required:  true,
 				DependsOn: []string{"trust-manager"},
-				Expected:  10 * time.Second,
+				Expected:  5 * time.Second,
 				Timeout:   2 * time.Minute,
 				Run: func(ctx context.Context) Result {
 					return checkConfigMapData(ctx, opts.KubeContext, opts.Kubeconfig, "default", "platform-selfsigned-ca-bundle", "ca.crt")
