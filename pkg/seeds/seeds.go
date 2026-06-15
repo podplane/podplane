@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	defaultDepsBaseURL = "https://cli.podplane.dev/deps"
+	defaultDepsBaseURL = "https://deps.podplane.dev"
 
 	Recommended = "recommended"
 	Minimal     = "minimal"

@@ -21,7 +21,7 @@ The local components images mirror only downloads images for the target architec
   - Some registry views may still show the full list of architectures from the original upstream image, but architectures you did not download are not actually available in the local mirror.
   - Use the mirror for the local VM architecture you downloaded, not as a complete copy of the upstream registry.
 
-For development, pass `--vmconfig <path>`, `--components <path>`, or `--templates <path>` to use local manifest JSON files instead of fetching published manifests from `cli.podplane.dev`. See [Development](../development.md) for more information.
+For development, pass `--vmconfig <path>`, `--components <path>`, or `--templates <path>` to use local manifest JSON files instead of fetching published manifests from `deps.podplane.dev`. See [Development](../development.md) for more information.
 
 Pass `--skip-seeds` to skip seed file downloads while still downloading VMConfig artifacts, component images, and template charts.
 

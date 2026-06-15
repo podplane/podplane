@@ -14,7 +14,7 @@ type Manager struct {
 // NewManager creates a new deps manager.
 //
 // baseURL is the base URL used to fetch manifest files, e.g.
-// "https://cli.podplane.dev/deps". depsCacheDir is the local deps cache root.
+// "https://deps.podplane.dev". depsCacheDir is the local deps cache root.
 func NewManager(baseURL, depsCacheDir string) *Manager {
 	return &Manager{
 		baseURL:      baseURL,

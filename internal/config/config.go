@@ -34,10 +34,9 @@ func Init() (*Config, error) {
 // runtimeConfig defines the config variables, validation, and viper config
 type runtimeConfig struct {
 	Verbose       bool   `viper:"verbose" envkey:"PODPLANE_DEBUG" default:"false" json:"-" description:"Enable verbose output"`
-	DepsBaseURL   string `viper:"deps_base_url" envkey:"PODPLANE_DEPS_BASE_URL" default:"https://cli.podplane.dev/deps" json:"-" description:"Override the base URL for dependency manifests"`
+	DepsBaseURL   string `viper:"deps_url" envkey:"PODPLANE_DEPS_URL" default:"https://deps.podplane.dev" json:"-" description:"Override the base URL for dependency manifests"`
 	DepsCacheDir  string `viper:"deps_cache_dir" envkey:"PODPLANE_DEPS_CACHE_DIR" default:"" json:"-" description:"Override the directory to cache dependency files. Empty value defaults to CACHE_DIR/deps e.g. ~/.podplane/cache/deps"`
 	Arch          string `viper:"arch" envkey:"PODPLANE_ARCH" default:"" json:"-" description:"Override the target architecture (arm64 or amd64). Empty value auto-detects from runtime.GOARCH."`
-	ApiURL        string `viper:"api_url" envkey:"PODPLANE_API_URL" default:"https://api.podplane.dev" json:"-" description:"Override the Podplane API URL"`
 	OIDCIssuerURL string `viper:"oidc_issuer_url" envkey:"PODPLANE_OIDC_ISSUER_URL" default:"https://auth.podplane.dev" json:"-" description:"Override the Podplane Auth/OIDC Issuer URL"`
 }
 
@@ -61,23 +60,18 @@ func (c *Config) InstanceKind() string {
 	return "knc"
 }
 
-// ApiURL returns API service URL
-func (c *Config) ApiURL() string {
-	return viper.GetString("api_url")
-}
-
 // OIDCIssuerURL returns Auth / OIDC Issuer URL
 func (c *Config) OIDCIssuerURL() string {
 	return viper.GetString("oidc_issuer_url")
 }
 
-// DepsBaseURL returns the base URL used to fetch dependency manifests.
+// DepsBaseURL returns the URL used to fetch dependency manifests and artifacts.
 func (c *Config) DepsBaseURL() string {
-	url := viper.GetString("deps_base_url")
+	url := viper.GetString("deps_url")
 	if url != "" {
 		return url
 	}
-	return "https://cli.podplane.dev/deps"
+	return "https://deps.podplane.dev"
 }
 
 // DepsCacheDir returns the directory used to cache deps files (the manifest

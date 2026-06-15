@@ -44,7 +44,7 @@ func sampleVMConfigManifest(kind string, arch string) *deps.Manifest {
 // not read the local deps cache or fetch remote manifests.
 func testClusterOptions() ClusterOptions {
 	return ClusterOptions{
-		DepsMirrorURL: "https://cli.podplane.dev/deps",
+		DepsMirrorURL: "https://deps.podplane.dev",
 		VMConfigManifests: map[string]*deps.Manifest{
 			"knc/arm64": sampleVMConfigManifest("knc", "arm64"),
 		},

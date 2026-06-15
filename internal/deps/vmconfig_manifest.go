@@ -29,7 +29,7 @@ const VMConfigDepName = "vmconfig"
 
 // Manifest is the top-level structure of the vmconfig manifest JSON file
 // as published at
-// <DepsBaseURL>/vmconfig/manifests/vmconfig_<kind>_<os>_<arch>.json.
+// <deps-url>/manifests/vmconfig_<kind>_<os>_<arch>.json.
 type Manifest struct {
 	VMConfig VMConfig `json:"vmconfig"`
 }

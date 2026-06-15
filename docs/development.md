@@ -62,7 +62,7 @@ make knc-watch
 
 ## Why This Works
 
-`podplane deps download` normally fetches the published manifests from `https://cli.podplane.dev`. Passing local paths changes that behavior:
+`podplane deps download` normally fetches the published manifests from `https://deps.podplane.dev`. Passing local paths changes that behavior:
 
 - `--components ../components/manifests/components.json` uses the local components manifest and mirrors the component images it names into the local dependency cache. It does not cache the published Podplane seed files (`recommended.netsy` / `minimal.netsy`), so pair this workflow with `go run . local start --components none` when you want to bootstrap components manually from your local `components` checkout.
 - `--vmconfig ../vmconfig/manifests/vmconfig_knc_debian-13_arm64.json` uses the local vmconfig manifest, which contains a vmconfig dependency stub instead of a released vmconfig tarball. That makes the local VM user-data skip extracting and running a prebuilt vmconfig package. For the OS image and other dependencies in the manifest, these will be mirrored into the local dependency cache, so using the local manifest means you can test out new dependencies as well as new configuration.
