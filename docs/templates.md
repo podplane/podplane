@@ -47,7 +47,7 @@ Your app container serves plain HTTP on port 80 by default - the Caddy sidecar h
 
 Use [`podplane deploy`](./cli-reference/deploy.md) flags for universal inputs such as app name, image, and environment variables.
 
-The web template also supports the ergonomic routing flags `--hostname` and `--path`.
+The web template also supports the ergonomic routing flags `--hostname` and `--path`. For non-standard external HTTPS ports, set `route.port` with `--set route.port=<port>`.
 
 Template-specific values can be set with `--set` e.g.:
 
@@ -56,6 +56,7 @@ Template-specific values can be set with `--set` e.g.:
 | `app.port` | `80` | Plain HTTP port exposed by the app container |
 | `route.hostname` | `""` | External hostname for routing; `--hostname` maps here |
 | `route.path` | `/` | URL path prefix for routing; `--path` maps here |
+| `route.port` | `443` | External HTTPS port for the browser-facing route URL |
 | `metrics.http` | `true` | Enable Caddy HTTP metrics |
 
 ### Example

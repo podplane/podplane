@@ -4,23 +4,30 @@
 
 package deploy
 
-import "time"
+import (
+	"time"
+
+	"github.com/podplane/podplane/internal/kubectl"
+	"github.com/podplane/podplane/internal/local"
+)
 
 // Options controls a single app deployment.
 type Options struct {
-	Template   string
-	Name       string
-	ChartPath  string
-	Image      string
-	Env        []string
-	Hostname   string
-	Path       string
-	Set        []string
-	Namespace  string
-	Context    string
-	Kubeconfig string
-	Wait       bool
-	Timeout    time.Duration
+	Template         string
+	Name             string
+	ChartPath        string
+	Image            string
+	Env              []string
+	Hostname         string
+	Path             string
+	Port             int
+	RuntimeDirectory string
+	Set              []string
+	Namespace        string
+	Context          string
+	Kubeconfig       string
+	Wait             bool
+	Timeout          time.Duration
 }
 
 // Run renders Helm values from opts and invokes `helm upgrade --install` for
@@ -34,7 +41,17 @@ func Run(opts Options) error {
 	if err := validateTemplateValuesSchema(opts.Template, opts.ChartPath, opts.Hostname != "", opts.Path != ""); err != nil {
 		return err
 	}
-	return withValuesFile(opts.Image, env, opts.Hostname, opts.Path, func(valuesPath string) error {
+	port := opts.Port
+	if port == 0 && local.IsAppIngressHostname(opts.Hostname) {
+		// Local clusters expose app ingress through the host-side local ingress
+		// server, so the browser-facing route port can differ from the in-cluster
+		// Traefik HTTPS port used by the HTTPRoute.
+		clusterID, err := kubectl.LocalClusterIDFromContext(opts.Context, opts.Kubeconfig)
+		if err == nil {
+			port = local.AppIngressRoutePort(opts.RuntimeDirectory, opts.Hostname, clusterID)
+		}
+	}
+	return withValuesFile(opts.Image, env, opts.Hostname, opts.Path, port, func(valuesPath string) error {
 		return runHelm(helmUpgradeInstallArgs(opts, valuesPath))
 	})
 }

@@ -77,6 +77,36 @@ func SetContext(stdout io.Writer, sub string, clusterID string, local bool) erro
 // ClusterIDFromContext returns a Podplane cluster ID from a kubeconfig
 // context. If kubeContext is empty, the current context is used.
 func ClusterIDFromContext(kubeContext, kubeconfig string) (string, error) {
+	clusterID, local, err := clusterIDFromContext(kubeContext, kubeconfig)
+	if err != nil {
+		return "", err
+	}
+	if local {
+		name := strings.TrimSpace(kubeContext)
+		if name == "" {
+			name = ContextKey(clusterID, true)
+		}
+		return "", fmt.Errorf("context %q is a local Podplane cluster; use `podplane local stop` or `podplane local delete`", name)
+	}
+	return clusterID, nil
+}
+
+// LocalClusterIDFromContext returns a local Podplane cluster ID from a
+// kubeconfig context. If kubeContext is empty, the current context is used.
+func LocalClusterIDFromContext(kubeContext, kubeconfig string) (string, error) {
+	clusterID, local, err := clusterIDFromContext(kubeContext, kubeconfig)
+	if err != nil {
+		return "", err
+	}
+	if !local {
+		return "", fmt.Errorf("context %q is not a local Podplane cluster", kubeContext)
+	}
+	return clusterID, nil
+}
+
+// clusterIDFromContext returns a kubeconfig context's Podplane cluster ID and
+// whether it is a local Podplane cluster context.
+func clusterIDFromContext(kubeContext, kubeconfig string) (string, bool, error) {
 	args := []string{"config", "view", "--raw", "--output=json"}
 	if kubeconfig != "" {
 		args = append(args, "--kubeconfig", kubeconfig)
@@ -90,9 +120,9 @@ func ClusterIDFromContext(kubeContext, kubeconfig string) (string, error) {
 	if err := cmd.Run(); err != nil {
 		stderr := strings.TrimSpace(errOut.String())
 		if stderr != "" {
-			return "", fmt.Errorf("read kubeconfig: %w: %s", err, stderr)
+			return "", false, fmt.Errorf("read kubeconfig: %w: %s", err, stderr)
 		}
-		return "", fmt.Errorf("read kubeconfig: %w", err)
+		return "", false, fmt.Errorf("read kubeconfig: %w", err)
 	}
 
 	var cfg struct {
@@ -105,7 +135,7 @@ func ClusterIDFromContext(kubeContext, kubeconfig string) (string, error) {
 		} `json:"contexts"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &cfg); err != nil {
-		return "", fmt.Errorf("parse kubeconfig: %w", err)
+		return "", false, fmt.Errorf("parse kubeconfig: %w", err)
 	}
 
 	name := strings.TrimSpace(kubeContext)
@@ -113,7 +143,7 @@ func ClusterIDFromContext(kubeContext, kubeconfig string) (string, error) {
 		name = strings.TrimSpace(cfg.CurrentContext)
 	}
 	if name == "" {
-		return "", fmt.Errorf("no kubeconfig context selected; pass --context, --cluster, or -f/--cluster-config")
+		return "", false, fmt.Errorf("no kubeconfig context selected; pass --context, --cluster, or -f/--cluster-config")
 	}
 
 	for _, context := range cfg.Contexts {
@@ -121,12 +151,12 @@ func ClusterIDFromContext(kubeContext, kubeconfig string) (string, error) {
 			continue
 		}
 		if strings.HasPrefix(context.Context.Cluster, "podplane-local-") {
-			return "", fmt.Errorf("context %q is a local Podplane cluster; use `podplane local stop` or `podplane local delete`", name)
+			return strings.TrimPrefix(context.Context.Cluster, "podplane-local-"), true, nil
 		}
 		if clusterID := strings.TrimPrefix(context.Context.Cluster, "podplane-"); clusterID != context.Context.Cluster {
-			return clusterID, nil
+			return clusterID, false, nil
 		}
-		return name, nil
+		return name, false, nil
 	}
-	return "", fmt.Errorf("kubeconfig context %q not found", name)
+	return "", false, fmt.Errorf("kubeconfig context %q not found", name)
 }

@@ -50,6 +50,29 @@ func TestLocalIngressClusterID(t *testing.T) {
 	}
 }
 
+func TestIsAppIngressHostname(t *testing.T) {
+	tests := []struct {
+		name string
+		host string
+		want bool
+	}{
+		{name: "cluster root", host: "dev.localhost", want: true},
+		{name: "host under cluster", host: "app.dev.localhost", want: true},
+		{name: "host with port", host: "app.dev.localhost:4433", want: true},
+		{name: "case and trailing dot", host: "App.Dev.Localhost.", want: true},
+		{name: "production", host: "app.example.com", want: false},
+		{name: "kubernetes api", host: "dev.k8s.localhost", want: false},
+		{name: "too many labels", host: "api.internal.dev.localhost", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsAppIngressHostname(tt.host); got != tt.want {
+				t.Fatalf("IsAppIngressHostname(%q) = %t, want %t", tt.host, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLocalIngressClusterIDRejectsInvalidHostnames(t *testing.T) {
 	for _, serverName := range []string{"", "example.com", "localhost", "api.internal.dev.localhost"} {
 		t.Run(serverName, func(t *testing.T) {

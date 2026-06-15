@@ -12,7 +12,7 @@ import (
 
 func TestWithValuesFileIncludesRouteWhenSet(t *testing.T) {
 	t.Parallel()
-	err := withValuesFile("example.com/app:latest", nil, "hello.example.com", "/api", func(valuesPath string) error {
+	err := withValuesFile("example.com/app:latest", nil, "hello.example.com", "/api", 8443, func(valuesPath string) error {
 		raw, err := os.ReadFile(valuesPath)
 		if err != nil {
 			return err
@@ -31,6 +31,9 @@ func TestWithValuesFileIncludesRouteWhenSet(t *testing.T) {
 		if got := route["path"]; got != "/api" {
 			t.Fatalf("route.path = %v, want /api", got)
 		}
+		if got := route["port"]; got != float64(8443) {
+			t.Fatalf("route.port = %v, want 8443", got)
+		}
 		return nil
 	})
 	if err != nil {
@@ -40,7 +43,7 @@ func TestWithValuesFileIncludesRouteWhenSet(t *testing.T) {
 
 func TestWithValuesFileOmitsRouteWhenUnset(t *testing.T) {
 	t.Parallel()
-	err := withValuesFile("example.com/app:latest", nil, "", "", func(valuesPath string) error {
+	err := withValuesFile("example.com/app:latest", nil, "", "", 0, func(valuesPath string) error {
 		raw, err := os.ReadFile(valuesPath)
 		if err != nil {
 			return err

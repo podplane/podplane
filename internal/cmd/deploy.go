@@ -74,19 +74,20 @@ func newDeployCmd(c *config.Config) *cobra.Command {
 			return err
 		}
 		return deploy.Run(deploy.Options{
-			Template:   args[0],
-			Name:       deployName,
-			ChartPath:  chart.Path,
-			Image:      deployImage,
-			Env:        deployEnv,
-			Hostname:   deployHostname,
-			Path:       deployPath,
-			Set:        deploySet,
-			Namespace:  deployNamespace,
-			Context:    deployContext,
-			Kubeconfig: deployKubeconfig,
-			Wait:       deployWait,
-			Timeout:    deployTimeout,
+			Template:         args[0],
+			Name:             deployName,
+			ChartPath:        chart.Path,
+			Image:            deployImage,
+			Env:              deployEnv,
+			Hostname:         deployHostname,
+			Path:             deployPath,
+			RuntimeDirectory: c.RuntimeDirectory(),
+			Set:              deploySet,
+			Namespace:        deployNamespace,
+			Context:          deployContext,
+			Kubeconfig:       deployKubeconfig,
+			Wait:             deployWait,
+			Timeout:          deployTimeout,
 		})
 	}
 	return deployCmd

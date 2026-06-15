@@ -11,7 +11,7 @@ import (
 
 // withValuesFile renders a Helm values JSON file to a temporary path, invokes
 // fn with that path, and removes the file before returning.
-func withValuesFile(image string, env map[string]string, hostname, path string, fn func(valuesPath string) error) error {
+func withValuesFile(image string, env map[string]string, hostname, path string, port int, fn func(valuesPath string) error) error {
 	if env == nil {
 		env = map[string]string{}
 	}
@@ -19,13 +19,16 @@ func withValuesFile(image string, env map[string]string, hostname, path string, 
 		"image": image,
 		"env":   env,
 	}
-	if hostname != "" || path != "" {
+	if hostname != "" || path != "" || port != 0 {
 		route := map[string]any{}
 		if hostname != "" {
 			route["hostname"] = hostname
 		}
 		if path != "" {
 			route["path"] = path
+		}
+		if port != 0 {
+			route["port"] = port
 		}
 		values["route"] = route
 	}

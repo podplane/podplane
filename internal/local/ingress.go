@@ -63,6 +63,47 @@ func LocalKubernetesAPIHostname(clusterID string) string {
 	return fmt.Sprintf("%s.k8s.localhost", clusterID)
 }
 
+// IsAppIngressHostname reports whether host is in the local app ingress
+// namespace. App ingress uses <cluster-id>.localhost or
+// <host>.<cluster-id>.localhost; <cluster-id>.k8s.localhost is reserved for the
+// Kubernetes API.
+func IsAppIngressHostname(host string) bool {
+	target, err := localIngressTargetForHost(host)
+	return err == nil && target.kind == localIngressTargetTraefik
+}
+
+// LocalIngressClusterID extracts the local cluster ID from a browser-facing
+// local app ingress hostname.
+func LocalIngressClusterID(host string) (string, error) {
+	target, err := localIngressTargetForHost(host)
+	if err != nil {
+		return "", err
+	}
+	if target.kind != localIngressTargetTraefik {
+		return "", fmt.Errorf("local ingress hostname %q is reserved for Kubernetes API routing", host)
+	}
+	return target.clusterID, nil
+}
+
+// AppIngressRoutePort returns the browser-facing local ingress HTTPS port when
+// host belongs to clusterID's app ingress namespace and the local server is
+// running.
+func AppIngressRoutePort(runtimeDir, host, clusterID string) int {
+	hostClusterID, err := LocalIngressClusterID(host)
+	if err != nil || hostClusterID != clusterID {
+		return 0
+	}
+	pidFile, err := ServerPIDFile(runtimeDir)
+	if err != nil {
+		return 0
+	}
+	if running, err := pidFile.IsRunning(); err != nil || !running {
+		return 0
+	}
+	port, _ := strconv.Atoi(pidFile.GetData("ingress_https_port"))
+	return port
+}
+
 // localIngressTargetForHost extracts the local cluster and target from an
 // ingress hostname. App ingress uses <cluster-id>.localhost or
 // <host>.<cluster-id>.localhost. The reserved <cluster-id>.k8s.localhost host
