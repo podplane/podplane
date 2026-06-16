@@ -31,7 +31,7 @@ Under the hood deploy runs `helm upgrade --install --wait --timeout 2m` by defau
 
 The `web` template deploys a web application with automatic TLS and ingress routing.
 
-**Component dependencies:** traefik, platform-trust
+**Component dependencies:** cert-manager, traefik, platform-trust
 
 ### What You Get
 
