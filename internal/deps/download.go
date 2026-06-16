@@ -94,6 +94,7 @@ type pendingDownload struct {
 	Checksum       string
 	Image          ComponentImage
 	ComponentIndex int
+	TemplateIndex  int
 	Kind           pendingDownloadKind
 }
 
@@ -102,6 +103,7 @@ type pendingDownloadKind string
 const (
 	pendingDownloadVMConfig       pendingDownloadKind = "vmconfig"
 	pendingDownloadComponentImage pendingDownloadKind = "component-image"
+	pendingDownloadTemplateImage  pendingDownloadKind = "template-image"
 )
 
 // Download fetches the latest manifests and downloads any referenced vmconfig
@@ -188,12 +190,18 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 	}
 	templatesManifest := &TemplatesManifest{}
 	templatesSource := ""
+	templateImageIndexes := []int{}
 	if !opts.SkipCrossArchDependencies {
 		templatesManifest, templatesSource, err = m.loadTemplatesManifest(ctx, client, opts, emit)
 		if err != nil {
 			return err
 		}
 		templatesManifest.ResetCached()
+		templateArchs, err := normalizeArchs(opts.Archs, arch)
+		if err != nil {
+			return err
+		}
+		templateImageIndexes = templatesManifest.DownloadImageIndexes(templateArchs)
 	}
 	seedsManifest := &SeedsManifest{}
 	seedsSource := ""
@@ -216,14 +224,26 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 			return fmt.Errorf("component %s image %s has missing size", image.Component, image.Image)
 		}
 	}
+	for _, index := range templateImageIndexes {
+		image := templatesManifest.Templates.Images[index]
+		if image.Image == "" {
+			return fmt.Errorf("template image entry %d has empty image", index)
+		}
+		if image.Digest == "" {
+			return fmt.Errorf("template image %s has empty digest", image.Image)
+		}
+		if image.Size <= 0 {
+			return fmt.Errorf("template image %s has missing size", image.Image)
+		}
+	}
 
 	if opts.DryRun {
 		fmt.Fprintf(output, "VMConfig manifest: %s\n", vmconfigManifestSource)
 		fmt.Fprintf(output, "VMConfig cache directory: %s\n", m.VMConfigCacheDir())
 		fmt.Fprintln(output, "VMConfig artifacts that would be downloaded:")
 	} else {
-		totalItems := len(items) + len(componentIndexes)
-		emit(DownloadEvent{Type: DownloadEventStatus, Message: fmt.Sprintf("Checking %d vmconfig artifacts and component images in cache...", totalItems)})
+		totalItems := len(items) + len(componentIndexes) + len(templateImageIndexes)
+		emit(DownloadEvent{Type: DownloadEventStatus, Message: fmt.Sprintf("Checking %d vmconfig artifacts and image mirror entries in cache...", totalItems)})
 		for _, it := range items {
 			emit(DownloadEvent{Type: DownloadEventChecking, Name: it.Name, Total: it.Dep.Size})
 		}
@@ -231,13 +251,17 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 			image := componentsManifest.Components.Images[index]
 			emit(DownloadEvent{Type: DownloadEventChecking, Name: image.Image, Total: image.Size})
 		}
+		for _, index := range templateImageIndexes {
+			image := templatesManifest.Templates.Images[index]
+			emit(DownloadEvent{Type: DownloadEventChecking, Name: image.Image, Total: image.Size})
+		}
 	}
 
-	pending := make([]pendingDownload, 0, len(items)+len(componentIndexes))
+	pending := make([]pendingDownload, 0, len(items)+len(componentIndexes)+len(templateImageIndexes))
 	missing := 0
-	componentMissing := 0
+	imageMissing := 0
 	vmconfigPending := 0
-	componentPending := 0
+	imagePending := 0
 	for _, it := range items {
 		algo, hex, err := it.Dep.ParseDigest()
 		if err != nil {
@@ -286,16 +310,35 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 			emit(DownloadEvent{Type: DownloadEventCached, Name: image.Image, Current: image.Size, Total: image.Size})
 			continue
 		}
-		componentMissing++
+		imageMissing++
 		if !opts.DryRun {
 			pending = append(pending, pendingDownload{Kind: pendingDownloadComponentImage, Image: image, ComponentIndex: index})
-			componentPending++
+			imagePending++
+			emit(DownloadEvent{Type: DownloadEventQueued, Name: image.Image, Total: image.Size})
+		}
+	}
+	for _, index := range templateImageIndexes {
+		templateImage := templatesManifest.Templates.Images[index]
+		image := templateComponentImage(templateImage)
+		cached, err := componentImageCached(m.ComponentsImagesCacheDir(), image)
+		if err != nil {
+			return err
+		}
+		if cached {
+			templatesManifest.MarkImageCached(index)
+			emit(DownloadEvent{Type: DownloadEventCached, Name: image.Image, Current: image.Size, Total: image.Size})
+			continue
+		}
+		imageMissing++
+		if !opts.DryRun {
+			pending = append(pending, pendingDownload{Kind: pendingDownloadTemplateImage, Image: image, TemplateIndex: index})
+			imagePending++
 			emit(DownloadEvent{Type: DownloadEventQueued, Name: image.Image, Total: image.Size})
 		}
 	}
 
 	if opts.DryRun {
-		if missing == 0 && componentMissing == 0 {
+		if missing == 0 && imageMissing == 0 {
 			fmt.Fprintln(output, "All dependencies already cached, nothing to download.")
 		}
 		if !opts.SkipCrossArchDependencies {
@@ -307,6 +350,7 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 			fmt.Fprintf(output, "Templates manifest: %s\n", templatesSource)
 			fmt.Fprintf(output, "Template chart cache directory: %s\n", m.TemplatesChartsCacheDir())
 			fmt.Fprintf(output, "Template charts: %d\n", len(templatesManifest.Templates.Charts))
+			fmt.Fprintf(output, "Template images: %d\n", len(templateImageIndexes))
 		}
 		if !opts.SkipCrossArchDependencies && !opts.SkipSeeds {
 			fmt.Fprintf(output, "Seeds manifest: %s\n", seedsSource)
@@ -319,7 +363,7 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 	if len(pending) == 0 {
 		emit(DownloadEvent{Type: DownloadEventStatus, Message: "All dependencies already cached, nothing to download."})
 	} else {
-		emit(DownloadEvent{Type: DownloadEventStatus, Message: downloadPendingMessage(vmconfigPending, componentPending)})
+		emit(DownloadEvent{Type: DownloadEventStatus, Message: downloadPendingMessage(vmconfigPending, imagePending)})
 		if err := m.downloadPending(pending, opts.Concurrency, client, emit); err != nil {
 			return err
 		}
@@ -327,6 +371,8 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 			switch job.Kind {
 			case pendingDownloadComponentImage:
 				componentsManifest.MarkCached(job.ComponentIndex)
+			case pendingDownloadTemplateImage:
+				templatesManifest.MarkImageCached(job.TemplateIndex)
 			default:
 				manifest.MarkCached(job.Item.Name)
 			}
@@ -439,14 +485,14 @@ func (m *Manager) loadSeedsManifest(ctx context.Context, client *http.Client, op
 	return seedsManifest, seedsSource, nil
 }
 
-func downloadPendingMessage(vmconfigPending, componentPending int) string {
+func downloadPendingMessage(vmconfigPending, imagePending int) string {
 	if vmconfigPending == 0 {
-		return fmt.Sprintf("Populating component image mirror store with %d images...", componentPending)
+		return fmt.Sprintf("Populating image mirror store with %d images...", imagePending)
 	}
-	if componentPending == 0 {
+	if imagePending == 0 {
 		return fmt.Sprintf("Downloading %d vmconfig artifacts...", vmconfigPending)
 	}
-	return fmt.Sprintf("Downloading %d vmconfig artifacts and populating component image mirror store with %d images...", vmconfigPending, componentPending)
+	return fmt.Sprintf("Downloading %d vmconfig artifacts and populating image mirror store with %d images...", vmconfigPending, imagePending)
 }
 
 func (m *Manager) downloadPending(pending []pendingDownload, concurrency int, client *http.Client, emit func(DownloadEvent)) error {
@@ -501,7 +547,7 @@ func (m *Manager) downloadPending(pending []pendingDownload, concurrency int, cl
 		<-sem
 	}
 	hostSemaphore := func(job pendingDownload) chan struct{} {
-		if job.Kind != pendingDownloadComponentImage {
+		if job.Kind != pendingDownloadComponentImage && job.Kind != pendingDownloadTemplateImage {
 			return nil
 		}
 		return hostSemaphores[registryHostFromImage(job.Image.Image)]
@@ -528,7 +574,7 @@ func (m *Manager) downloadPending(pending []pendingDownload, concurrency int, cl
 			defer release(globalSem)
 
 			switch job.Kind {
-			case pendingDownloadComponentImage:
+			case pendingDownloadComponentImage, pendingDownloadTemplateImage:
 				lock := componentRepoLock(job.Image)
 				lock.Lock()
 				defer lock.Unlock()

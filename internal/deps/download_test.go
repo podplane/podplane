@@ -5,6 +5,7 @@
 package deps
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -400,6 +401,59 @@ func TestFilterComponentsManifestExcludesAddonsAndProviderSpecificImagesByDefaul
 	if got := componentImageNamesAt(manifest.Components.Images, indexes); strings.Join(got, ",") != "aws-addon" {
 		t.Fatalf("filtered images = %v, want aws-addon", got)
 	}
+}
+
+func TestDownloadDryRunIncludesTemplateImages(t *testing.T) {
+	dir := t.TempDir()
+	vmconfigPath := writeJSONFile(t, dir, "vmconfig.json", Manifest{VMConfig: VMConfig{
+		Version: "test",
+		Kind:    DefaultKind,
+		OS: OSInfo{Image: Dependency{
+			URL:    "https://example.invalid/os-image",
+			Digest: "sha256:" + strings.Repeat("0", 64),
+			Size:   1,
+		}},
+	}})
+	componentsPath := writeJSONFile(t, dir, "components.json", ComponentsManifest{Components: Components{Version: "test", Images: []ComponentImage{}}})
+	templatesPath := writeJSONFile(t, dir, "templates.json", TemplatesManifest{Templates: Templates{Version: "test", Images: []TemplateImage{{
+		Image:    "docker.io/library/caddy:2",
+		Digest:   "sha256:" + strings.Repeat("1", 64),
+		Size:     1,
+		Platform: "linux/arm64",
+		Templates: map[string]string{
+			"web": "caddy",
+		},
+	}}}})
+
+	var output bytes.Buffer
+	manager := NewManager("https://example.invalid", t.TempDir())
+	err := manager.Download(DefaultKind, "arm64", DownloadOptions{
+		DryRun:                 true,
+		VMConfigManifestPath:   vmconfigPath,
+		ComponentsManifestPath: componentsPath,
+		TemplatesManifestPath:  templatesPath,
+		SkipSeeds:              true,
+		Output:                 &output,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Template images: 1") {
+		t.Fatalf("dry-run output = %q, want template image count", output.String())
+	}
+}
+
+func writeJSONFile(t *testing.T, dir, name string, value any) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal %s: %v", name, err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	return path
 }
 
 func componentImageNamesAt(images []ComponentImage, indexes []int) []string {
