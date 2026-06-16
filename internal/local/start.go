@@ -91,8 +91,8 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to verify deps: %w", err)
 	}
-	componentsEntries, componentsReadErr := os.ReadDir(depsManager.ComponentsImagesCacheDir())
-	if componentsReadErr != nil || len(componentsEntries) == 0 {
+	registryEntries, registryReadErr := os.ReadDir(depsManager.RegistryCacheDir())
+	if registryReadErr != nil || len(registryEntries) == 0 {
 		download := func(progress func(deps.DownloadEvent)) error {
 			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress})
 		}

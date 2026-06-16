@@ -37,8 +37,8 @@ func TestCacheDomainPaths(t *testing.T) {
 	if got, want := manager.ComponentsManifestCacheDir(), filepath.Join("/cache/deps", "components", "manifests"); got != want {
 		t.Fatalf("ComponentsManifestCacheDir() = %q, want %q", got, want)
 	}
-	if got, want := manager.ComponentsImagesCacheDir(), filepath.Join("/cache/deps", "components", "images"); got != want {
-		t.Fatalf("ComponentsImagesCacheDir() = %q, want %q", got, want)
+	if got, want := manager.RegistryCacheDir(), filepath.Join("/cache", "registry"); got != want {
+		t.Fatalf("RegistryCacheDir() = %q, want %q", got, want)
 	}
 	if got, want := manager.ComponentsManifestCachePath(), filepath.Join("/cache/deps", "components", "manifests", "components.json"); got != want {
 		t.Fatalf("ComponentsManifestCachePath() = %q, want %q", got, want)
@@ -69,6 +69,13 @@ func TestCacheDomainPaths(t *testing.T) {
 	}
 	if got, want := manager.SeedSnapshotCachePath("recommended", "1.2.3-1", "recommended.netsy"), filepath.Join("/cache/deps", "seeds", "snapshots", "recommended", "1.2.3-1", "recommended.netsy"); got != want {
 		t.Fatalf("SeedSnapshotCachePath() = %q, want %q", got, want)
+	}
+}
+
+func TestRegistryCacheDirWithCustomDepsCacheDir(t *testing.T) {
+	manager := NewManager("https://example.invalid/deps", "/custom/podplane-deps")
+	if got, want := manager.RegistryCacheDir(), filepath.Join("/custom/podplane-deps", "registry"); got != want {
+		t.Fatalf("RegistryCacheDir() = %q, want %q", got, want)
 	}
 }
 

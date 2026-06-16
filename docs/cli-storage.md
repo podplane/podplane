@@ -70,11 +70,12 @@ The `XDG_*` environment variables can be used on any operating system to move Po
 
 ### Cache Files
 
-- **Dependencies cache**: dependency files are grouped by dependency domain under the dependencies cache root. VMConfig manifests and artifacts live under `vmconfig/`, component image metadata and blobs for the local zot storage live under `components/`, and template manifests and cached chart OCI data live under `templates/`.
+- **Dependencies cache**: dependency files are grouped by dependency domain under the dependencies cache root. VMConfig manifests and artifacts live under `deps/vmconfig/`, component manifests live under `deps/components/`, template manifests and cached chart OCI data live under `deps/templates/`, and seed manifests/snapshots live under `deps/seeds/`.
 - **VMConfig dependency manifests**: metadata about all vmconfig dependencies relevant to the specified architecture and desired OS kind/version, stored under `vmconfig/manifests/`. Safe to delete; the Podplane CLI can fetch it again.
 - **Downloaded VMConfig dependency artifacts**: downloadable and checksum-verifiable artifacts stored under `vmconfig/artifacts/<artifact-name>/<version>/<file>`. Includes VM base images, tar.gz archives, and deb packages. Safe to delete, though deletion will require a potentially slow re-download before local clusters can start.
-- **Component container image cache**: component manifests are cached under `components/manifests/`, and mirrored container image data for the local zot registry is stored under `components/images/`. Safe to delete; it can be recreated by downloading dependencies again.
-- **Template chart cache**: template manifests are cached under `templates/manifests/`, and Helm chart data is stored under `templates/charts/`. Safe to delete; it can be recreated by downloading dependencies again.
+- **Local registry cache**: mirrored container image data for the local zot registry is stored under `registry/`. This shared registry store can be populated by dependency downloads and future commands that build or import local images. Safe to delete; images can be downloaded or rebuilt again.
+- **Component dependency cache**: component manifests are cached under `deps/components/manifests/`. Component container images are stored in the shared local registry cache.
+- **Template cache**: template manifests are cached under `deps/templates/manifests/`, Helm chart data is stored under `deps/templates/charts/`, and template image data used by local mirrors is stored in the shared local registry cache. Safe to delete; it can be recreated by downloading dependencies again.
 - **Cached CA certs derived from inline PEM or URL specs**: reconstructable from the original inline PEM or URL input. Safe to delete; the Podplane CLI can resolve/cache them again.
 
 ### Data Files

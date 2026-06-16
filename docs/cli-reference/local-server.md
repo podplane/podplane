@@ -16,7 +16,7 @@ This `local server` command is run automatically in the background when `podplan
 
 The server also terminates host-facing local ingress TLS on `https://<host>.<cluster-id>.localhost:4433`, dynamically selecting or generating a [mkcert](https://mkcert.dev/)-issued certificate for `<cluster-id>.localhost` and `*.<cluster-id>.localhost` based on the requested hostname, then reverse-proxies to Traefik inside the VM. This requires mkcert to be installed prior to running a local VM. For your browser to trust the local ingress server certificates, please ensure you've run `mkcert -install` once.
 
-The fake S3 service exposes durable local-cluster buckets such as `<cluster-id>-netsy` and `<cluster-id>-telemetry` under `/s3/data/`. Cache-backed buckets are exposed separately under `/s3/cache/`; currently this includes the shared `registry` bucket used by zot for mirrored component images from the `components/images` directory under the deps cache.
+The fake S3 service exposes durable local-cluster buckets such as `<cluster-id>-netsy` and `<cluster-id>-telemetry` under `/s3/data/`. Cache-backed buckets are exposed separately under `/s3/cache/`; currently this includes the shared `registry` bucket used by zot for mirrored images from the local registry cache.
 
 ```
 podplane local server [flags]

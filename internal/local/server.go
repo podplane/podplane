@@ -18,6 +18,7 @@ import (
 	"github.com/nstance-dev/nstance/pkg/fakeserver"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
+	"github.com/podplane/podplane/internal/deps"
 	"github.com/podplane/podplane/internal/execwrap"
 	"github.com/podplane/podplane/internal/oidcserver"
 	"github.com/podplane/podplane/internal/pid"
@@ -166,7 +167,7 @@ func (m *Local) ServerCleanup() error {
 type Server struct {
 	pidFile         *pid.PIDFile
 	depsCacheDir    string
-	componentsDir   string
+	registryDir     string
 	cloudInitDir    string
 	s3Dir           string
 	oidcKeyPath     string
@@ -254,10 +255,11 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int) (*Ser
 	}
 
 	// Create initial server struct.
+	depsManager := deps.NewManager(c.DepsBaseURL(), c.DepsCacheDir())
 	w := &Server{
 		pidFile:         &pidFile,
 		depsCacheDir:    c.DepsCacheDir(),
-		componentsDir:   filepath.Join(c.DepsCacheDir(), "components", "images"),
+		registryDir:     depsManager.RegistryCacheDir(),
 		cloudInitDir:    filepath.Join(c.DataDirectory(), "local"),
 		s3Dir:           filepath.Join(c.DataDirectory(), "s3"),
 		oidcKeyPath:     filepath.Join(c.DataDirectory(), "local-server", "oidc-key.pem"),
@@ -345,7 +347,7 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int) (*Ser
 	mux.Handle("/s3/data/", http.StripPrefix("/s3/data", s3Handler))
 
 	// /s3/cache/ — fake S3 for cache-backed buckets.
-	s3CacheHandler, err := s3fake.BucketHandler("registry", w.componentsDir)
+	s3CacheHandler, err := s3fake.BucketHandler("registry", w.registryDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build cache s3 handler: %w", err)
 	}

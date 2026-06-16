@@ -301,7 +301,7 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 	}
 	for _, index := range componentIndexes {
 		image := componentsManifest.Components.Images[index]
-		cached, err := componentImageCached(m.ComponentsImagesCacheDir(), image)
+		cached, err := componentImageCached(m.RegistryCacheDir(), image)
 		if err != nil {
 			return err
 		}
@@ -320,7 +320,7 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 	for _, index := range templateImageIndexes {
 		templateImage := templatesManifest.Templates.Images[index]
 		image := templateComponentImage(templateImage)
-		cached, err := componentImageCached(m.ComponentsImagesCacheDir(), image)
+		cached, err := componentImageCached(m.RegistryCacheDir(), image)
 		if err != nil {
 			return err
 		}
@@ -343,7 +343,7 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 		}
 		if !opts.SkipCrossArchDependencies {
 			fmt.Fprintf(output, "Components manifest: %s\n", componentsSource)
-			fmt.Fprintf(output, "Component image cache directory: %s\n", m.ComponentsImagesCacheDir())
+			fmt.Fprintf(output, "Registry cache directory: %s\n", m.RegistryCacheDir())
 			fmt.Fprintf(output, "Component images: %d\n", len(componentIndexes))
 		}
 		if !opts.SkipCrossArchDependencies {
@@ -582,7 +582,7 @@ func (m *Manager) downloadPending(pending []pendingDownload, concurrency int, cl
 				emit(DownloadEvent{Type: DownloadEventStarted, Name: job.Image.Image, Total: job.Image.Size})
 				imageProgress := &componentImageProgress{name: job.Image.Image, total: job.Image.Size, emit: emit}
 				imageProgress.report()
-				err := writeComponentImage(ctx, m.ComponentsImagesCacheDir(), job.Image, imageProgress)
+				err := writeComponentImage(ctx, m.RegistryCacheDir(), job.Image, imageProgress)
 				if err != nil {
 					wrapped := fmt.Errorf("failed to download %s: %w", job.Image.Image, err)
 					if setErr(wrapped) {

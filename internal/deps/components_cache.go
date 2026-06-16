@@ -24,11 +24,6 @@ func (m *Manager) ComponentsManifestCacheDir() string {
 	return filepath.Join(m.ComponentsCacheDir(), "manifests")
 }
 
-// ComponentsImagesCacheDir returns the component OCI image cache directory.
-func (m *Manager) ComponentsImagesCacheDir() string {
-	return filepath.Join(m.ComponentsCacheDir(), "images")
-}
-
 // ComponentsManifestCachePath returns the path to the cached components manifest.
 func (m *Manager) ComponentsManifestCachePath() string {
 	return filepath.Join(m.ComponentsManifestCacheDir(), "components.json")
