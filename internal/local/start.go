@@ -349,6 +349,8 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	vars.Vars["REGISTRY_ACCESS_KEY_ID"] = "test"
 	vars.Vars["REGISTRY_SECRET_ACCESS_KEY"] = "test"
 	vars.Vars["AWS_S3_USE_PATH_STYLE"] = "true"
+	vars.Vars["NSTANCE_SERVER_REGISTRATION_ADDR"] = nstanceBootstrap.ServerRegistrationAddr
+	vars.Vars["NSTANCE_SERVER_AGENT_ADDR"] = nstanceBootstrap.ServerAgentAddr
 	vars.ApplyDefaults()
 	mutableEnv := userdata.RenderMutableEnv(vars.Vars)
 	mutableEnvChanged := false
