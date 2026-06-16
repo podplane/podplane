@@ -132,7 +132,7 @@ func (c *Config) KeyringDelete(key string) error {
 	// delete the token from the keyring
 	err = (*c.keyring).Remove(key)
 	if err != nil {
-		if err == keyring.ErrKeyNotFound {
+		if err == keyring.ErrKeyNotFound || os.IsNotExist(err) {
 			return nil
 		}
 		return err
