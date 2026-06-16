@@ -15,10 +15,10 @@ import (
 // TemplateMirrorSetArgs builds Helm --set overrides for template image defaults
 // that should be served from the cluster's registry mirror.
 func TemplateMirrorSetArgs(images []deps.TemplateImage, template string, cluster config.ClusterSummary, explicitAppImage string, userSet []string) []string {
-	if cluster.Cluster.Components.Registry == nil {
+	if cluster.Components.Registry == nil {
 		return nil
 	}
-	mirror := cluster.Cluster.Components.Registry.Mirror
+	mirror := cluster.Components.Registry.Mirror
 	if !mirror.Enabled || mirror.Hostname == "" {
 		return nil
 	}

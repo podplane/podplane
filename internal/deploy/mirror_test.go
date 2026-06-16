@@ -58,11 +58,9 @@ func TestTemplateMirrorSetArgsDisabledWithoutMirror(t *testing.T) {
 
 func mirrorClusterSummary(hostname string) config.ClusterSummary {
 	return config.ClusterSummary{
-		Cluster: config.ClusterSummaryCluster{
-			Components: config.ClusterSummaryClusterComponents{
-				Registry: &clusterconfig.ComponentsRegistry{
-					Mirror: clusterconfig.ComponentsRegistryMirror{Enabled: true, Hostname: hostname},
-				},
+		Components: config.ClusterSummaryClusterComponents{
+			Registry: &clusterconfig.ComponentsRegistry{
+				Mirror: clusterconfig.ComponentsRegistryMirror{Enabled: true, Hostname: hostname},
 			},
 		},
 	}

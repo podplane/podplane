@@ -64,15 +64,15 @@ func init() {
 func newDeployCmd(c *config.Config) *cobra.Command {
 	deployCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
-		clusterID, _, err := kubectl.ClusterIDFromContext(deployContext, deployKubeconfig)
+		clusterID, local, err := kubectl.ClusterIDFromContext(deployContext, deployKubeconfig)
 		if err != nil {
 			return err
 		}
-		clusterSummary, err := c.ClusterSummary(clusterID)
+		clusterSummary, err := c.ClusterSummary(clusterID, local)
 		if err != nil {
 			return err
 		}
-		if clusterSummary.Cluster.ID == "" {
+		if clusterSummary.ID == "" {
 			return fmt.Errorf("cluster summary for %q is not cached; run `podplane login -f <podplane.cluster.jsonc>` for this cluster", clusterID)
 		}
 		chart, err := deploy.EnsureChart(c, args[0], func(download func(func(deps.DownloadEvent)) error) error {

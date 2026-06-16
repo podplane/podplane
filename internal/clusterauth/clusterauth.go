@@ -33,6 +33,7 @@ type Options struct {
 	HTTPClient   *http.Client
 	CallbackPort int
 	Headless     bool
+	Local        bool
 }
 
 // Login performs the OIDC login flow against opts.Cluster and persists the
@@ -49,7 +50,7 @@ func Login(ctx context.Context, c *config.Config, opts Options) (config.AuthMeta
 	if err != nil {
 		return config.AuthMetadata{}, oidc.Tokens{}, fmt.Errorf("login: %w", err)
 	}
-	meta, err := persistTokens(c, opts.Cluster, tokens)
+	meta, err := persistTokens(c, opts.Cluster, tokens, opts.Local)
 	if err != nil {
 		return config.AuthMetadata{}, oidc.Tokens{}, err
 	}
@@ -74,7 +75,7 @@ func Refresh(ctx context.Context, c *config.Config, opts Options, meta config.Au
 	if newRefresh == "" {
 		newRefresh = refreshToken
 	}
-	if err := c.AuthSet(meta, config.AuthSecrets{IDToken: tokens.IDToken, RefreshToken: newRefresh}); err != nil {
+	if err := c.AuthSet(meta, config.AuthSecrets{IDToken: tokens.IDToken, RefreshToken: newRefresh}, opts.Local); err != nil {
 		return oidc.Tokens{}, fmt.Errorf("save refreshed tokens: %w", err)
 	}
 	return *tokens, nil
@@ -83,7 +84,8 @@ func Refresh(ctx context.Context, c *config.Config, opts Options, meta config.Au
 // ResolveToken implements the kubectl auth hook token waterfall: cached token,
 // refresh token, then fresh login.
 func ResolveToken(c *config.Config, clusterID, sub string) (string, error) {
-	meta, secrets, err := c.AuthGet(sub, clusterID)
+	isLocal := localClusterConfigExists(c, clusterID)
+	meta, secrets, err := c.AuthGet(sub, clusterID, isLocal)
 	if err != nil {
 		return "", fmt.Errorf("read auth state: %w", err)
 	}
@@ -101,7 +103,7 @@ func ResolveToken(c *config.Config, clusterID, sub string) (string, error) {
 		return "", err
 	}
 
-	opts := Options{Cluster: cluster, HTTPClient: httpClient}
+	opts := Options{Cluster: cluster, HTTPClient: httpClient, Local: isLocal}
 	if secrets.RefreshToken != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -123,7 +125,7 @@ func ResolveToken(c *config.Config, clusterID, sub string) (string, error) {
 
 // Logout clears cached auth state and matching kubectl access for a cluster.
 func Logout(c *config.Config, stdout io.Writer, clusterID string, local bool) error {
-	entries, err := c.AuthListByCluster(clusterID)
+	entries, err := c.AuthListByCluster(clusterID, local)
 	if err != nil {
 		return err
 	}
@@ -136,7 +138,7 @@ func Logout(c *config.Config, stdout io.Writer, clusterID string, local bool) er
 	}
 	for _, e := range entries {
 		subs = append(subs, e.Sub)
-		if err := c.AuthDelete(e.Sub, e.ClusterID); err != nil {
+		if err := c.AuthDelete(e.Sub, e.ClusterID, local); err != nil {
 			return fmt.Errorf("delete auth for %s: %w", e.Sub, err)
 		}
 		user := e.UserEmail
@@ -144,6 +146,11 @@ func Logout(c *config.Config, stdout io.Writer, clusterID string, local bool) er
 			user = e.Sub
 		}
 		fmt.Fprintf(stdout, "Cleared credentials for %s on cluster %s\n", user, e.ClusterID)
+	}
+	if local {
+		if err := c.AuthDelete(oidcserver.LocalSub, clusterID, true); err != nil {
+			return fmt.Errorf("delete local auth for %s: %w", oidcserver.LocalSub, err)
+		}
 	}
 	if err := kubectl.DeleteClusterAccess(stdout, clusterID, subs, local); err != nil {
 		return err
@@ -162,10 +169,16 @@ func LogoutLocal(stdout io.Writer, clusterID string) error {
 	return Logout(c, stdout, clusterID, true)
 }
 
+// localClusterConfigExists reports whether a generated local cluster config exists.
+func localClusterConfigExists(c *config.Config, clusterID string) bool {
+	_, err := os.Stat(local.ClusterConfigPath(c.DataDirectory(), clusterID))
+	return err == nil
+}
+
 func loadClusterForHook(c *config.Config, clusterID string, meta config.AuthMetadata) (*clusterconfig.ClusterConfig, bool, error) {
-	stash := local.ClusterConfigPath(c.DataDirectory(), clusterID)
-	if _, err := os.Stat(stash); err == nil {
-		cfg, err := clusterconfig.Load(stash)
+	localConfigPath := local.ClusterConfigPath(c.DataDirectory(), clusterID)
+	if _, err := os.Stat(localConfigPath); err == nil {
+		cfg, err := clusterconfig.Load(localConfigPath)
 		return cfg, true, err
 	}
 	if meta.Issuer == "" || meta.ClientID == "" {
@@ -232,7 +245,7 @@ func NewOIDCHTTPClient(c *config.Config, cluster *clusterconfig.ClusterConfig) (
 
 // persistTokens parses identity from tokens.IDToken, builds the matching
 // AuthMetadata for cluster, and writes both to the config + keyring.
-func persistTokens(c *config.Config, cluster *clusterconfig.ClusterConfig, tokens *oidc.Tokens) (config.AuthMetadata, error) {
+func persistTokens(c *config.Config, cluster *clusterconfig.ClusterConfig, tokens *oidc.Tokens, local bool) (config.AuthMetadata, error) {
 	sub, email, err := oidc.IdentityFromIDToken(tokens.IDToken, cluster.ResolvedUsernameClaim())
 	if err != nil {
 		return config.AuthMetadata{}, fmt.Errorf("inspect id_token: %w", err)
@@ -251,7 +264,7 @@ func persistTokens(c *config.Config, cluster *clusterconfig.ClusterConfig, token
 	if err := c.AuthSet(meta, config.AuthSecrets{
 		IDToken:      tokens.IDToken,
 		RefreshToken: tokens.RefreshToken,
-	}); err != nil {
+	}, local); err != nil {
 		return config.AuthMetadata{}, err
 	}
 	return meta, nil

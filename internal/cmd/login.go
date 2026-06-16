@@ -84,7 +84,7 @@ matching cluster, user and context.`,
 			if err := kubectl.ConfigureClusterAccess(os.Stdout, cluster.Cluster.ID, cluster.ResolvedKubernetesAPIURL(), meta.Sub, kubeAPICAPath, false); err != nil {
 				return err
 			}
-			if err := c.SetClusterSummary(config.ClusterSummaryFromConfig(cluster)); err != nil {
+			if err := c.SetClusterSummary(config.ClusterSummaryFromConfig(cluster), false); err != nil {
 				return fmt.Errorf("cache cluster summary: %w", err)
 			}
 			user := meta.UserEmail

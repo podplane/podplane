@@ -13,12 +13,6 @@ import (
 // ClusterSummary is the subset of podplane.cluster.jsonc cached for commands
 // that run from kube context instead of a cluster config file.
 type ClusterSummary struct {
-	Cluster ClusterSummaryCluster `mapstructure:"cluster" json:"cluster"`
-}
-
-// ClusterSummaryCluster is the subset of clusterconfig.Cluster persisted in the
-// CLI config file.
-type ClusterSummaryCluster struct {
 	ID         string                          `mapstructure:"id" json:"id"`
 	Name       string                          `mapstructure:"name" json:"name"`
 	OIDC       clusterconfig.OIDC              `mapstructure:"oidc" json:"oidc"`
@@ -36,26 +30,33 @@ type ClusterSummaryClusterComponents struct {
 // cluster config.
 func ClusterSummaryFromConfig(cluster *clusterconfig.ClusterConfig) ClusterSummary {
 	return ClusterSummary{
-		Cluster: ClusterSummaryCluster{
-			ID:         cluster.Cluster.ID,
-			Name:       cluster.Cluster.Name,
-			OIDC:       cluster.Cluster.OIDC,
-			Kubernetes: cluster.Cluster.Kubernetes,
-			Components: ClusterSummaryClusterComponents{
-				Registry: cluster.Cluster.Components.Registry,
-			},
+		ID:         cluster.Cluster.ID,
+		Name:       cluster.Cluster.Name,
+		OIDC:       cluster.Cluster.OIDC,
+		Kubernetes: cluster.Cluster.Kubernetes,
+		Components: ClusterSummaryClusterComponents{
+			Registry: cluster.Cluster.Components.Registry,
 		},
 	}
 }
 
+// clusterSummaryKey returns the config map key for a cached cluster summary.
+func clusterSummaryKey(clusterID string, local bool) string {
+	if local {
+		return "local:" + clusterID
+	}
+	return clusterID
+}
+
 // ClusterSummary returns the cached cluster summary for clusterID. Missing
 // entries return a zero-value ClusterSummary and no error.
-func (c *Config) ClusterSummary(clusterID string) (ClusterSummary, error) {
+func (c *Config) ClusterSummary(clusterID string, local bool) (ClusterSummary, error) {
 	var summary ClusterSummary
 	if clusterID == "" {
 		return summary, fmt.Errorf("ClusterSummary: cluster_id is required")
 	}
-	if raw := c.viperFile.GetStringMap("clusters." + clusterID); len(raw) > 0 {
+	key := clusterSummaryKey(clusterID, local)
+	if raw := c.viperFile.GetStringMap("clusters." + key); len(raw) > 0 {
 		if err := decodeMap(raw, &summary); err != nil {
 			return ClusterSummary{}, fmt.Errorf("decode cluster summary for %s: %w", clusterID, err)
 		}
@@ -64,22 +65,22 @@ func (c *Config) ClusterSummary(clusterID string) (ClusterSummary, error) {
 }
 
 // SetClusterSummary writes the cached cluster summary.
-func (c *Config) SetClusterSummary(summary ClusterSummary) error {
-	if summary.Cluster.ID == "" {
+func (c *Config) SetClusterSummary(summary ClusterSummary, local bool) error {
+	if summary.ID == "" {
 		return fmt.Errorf("SetClusterSummary: cluster.id is required")
 	}
 	cluster := map[string]any{
-		"id":         summary.Cluster.ID,
-		"name":       summary.Cluster.Name,
-		"oidc":       summary.Cluster.OIDC,
-		"kubernetes": summary.Cluster.Kubernetes,
+		"id":         summary.ID,
+		"name":       summary.Name,
+		"oidc":       summary.OIDC,
+		"kubernetes": summary.Kubernetes,
 	}
-	if summary.Cluster.Components.Registry != nil {
+	if summary.Components.Registry != nil {
 		cluster["components"] = map[string]any{
-			"registry": summary.Cluster.Components.Registry,
+			"registry": summary.Components.Registry,
 		}
 	}
-	c.viperFile.Set("clusters."+summary.Cluster.ID, map[string]any{"cluster": cluster})
+	c.viperFile.Set("clusters."+clusterSummaryKey(summary.ID, local), cluster)
 	if err := c.SaveFile(); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
