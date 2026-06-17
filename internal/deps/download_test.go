@@ -376,6 +376,43 @@ func TestDownloadRejectsDependencyMissingSize(t *testing.T) {
 	}
 }
 
+// TestVerifyRequiresCachedVMConfigImages confirms dependency verification treats
+// vmconfig-owned runtime images as required cache entries.
+func TestVerifyRequiresCachedVMConfigImages(t *testing.T) {
+	manager := NewManager("https://example.invalid", t.TempDir())
+	manifest := Manifest{VMConfig: VMConfig{
+		Version: "test",
+		Kind:    DefaultKind,
+		OS: OSInfo{Image: Dependency{
+			URL:    "https://example.invalid/os-image",
+			Digest: "sha256:" + strings.Repeat("0", 64),
+			Size:   1,
+		}},
+		Images: []VMConfigImage{{
+			Image:    "registry.k8s.io/pause:3.10.2",
+			Digest:   "sha256:" + strings.Repeat("1", 64),
+			Size:     1,
+			Platform: "linux/arm64",
+			Cached:   true,
+		}},
+	}}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if err := manager.WriteCachedManifest(DefaultKind, "arm64", raw); err != nil {
+		t.Fatalf("write cached manifest: %v", err)
+	}
+
+	_, err = manager.Verify(DefaultKind, "arm64")
+	if err == nil {
+		t.Fatal("Verify returned nil error, want missing vmconfig image error")
+	}
+	if !strings.Contains(err.Error(), "missing or corrupt image: registry.k8s.io/pause:3.10.2") {
+		t.Fatalf("Verify error = %q, want missing vmconfig image", err.Error())
+	}
+}
+
 func TestFilterComponentsManifestExcludesAddonsAndProviderSpecificImagesByDefault(t *testing.T) {
 	manifest := &ComponentsManifest{Components: Components{Images: []ComponentImage{
 		{Component: "cilium", Image: "cilium"},
@@ -413,6 +450,12 @@ func TestDownloadDryRunIncludesTemplateImages(t *testing.T) {
 			Digest: "sha256:" + strings.Repeat("0", 64),
 			Size:   1,
 		}},
+		Images: []VMConfigImage{{
+			Image:    "registry.k8s.io/pause:3.10.2",
+			Digest:   "sha256:" + strings.Repeat("2", 64),
+			Size:     1,
+			Platform: "linux/arm64",
+		}},
 	}})
 	componentsPath := writeJSONFile(t, dir, "components.json", ComponentsManifest{Components: Components{Version: "test", Images: []ComponentImage{}}})
 	templatesPath := writeJSONFile(t, dir, "templates.json", TemplatesManifest{Templates: Templates{Version: "test", Images: []TemplateImage{{
@@ -440,6 +483,45 @@ func TestDownloadDryRunIncludesTemplateImages(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "Template images: 1") {
 		t.Fatalf("dry-run output = %q, want template image count", output.String())
+	}
+	if !strings.Contains(output.String(), "VMConfig images: 1") {
+		t.Fatalf("dry-run output = %q, want vmconfig image count", output.String())
+	}
+}
+
+// TestDownloadRejectsVMConfigImageMissingSize confirms vmconfig image rows keep
+// the same required digest/size contract as component and template images.
+func TestDownloadRejectsVMConfigImageMissingSize(t *testing.T) {
+	dir := t.TempDir()
+	vmconfigPath := writeJSONFile(t, dir, "vmconfig.json", Manifest{VMConfig: VMConfig{
+		Version: "test",
+		Kind:    DefaultKind,
+		OS: OSInfo{Image: Dependency{
+			URL:    "https://example.invalid/os-image",
+			Digest: "sha256:" + strings.Repeat("0", 64),
+			Size:   1,
+		}},
+		Images: []VMConfigImage{{
+			Image:  "registry.k8s.io/pause:3.10.2",
+			Digest: "sha256:" + strings.Repeat("1", 64),
+		}},
+	}})
+	componentsPath := writeJSONFile(t, dir, "components.json", ComponentsManifest{Components: Components{Version: "test", Images: []ComponentImage{}}})
+	templatesPath := writeJSONFile(t, dir, "templates.json", TemplatesManifest{Templates: Templates{Version: "test"}})
+
+	manager := NewManager("https://example.invalid", t.TempDir())
+	err := manager.Download(DefaultKind, "arm64", DownloadOptions{
+		DryRun:                 true,
+		VMConfigManifestPath:   vmconfigPath,
+		ComponentsManifestPath: componentsPath,
+		TemplatesManifestPath:  templatesPath,
+		SkipSeeds:              true,
+	})
+	if err == nil {
+		t.Fatal("Download returned nil error, want missing vmconfig image size error")
+	}
+	if !strings.Contains(err.Error(), "vmconfig image registry.k8s.io/pause:3.10.2 has missing size") {
+		t.Fatalf("Download error = %q, want missing vmconfig image size", err.Error())
 	}
 }
 

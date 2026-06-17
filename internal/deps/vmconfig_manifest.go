@@ -41,6 +41,7 @@ type VMConfig struct {
 	Kind         string                `json:"kind"`
 	OS           OSInfo                `json:"os"`
 	Dependencies map[string]Dependency `json:"dependencies"`
+	Images       []VMConfigImage       `json:"images"`
 }
 
 // OSInfo describes the base OS, including the qcow2 image to download.
@@ -89,6 +90,30 @@ type Dependency struct {
 	Cached    bool     `json:"cached,omitempty"`
 }
 
+// VMConfigImage describes a runtime container image required by vmconfig
+// itself, using the same shape as component/template image manifests.
+type VMConfigImage struct {
+	Image    string `json:"image"`
+	Digest   string `json:"digest"`
+	Size     int64  `json:"size"`
+	Platform string `json:"platform,omitempty"`
+	Index    string `json:"index,omitempty"`
+	Cached   bool   `json:"cached,omitempty"`
+}
+
+// vmconfigComponentImage adapts a vmconfig runtime image row to the shared
+// registry mirror writer's ComponentImage input type.
+func vmconfigComponentImage(image VMConfigImage) ComponentImage {
+	return ComponentImage{
+		Component: "vmconfig",
+		Image:     image.Image,
+		Digest:    image.Digest,
+		Size:      image.Size,
+		Platform:  image.Platform,
+		Index:     image.Index,
+	}
+}
+
 // ItemFilter selects manifest items by provider and cache state. An empty
 // Providers list matches provider-neutral items only; "all" matches every
 // provider-specific item.
@@ -123,6 +148,9 @@ func (m *Manifest) ResetCached() {
 		dep.Cached = false
 		m.VMConfig.Dependencies[name] = dep
 	}
+	for i := range m.VMConfig.Images {
+		m.VMConfig.Images[i].Cached = false
+	}
 }
 
 // MarkCached marks one vmconfig artifact entry as present in the local cache.
@@ -134,6 +162,15 @@ func (m *Manifest) MarkCached(name string) {
 	dep := m.VMConfig.Dependencies[name]
 	dep.Cached = true
 	m.VMConfig.Dependencies[name] = dep
+}
+
+// MarkImageCached marks one vmconfig runtime image entry as present in the
+// local registry cache.
+func (m *Manifest) MarkImageCached(index int) {
+	if index < 0 || index >= len(m.VMConfig.Images) {
+		return
+	}
+	m.VMConfig.Images[index].Cached = true
 }
 
 // DownloadItems returns only the artifacts the CLI can fetch and verify from

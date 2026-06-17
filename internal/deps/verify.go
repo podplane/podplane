@@ -49,6 +49,15 @@ func (m *Manager) Verify(kind, arch string) (*Manifest, error) {
 			return nil, fmt.Errorf("%w: missing or corrupt: %s", ErrIncomplete, path)
 		}
 	}
+	for _, image := range manifest.VMConfig.Images {
+		cached, err := componentImageCached(m.RegistryCacheDir(), vmconfigComponentImage(image))
+		if err != nil {
+			return nil, fmt.Errorf("%w: failed to check image %s: %v", ErrIncomplete, image.Image, err)
+		}
+		if !cached {
+			return nil, fmt.Errorf("%w: missing or corrupt image: %s", ErrIncomplete, image.Image)
+		}
+	}
 
 	return manifest, nil
 }
