@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/podplane/podplane/internal/config"
+	"github.com/podplane/podplane/internal/fakevault"
 	"github.com/podplane/podplane/internal/local"
 	"github.com/spf13/cobra"
 )
@@ -89,7 +90,8 @@ func newLocalServerCmd(c *config.Config) *cobra.Command {
 		}()
 
 		// Start a local server.
-		server, err := local.NewServer(pidFile, c, serverAddr, 0)
+		vaultStore := fakevault.NewKeyringStore(c)
+		server, err := local.NewServer(pidFile, c, serverAddr, 0, vaultStore)
 		if err != nil {
 			return fmt.Errorf("failed to start local server: %w", err)
 		}

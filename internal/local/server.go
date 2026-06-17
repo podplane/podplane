@@ -6,6 +6,7 @@ package local
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -20,6 +21,7 @@ import (
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/deps"
 	"github.com/podplane/podplane/internal/execwrap"
+	"github.com/podplane/podplane/internal/fakevault"
 	"github.com/podplane/podplane/internal/oidcserver"
 	"github.com/podplane/podplane/internal/pid"
 	"github.com/podplane/podplane/internal/s3fake"
@@ -213,14 +215,18 @@ var cloudInitStaticFiles = map[string]bool{
 //	/oidc/        — fake OIDC issuer (discovery, JWKS, /token)
 //	/s3/data/     — fake S3 for durable local-cluster buckets
 //	/s3/cache/    — fake S3 for cache-backed buckets
+//	/vault/       — fake Vault/OpenBao API for local Secrets Store CSI usage (HTTPS)
 //	fake Nstance gRPC services on dedicated random ports, published via PID metadata
 //
 // It also creates a PID file to prevent multiple local servers from
 // running and to allow other CLI processes to ensure the server is running and
 // determine its port numbers.
-func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int) (*Server, error) {
+func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vaultStore fakevault.Store) (*Server, error) {
 	if pid := pidFile.PID(); pid != 0 {
 		return nil, fmt.Errorf("PID file exists but process is not running: %d", pid)
+	}
+	if vaultStore == nil {
+		return nil, fmt.Errorf("vaultStore must be set")
 	}
 
 	// validate the address and port
@@ -301,15 +307,15 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int) (*Ser
 		return nil, fmt.Errorf("failed to prepare local OIDC TLS certificate: %w", err)
 	}
 
-	// Build the four sibling handlers.
-	mux := http.NewServeMux()
+	// Build the sibling HTTP and HTTPS handlers.
+	httpMux := http.NewServeMux()
 
 	// /deps/ — file server over depsCacheDir.
-	mux.Handle("/deps/", http.StripPrefix("/deps/", http.FileServer(http.Dir(w.depsCacheDir))))
+	httpMux.Handle("/deps/", http.StripPrefix("/deps/", http.FileServer(http.Dir(w.depsCacheDir))))
 
 	// /cloud-init/ — NoCloud user-data + static datasource files.
 	cloudInitFileServer := http.FileServer(http.Dir(w.cloudInitDir))
-	mux.Handle("/cloud-init/", http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+	httpMux.Handle("/cloud-init/", http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		if _, ok := cloudInitStaticFiles[filepath.Base(r.URL.Path)]; ok {
 			staticFileHandler(rw, r)
 			return
@@ -335,27 +341,38 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int) (*Ser
 	if err != nil {
 		return nil, fmt.Errorf("failed to build oidc handler: %w", err)
 	}
-	mux.Handle("/oidc/", http.StripPrefix("/oidc", oidcHandler))
-	oidcMux := http.NewServeMux()
-	oidcMux.Handle("/oidc/", http.StripPrefix("/oidc", oidcHandler))
+	httpMux.Handle("/oidc/", http.StripPrefix("/oidc", oidcHandler))
+	httpsMux := http.NewServeMux()
+	httpsMux.Handle("/oidc/", http.StripPrefix("/oidc", oidcHandler))
 
 	// /s3/data/ — fake S3 for durable local-cluster buckets.
 	s3Handler, err := s3fake.Handler(w.s3Dir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build s3 handler: %w", err)
 	}
-	mux.Handle("/s3/data/", http.StripPrefix("/s3/data", s3Handler))
+	httpMux.Handle("/s3/data/", http.StripPrefix("/s3/data", s3Handler))
 
 	// /s3/cache/ — fake S3 for cache-backed buckets.
 	s3CacheHandler, err := s3fake.BucketHandler("registry", w.registryDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build cache s3 handler: %w", err)
 	}
-	mux.Handle("/s3/cache/", http.StripPrefix("/s3/cache", s3CacheHandler))
+	httpMux.Handle("/s3/cache/", http.StripPrefix("/s3/cache", s3CacheHandler))
+
+	// /vault/ — fake Vault/OpenBao API for local Secrets Store CSI usage.
+	validator := &fakevault.KubernetesTokenValidator{
+		KubernetesAPIURL: hostForwardedKubernetesAPIURL(c.RuntimeDirectory()),
+		Client: &http.Client{
+			Timeout:   5 * time.Second,
+			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+		},
+	}
+	fakeVault := fakevault.NewHandler(vaultStore, validator.ValidateToken)
+	httpsMux.Handle("/vault/", fakeVault)
 
 	// Create the guest-facing HTTP and HTTPS servers with an app-level peer allowlist.
-	w.httpServer = &http.Server{Handler: localServicePeerAllowlist(mux)}
-	w.httpsServer = &http.Server{Handler: localServicePeerAllowlist(oidcMux)}
+	w.httpServer = &http.Server{Handler: localServicePeerAllowlist(httpMux)}
+	w.httpsServer = &http.Server{Handler: localServicePeerAllowlist(httpsMux)}
 
 	// Configure local proxy using dynamically selected mkcert-generated TLS certificates.
 	ingressTLSConfig := localIngressTLSConfig(c.DataDirectory())

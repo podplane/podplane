@@ -95,6 +95,22 @@ func (l *Local) LocalKubernetesAPIURL() (string, error) {
 	return fmt.Sprintf("https://%s:%s", LocalKubernetesAPIHostname(l.clusterID), port), nil
 }
 
+// hostForwardedKubernetesAPIURL returns a resolver that maps a local cluster ID
+// to its direct QEMU host-forwarded kube-apiserver URL. This is intentionally
+// not LocalKubernetesAPIURL, which returns the public local-ingress URL.
+func hostForwardedKubernetesAPIURL(runtimeDir string) func(string) (string, error) {
+	return func(clusterID string) (string, error) {
+		state, err := readState(runtimeDir, clusterID)
+		if err != nil {
+			return "", fmt.Errorf("read local cluster state: %w", err)
+		}
+		if state.Ports.KubernetesAPI == 0 {
+			return "", fmt.Errorf("local cluster state is missing kubernetes api port")
+		}
+		return fmt.Sprintf("https://127.0.0.1:%d", state.Ports.KubernetesAPI), nil
+	}
+}
+
 // CloudInitServerURL returns the URL to the local server cloud-init base URL
 // for a given cluster.
 func (l *Local) CloudInitServerURL(hostMachineAddr, clusterID string) (string, error) {
@@ -178,6 +194,22 @@ func (l *Local) S3DataServerURL(hostAddr string) (string, error) {
 // S3CacheServerURL returns the local fake S3 endpoint for cache-backed buckets.
 func (l *Local) S3CacheServerURL(hostAddr string) (string, error) {
 	return l.s3ServerURL(hostAddr, "cache")
+}
+
+// VaultServerURL returns the local Vault/OpenBao-compatible base URL for this
+// cluster. The OpenBao CSI provider appends /v1/... paths below this URL.
+func (l *Local) VaultServerURL(hostAddr string) (string, error) {
+	port, err := l.LocalServerHTTPSPort()
+	if err != nil {
+		return "", err
+	}
+	if hostAddr == "" {
+		return "", fmt.Errorf("hostAddr must be set")
+	}
+	if l.clusterID == "" {
+		return "", fmt.Errorf("clusterID must be set")
+	}
+	return fmt.Sprintf("https://%s:%s/vault/%s", hostAddr, port, l.clusterID), nil
 }
 
 // localNetsyBucketName returns the fake S3 bucket name used for a local
