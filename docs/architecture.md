@@ -103,3 +103,4 @@ For detailed information about each layer, see:
 - [Infrastructure](../infrastructure.md) - how Podplane provisions and manages cloud infrastructure.
 - [VM Configuration](../vmconfig.md) - how VMs are configured and what runs on them.
 - [Components](../components.md) - the component system, including core components and addon installation.
+- [Secrets](../secrets.md) - how Podplane manages and mounts application secrets.
