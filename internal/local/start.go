@@ -39,6 +39,22 @@ type StartOptions struct {
 	Progress            tui.TaskProgress
 }
 
+// configureLocalHTTPSForwarderScript updates the socat systemd unit rendered
+// by user-data.sh when the provider = local and sets the host-side local HTTPS
+// server port to the current port.
+const configureLocalHTTPSForwarderScript = `sudo sh -s <<'PODPLANE_LOCAL_HTTPS_FORWARD_SCRIPT'
+set -eu
+unit=/etc/systemd/system/podplane-local-https-forward.service
+if [ ! -f "${unit}" ]; then
+  echo "missing ${unit}; recreate the local VM so latest user-data script can install it" >&2
+  exit 1
+fi
+sed -i 's#TCP:[^[:space:]]*:[0-9][0-9]*#TCP:%s:%d#' "${unit}"
+systemctl daemon-reload
+systemctl enable --now podplane-local-https-forward.service
+systemctl restart podplane-local-https-forward.service
+PODPLANE_LOCAL_HTTPS_FORWARD_SCRIPT`
+
 // Start is used to create a cluster, create a VM, and start a VM.
 // Each cluster requires:
 // 1.a. The package files to be downloaded to cache
@@ -220,7 +236,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	if apiPort == 0 {
 		return "", fmt.Errorf("local server is missing ingress HTTPS port")
 	}
-	componentsSource, err := localComponentsSource(depsManager, seed)
+	componentsSource, err := localComponentsSource(depsManager, seed, m.vm.NodeIP())
 	if err != nil {
 		return "", err
 	}
@@ -324,6 +340,11 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 			RegistrationAddr: nstanceBootstrap.ServerRegistrationAddr,
 			AgentAddr:        nstanceBootstrap.ServerAgentAddr,
 		},
+		Local: userdata.LocalData{
+			VMForwardPortToLocalServerHTTPS: localVMForwardPortToLocalServerHTTPS,
+			LocalServerHostFromVM:           m.vm.Addr(),
+			LocalServerHTTPSPort:            m.webserverPIDFile.GetData("https_port"),
+		},
 		Vars: userdata.MutableVars{
 			"SSH_AUTHORIZED_KEY":       sshAuthorizedKey,
 			"OIDC_ISSUER":              oidcIssuerURL,
@@ -423,6 +444,12 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 		return "", fmt.Errorf("local VM system service readiness check failed: %w", err)
 	}
 	progress.Done("system-services", "system services", "")
+	progress.Started("https-forward", "local HTTPS server forwarder", "")
+	if err := m.configureLocalHTTPSForwarder(context.Background(), vmPorts.SSH, m.webserverPIDFile.GetData("https_port")); err != nil {
+		progress.Failed("https-forward", "local HTTPS server forwarder", err)
+		return "", fmt.Errorf("failed to configure local HTTPS server forwarder: %w", err)
+	}
+	progress.Done("https-forward", "local HTTPS server forwarder", fmt.Sprintf("https://%s:%d", m.vm.NodeIP(), localVMForwardPortToLocalServerHTTPS))
 	if vmExisted && mutableEnvChanged {
 		if err := m.repairExistingNstanceAgentEnv(context.Background(), vmPorts.SSH, nstanceBootstrap.ServerRegistrationAddr, nstanceBootstrap.ServerAgentAddr, progressOutput); err != nil {
 			return "", fmt.Errorf("failed to repair local nstance agent endpoint config: %w", err)
@@ -488,6 +515,27 @@ func (m *Local) repairExistingNstanceAgentEnv(ctx context.Context, sshPort int, 
 	output, err := m.vm.Shell(ctx, command, sshPort, privateKeyPath, vm.ShellOptions{Timeout: 30 * time.Second})
 	if err != nil {
 		return fmt.Errorf("restart nstance-agent with current endpoints: %w: %s", err, string(output))
+	}
+	return nil
+}
+
+// configureLocalHTTPSForwarder refreshes the VM-local HTTPS TCP forwarder.
+func (m *Local) configureLocalHTTPSForwarder(ctx context.Context, sshPort int, httpsPort string) error {
+	if httpsPort == "" {
+		return fmt.Errorf("local server HTTPS port is required")
+	}
+	parsedHTTPSPort, err := strconv.Atoi(httpsPort)
+	if err != nil || parsedHTTPSPort <= 0 {
+		return fmt.Errorf("local server HTTPS port %q is invalid", httpsPort)
+	}
+	privateKeyPath, err := SSHPrivateKeyPath(m.dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to prepare SSH key for local VM: %w", err)
+	}
+	command := fmt.Sprintf(configureLocalHTTPSForwarderScript, m.vm.Addr(), parsedHTTPSPort)
+	output, err := m.vm.Shell(ctx, command, sshPort, privateKeyPath, vm.ShellOptions{Timeout: 30 * time.Second})
+	if err != nil {
+		return fmt.Errorf("configure podplane-local-https-forward.service: %w: %s", err, string(output))
 	}
 	return nil
 }
@@ -562,13 +610,22 @@ func (m *Local) WriteLocalClusterConfig(clusterID, oidcIssuerURL, oidcCACertPath
 	}
 	componentsSourceBlock := ""
 	if componentsSource != nil {
+		refKey := "tag"
+		refValue := componentsSource.Ref.Tag
+		if componentsSource.Ref.Branch != "" {
+			refKey = "branch"
+			refValue = componentsSource.Ref.Branch
+		} else if componentsSource.Ref.Commit != "" {
+			refKey = "commit"
+			refValue = componentsSource.Ref.Commit
+		}
 		componentsSourceBlock = fmt.Sprintf(`      "source": {
         "url": %q,
         "ref": {
-          "tag": %q
+          %q: %q
         }
       },
-`, componentsSource.URL, componentsSource.Ref.Tag)
+`, componentsSource.URL, refKey, refValue)
 	}
 	registryHostname := localRegistryHostname(clusterID)
 	vaultAddress := m.localVaultServerURLForConfig(clusterID)
@@ -638,25 +695,53 @@ func (m *Local) localVaultServerURLForConfig(clusterID string) string {
 }
 
 // localComponentsSource returns the components Git source pinned to the cached
-// components manifest version used by local seeded clusters. Development
-// manifests are intentionally not released as Git tags, so they track main.
-func localComponentsSource(depsManager *deps.Manager, seed clusterconfig.Seed) (*clusterconfig.ComponentsSource, error) {
+// components manifest version used by local seeded clusters. Cached local Git
+// repositories are preferred so local VMs can reconcile without reaching GitHub.
+func localComponentsSource(depsManager *deps.Manager, seed clusterconfig.Seed, nodeIP string) (*clusterconfig.ComponentsSource, error) {
 	if seed.Name == seeds.None {
 		return nil, nil
 	}
-	version, err := depsManager.CachedComponentsVersion()
+	if _, err := os.Stat(filepath.Join(depsManager.GitCachePath("components.git"), "config")); err == nil {
+		return &clusterconfig.ComponentsSource{
+			URL: localGitURL(nodeIP, "components.git"),
+			Ref: clusterconfig.ComponentsSourceRef{Branch: "local-dev"},
+		}, nil
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect local components git cache: %w", err)
+	}
+	manifest, err := depsManager.CachedComponentsManifest()
 	if err != nil {
 		return nil, fmt.Errorf("determine Podplane components version: %w", err)
 	}
-	if version == "dev" {
+	if manifest.Components.Source != nil {
+		source := manifest.Components.Source
+		if repoPath, err := deps.GitCacheRepoPath(source.URL); err == nil {
+			if _, statErr := os.Stat(filepath.Join(depsManager.GitCachePath(repoPath), "config")); statErr == nil {
+				return &clusterconfig.ComponentsSource{
+					URL: localGitURL(nodeIP, repoPath),
+					Ref: clusterconfig.ComponentsSourceRef{Branch: source.Ref.Branch, Tag: source.Ref.Tag, Commit: source.Ref.Commit},
+				}, nil
+			} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+				return nil, fmt.Errorf("inspect components git cache: %w", statErr)
+			}
+		}
+		return &clusterconfig.ComponentsSource{
+			URL: source.URL,
+			Ref: clusterconfig.ComponentsSourceRef{Branch: source.Ref.Branch, Tag: source.Ref.Tag, Commit: source.Ref.Commit},
+		}, nil
+	}
+	if manifest.Components.Version == "dev" {
 		return &clusterconfig.ComponentsSource{
 			URL: "https://github.com/podplane/components.git",
 			Ref: clusterconfig.ComponentsSourceRef{Branch: "main"},
 		}, nil
 	}
+	if manifest.Components.Version == "" {
+		return nil, fmt.Errorf("cached components manifest is missing version")
+	}
 	return &clusterconfig.ComponentsSource{
 		URL: "https://github.com/podplane/components.git",
-		Ref: clusterconfig.ComponentsSourceRef{Tag: "v" + version},
+		Ref: clusterconfig.ComponentsSourceRef{Tag: "v" + manifest.Components.Version},
 	}, nil
 }
 

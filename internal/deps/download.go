@@ -78,6 +78,10 @@ type DownloadOptions struct {
 	// local JSON file instead of fetching it from the configured deps base URL.
 	ComponentsManifestPath string
 
+	// SkipComponentsGit skips fetching the Git source declared by the components
+	// manifest.
+	SkipComponentsGit bool
+
 	// TemplatesManifestPath, when set, reads the templates manifest from this
 	// local JSON file instead of fetching it from the configured deps base URL.
 	TemplatesManifestPath string
@@ -194,6 +198,12 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 		componentsManifest, componentsSource, err = m.loadComponentsManifest(ctx, client, opts, emit)
 		if err != nil {
 			return err
+		}
+		if !opts.DryRun && !opts.SkipComponentsGit {
+			emit(DownloadEvent{Type: DownloadEventStatus, Message: "Caching components Git source..."})
+			if err := m.EnsureComponentsGitCached(ctx, componentsManifest.Components.Source); err != nil {
+				return fmt.Errorf("failed to cache components Git source: %w", err)
+			}
 		}
 		componentsManifest.ResetCached()
 		componentArchs, err := normalizeArchs(opts.Archs, arch)

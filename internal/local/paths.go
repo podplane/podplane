@@ -11,6 +11,8 @@ import (
 
 const localOIDCHostname = "oidc.localhost"
 
+const localVMForwardPortToLocalServerHTTPS = 19443
+
 const LocalClusterConfigFilename = "cluster.jsonc"
 
 // ClusterDataDir returns the users data directory for a local cluster.
@@ -146,6 +148,11 @@ func (l *Local) DepsServerURL(hostAddr, port string) (string, error) {
 		}
 	}
 	return fmt.Sprintf("%s/deps", baseURL), nil
+}
+
+// localGitURL returns the VM-local forwarded HTTPS URL for a cached Git repo.
+func localGitURL(nodeIP, repoPath string) string {
+	return fmt.Sprintf("https://%s:%d/git/%s", nodeIP, localVMForwardPortToLocalServerHTTPS, repoPath)
 }
 
 // OIDCServerURL returns the URL to the local server fake HTTPS OIDC issuer.

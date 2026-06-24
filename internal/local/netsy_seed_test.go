@@ -33,7 +33,7 @@ func TestLocalComponentsSourceUsesBranchForDevManifest(t *testing.T) {
 		t.Fatalf("WriteCachedComponentsManifest: %v", err)
 	}
 
-	source, err := localComponentsSource(manager, clusterconfig.Seed{Name: seeds.Recommended, Version: testSeedVersion})
+	source, err := localComponentsSource(manager, clusterconfig.Seed{Name: seeds.Recommended, Version: testSeedVersion}, "10.0.2.15")
 	if err != nil {
 		t.Fatalf("localComponentsSource: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestLocalComponentsSourceUsesTagForReleasedManifest(t *testing.T) {
 		t.Fatalf("WriteCachedComponentsManifest: %v", err)
 	}
 
-	source, err := localComponentsSource(manager, clusterconfig.Seed{Name: seeds.Recommended, Version: testSeedVersion})
+	source, err := localComponentsSource(manager, clusterconfig.Seed{Name: seeds.Recommended, Version: testSeedVersion}, "10.0.2.15")
 	if err != nil {
 		t.Fatalf("localComponentsSource: %v", err)
 	}

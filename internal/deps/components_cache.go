@@ -54,16 +54,25 @@ func (m *Manager) WriteCachedComponentsManifest(raw []byte) error {
 
 // CachedComponentsVersion returns the version from the cached components manifest.
 func (m *Manager) CachedComponentsVersion() (string, error) {
-	raw, err := os.ReadFile(m.ComponentsManifestCachePath())
+	manifest, err := m.CachedComponentsManifest()
 	if err != nil {
-		return "", fmt.Errorf("read cached components manifest: %w", err)
-	}
-	var manifest ComponentsManifest
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return "", fmt.Errorf("parse cached components manifest: %w", err)
+		return "", err
 	}
 	if manifest.Components.Version == "" {
 		return "", fmt.Errorf("cached components manifest is missing version")
 	}
 	return manifest.Components.Version, nil
+}
+
+// CachedComponentsManifest returns the parsed cached components manifest.
+func (m *Manager) CachedComponentsManifest() (*ComponentsManifest, error) {
+	raw, err := os.ReadFile(m.ComponentsManifestCachePath())
+	if err != nil {
+		return nil, fmt.Errorf("read cached components manifest: %w", err)
+	}
+	var manifest ComponentsManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return nil, fmt.Errorf("parse cached components manifest: %w", err)
+	}
+	return &manifest, nil
 }

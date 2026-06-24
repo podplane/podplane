@@ -33,6 +33,7 @@ var (
 	depsDownloadAddons             string
 	depsDownloadClusterConfig      string
 	depsDownloadSkipSeeds          bool
+	depsDownloadSkipComponentsGit  bool
 )
 
 func init() {
@@ -56,6 +57,8 @@ func init() {
 		"Path to a cluster config file to infer providers")
 	depsDownloadCmd.Flags().BoolVar(&depsDownloadSkipSeeds, "skip-seeds", false,
 		"Skip downloading seed manifests and snapshots")
+	depsDownloadCmd.Flags().BoolVar(&depsDownloadSkipComponentsGit, "skip-components-git", false,
+		"Skip cloning or fetching the Git source declared by the components manifest")
 }
 
 func newDepsDownloadCmd(manager *deps.Manager, kind, arch string) *cobra.Command {
@@ -100,6 +103,7 @@ func newDepsDownloadCmd(manager *deps.Manager, kind, arch string) *cobra.Command
 					TemplatesManifestPath:     depsDownloadTemplatesManifest,
 					SeedsManifestPath:         depsDownloadSeedsManifest,
 					SkipSeeds:                 depsDownloadSkipSeeds,
+					SkipComponentsGit:         depsDownloadSkipComponentsGit,
 				})
 				if err != nil {
 					fmt.Printf("Error downloading the latest dependency files: %v\n", err)
@@ -122,6 +126,7 @@ func newDepsDownloadCmd(manager *deps.Manager, kind, arch string) *cobra.Command
 					TemplatesManifestPath:     depsDownloadTemplatesManifest,
 					SeedsManifestPath:         depsDownloadSeedsManifest,
 					SkipSeeds:                 depsDownloadSkipSeeds,
+					SkipComponentsGit:         depsDownloadSkipComponentsGit,
 				})
 				if err != nil {
 					return err

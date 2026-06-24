@@ -7,9 +7,50 @@ package local
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/fatih/color"
 )
+
+// StatusReport is the machine-readable local cluster status.
+type StatusReport struct {
+	ClusterID   string                 `json:"cluster_id"`
+	Running     bool                   `json:"running"`
+	VM          StatusReportVM         `json:"vm"`
+	LocalServer StatusReportServer     `json:"local_server"`
+	Components  StatusReportComponents `json:"components"`
+}
+
+// StatusReportVM describes the local VM status fields.
+type StatusReportVM struct {
+	Provider         string `json:"provider"`
+	NodeIP           string `json:"node_ip"`
+	ForwardHTTPSPort int    `json:"forward_https_port"`
+}
+
+// StatusReportServer describes the local server status fields.
+type StatusReportServer struct {
+	Running    bool   `json:"running"`
+	HTTPPort   int    `json:"http_port,omitempty"`
+	HTTPSPort  int    `json:"https_port,omitempty"`
+	CACertFile string `json:"ca_cert_file,omitempty"`
+}
+
+// StatusReportComponents describes the effective local components source.
+type StatusReportComponents struct {
+	Source StatusReportComponentsSource `json:"source"`
+}
+
+// StatusReportComponentsSource describes the effective local components Git source.
+type StatusReportComponentsSource struct {
+	URL string                          `json:"url"`
+	Ref StatusReportComponentsSourceRef `json:"ref"`
+}
+
+// StatusReportComponentsSourceRef describes the effective local components Git ref.
+type StatusReportComponentsSourceRef struct {
+	Branch string `json:"branch,omitempty"`
+}
 
 // Running reports whether the local cluster VM currently exists and is running.
 func (m *Local) Running() (bool, error) {
@@ -108,4 +149,40 @@ func (m *Local) Status() error {
 	}
 
 	return nil
+}
+
+// StatusReport returns the machine-readable local cluster status.
+func (m *Local) StatusReport() (StatusReport, error) {
+	running, err := m.Running()
+	if err != nil {
+		return StatusReport{}, err
+	}
+	report := StatusReport{
+		ClusterID: m.clusterID,
+		Running:   running,
+		VM: StatusReportVM{
+			Provider:         "qemu",
+			NodeIP:           m.vm.NodeIP(),
+			ForwardHTTPSPort: localVMForwardPortToLocalServerHTTPS,
+		},
+		LocalServer: StatusReportServer{CACertFile: m.OIDCCACertPath()},
+		Components: StatusReportComponents{
+			Source: StatusReportComponentsSource{
+				URL: localGitURL(m.vm.NodeIP(), "components.git"),
+				Ref: StatusReportComponentsSourceRef{Branch: "local-dev"},
+			},
+		},
+	}
+	pidFile, err := ServerPIDFile(m.runtimeDir)
+	if err != nil {
+		return report, nil
+	}
+	serverRunning, err := pidFile.IsRunning()
+	if err != nil || !serverRunning {
+		return report, nil
+	}
+	report.LocalServer.Running = true
+	report.LocalServer.HTTPPort, _ = strconv.Atoi(pidFile.GetData("http_port"))
+	report.LocalServer.HTTPSPort, _ = strconv.Atoi(pidFile.GetData("https_port"))
+	return report, nil
 }

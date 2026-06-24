@@ -45,6 +45,10 @@ type TemplateVars struct {
 	// Nonce is a dedicated field because it is Nstance first-boot bootstrap data,
 	// not a value vmconfig should receive later through mutable.env.
 	Nonce string
+
+	// The following fields are only used for local VMs and is not used
+	// when rendering user-data for real clusters
+	Local LocalData
 }
 
 type ClusterData struct {
@@ -66,6 +70,13 @@ type InstanceData struct {
 type ServerData struct {
 	RegistrationAddr string
 	AgentAddr        string
+}
+
+// LocalData contains values only rendered for local VMs.
+type LocalData struct {
+	VMForwardPortToLocalServerHTTPS int
+	LocalServerHostFromVM           string
+	LocalServerHTTPSPort            string
 }
 
 // MutableVars are the variables exposed to the canonical Nstance-style

@@ -80,7 +80,7 @@ func ensureLocalIngressCertificate(dataDir, name string, hosts ...string) (strin
 	keyFile := filepath.Join(certDir, "key.pem")
 	if _, certErr := os.Stat(certFile); certErr == nil {
 		if _, keyErr := os.Stat(keyFile); keyErr == nil {
-			if localIngressCertificateCoversHosts(certFile, hosts...) {
+			if localServerCertificateCoversHosts(certFile, hosts...) {
 				return certFile, keyFile, nil
 			}
 		}
@@ -102,9 +102,9 @@ func ensureLocalIngressCertificate(dataDir, name string, hosts ...string) (strin
 	return certFile, keyFile, nil
 }
 
-// localIngressCertificateCoversHosts reports whether an existing certificate can
-// be reused for every requested local ingress hostname.
-func localIngressCertificateCoversHosts(certFile string, hosts ...string) bool {
+// localServerCertificateCoversHosts reports whether an existing certificate can
+// be reused for every requested local server hostname.
+func localServerCertificateCoversHosts(certFile string, hosts ...string) bool {
 	certPEM, err := os.ReadFile(certFile)
 	if err != nil {
 		return false
@@ -144,7 +144,9 @@ func ensureLocalOIDCCertificate(dataDir string, hosts ...string) (caCertFile, ce
 		if _, keyErr := os.Stat(caKeyFile); keyErr == nil {
 			if _, certErr := os.Stat(certFile); certErr == nil {
 				if _, keyErr := os.Stat(keyFile); keyErr == nil {
-					return caCertFile, certFile, keyFile, nil
+					if localServerCertificateCoversHosts(certFile, hosts...) {
+						return caCertFile, certFile, keyFile, nil
+					}
 				}
 			}
 		}

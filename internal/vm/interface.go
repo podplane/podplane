@@ -39,6 +39,9 @@ type Manager interface {
 	// HostAddr returns the address to the host machine from the guest machine
 	Addr() string
 
+	// NodeIP returns the VM node IP address reachable from pods in the local VM.
+	NodeIP() string
+
 	// SetOutput sets where user-facing lifecycle messages and child process
 	// output are written.
 	SetOutput(output io.Writer)

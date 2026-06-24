@@ -262,6 +262,23 @@ if [ -n "${OIDC_CUSTOM_CA:-}" ] && [ -n "${OIDC_CA_FILE:-}" ]; then
   chmod 0644 "$OIDC_CA_FILE"
 fi
 
+cat >/etc/systemd/system/podplane-local-https-forward.service <<'LOCAL_HTTPS_FORWARD_SERVICE'
+[Unit]
+Description=Podplane local HTTPS server forwarder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/socat TCP-LISTEN:{{.Local.VMForwardPortToLocalServerHTTPS}},fork,reuseaddr,bind=0.0.0.0 TCP:{{.Local.LocalServerHostFromVM}}:{{.Local.LocalServerHTTPSPort}}
+Restart=always
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target
+LOCAL_HTTPS_FORWARD_SERVICE
+systemctl daemon-reload
+systemctl enable --now podplane-local-https-forward.service
+
 systemctl disable unattended-upgrades || true
 {{end}}
 # --- 10. Restart services ---------------------------------------------------

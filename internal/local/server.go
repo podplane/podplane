@@ -25,12 +25,31 @@ import (
 	"github.com/podplane/podplane/internal/oidcserver"
 	"github.com/podplane/podplane/internal/pid"
 	"github.com/podplane/podplane/internal/s3fake"
+	"github.com/podplane/podplane/internal/vm/qemu"
 )
 
 const (
 	localGuestHostAddr     = "10.0.2.2"
 	localServerLogFilename = "local-server.log"
 )
+
+// localServerCertificateSANs returns all DNS names and IPs that may be used to
+// reach the local HTTPS server.
+func localServerCertificateSANs() []string {
+	values := []string{localGuestHostAddr, "127.0.0.1", "localhost", localOIDCHostname}
+	values = append(values, qemu.LocalServerCertificateSANs()...)
+
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
 
 // ServerLogPath returns the local server stdout/stderr log path.
 func ServerLogPath(runtimeDir string) string {
@@ -302,7 +321,7 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vault
 		return nil, fmt.Errorf("failed to start fake nstance server: %w", err)
 	}
 	w.nstance = nstanceServer
-	_, oidcCertFile, oidcKeyFile, err := ensureLocalOIDCCertificate(c.DataDirectory(), localGuestHostAddr, "127.0.0.1", "localhost", localOIDCHostname)
+	_, oidcCertFile, oidcKeyFile, err := ensureLocalOIDCCertificate(c.DataDirectory(), localServerCertificateSANs()...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare local OIDC TLS certificate: %w", err)
 	}
@@ -312,6 +331,10 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vault
 
 	// /deps/ — file server over depsCacheDir.
 	httpMux.Handle("/deps/", http.StripPrefix("/deps/", http.FileServer(http.Dir(w.depsCacheDir))))
+
+	// /git/ — smart Git HTTP server over cached deps/git repositories.
+	gitHandler := newLocalGitHandler(w.depsCacheDir)
+	httpMux.Handle("/git/", gitHandler)
 
 	// /cloud-init/ — NoCloud user-data + static datasource files.
 	cloudInitFileServer := http.FileServer(http.Dir(w.cloudInitDir))
@@ -344,6 +367,7 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vault
 	httpMux.Handle("/oidc/", http.StripPrefix("/oidc", oidcHandler))
 	httpsMux := http.NewServeMux()
 	httpsMux.Handle("/oidc/", http.StripPrefix("/oidc", oidcHandler))
+	httpsMux.Handle("/git/", gitHandler)
 
 	// /s3/data/ — fake S3 for durable local-cluster buckets.
 	s3Handler, err := s3fake.Handler(w.s3Dir)

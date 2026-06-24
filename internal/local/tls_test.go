@@ -15,18 +15,18 @@ import (
 	"time"
 )
 
-func TestLocalIngressCertificateCoversHosts(t *testing.T) {
+func TestLocalServerCertificateCoversHosts(t *testing.T) {
 	certFile := writeTestCertificate(t, []string{"dev.localhost", "*.dev.localhost", "dev.k8s.localhost"})
 
-	if !localIngressCertificateCoversHosts(certFile, "dev.localhost", "*.dev.localhost", "dev.k8s.localhost") {
+	if !localServerCertificateCoversHosts(certFile, "dev.localhost", "*.dev.localhost", "dev.k8s.localhost") {
 		t.Fatalf("expected certificate to cover local ingress and Kubernetes API hosts")
 	}
 }
 
-func TestLocalIngressCertificateCoversHostsRejectsMissingHost(t *testing.T) {
+func TestLocalServerCertificateCoversHostsRejectsMissingHost(t *testing.T) {
 	certFile := writeTestCertificate(t, []string{"dev.localhost", "*.dev.localhost"})
 
-	if localIngressCertificateCoversHosts(certFile, "dev.localhost", "*.dev.localhost", "dev.k8s.localhost") {
+	if localServerCertificateCoversHosts(certFile, "dev.localhost", "*.dev.localhost", "dev.k8s.localhost") {
 		t.Fatalf("expected certificate missing Kubernetes API host to be rejected")
 	}
 }
