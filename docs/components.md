@@ -49,12 +49,15 @@ Recommended components which can also be installed via `podplane install` atop t
 - `trust-manager`: [trust-manager](https://cert-manager.io/docs/trust/trust-manager/) by the cert-manager project
     - `trust-manager-crds`
 - `platform-trust` for default trust bundles (requires `trust-manager`)
+- `podplane-operator` for Podplane platform APIs and controllers such as Secrets
+    - `podplane-operator-crds`
+- `secrets-store-csi-driver`: [Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/) for mounting provider-backed secrets into Pods. The recommended set includes the OpenBao provider; other provider-specific components, such as AWS, GCP, and Vault providers, are installed separately based on cluster/provider needs.
+    - `secrets-store-csi-driver-crds`
+    - `secrets-store-csi-provider-openbao`
 - `traefik`: [Traefik](https://doc.traefik.io/traefik/) ingress controller
 
 Addon components which can only be installed via `podplane install`:
 
-- `secrets-store-csi-driver`: [Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/)
-    - `secrets-store-csi-driver-crds`
 - `snapshot`: [Snapshot controller](https://kubernetes-csi.github.io/docs/snapshot-controller.html)
     - `snapshot-crds`
 - Cloud Provider CSI Drivers:

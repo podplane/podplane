@@ -15,16 +15,19 @@ import (
 
 // Delete deletes the local cluster VM and cluster data if it is the last VM
 func (m *Local) Delete() error {
+	fmt.Println("Deleting local VM disk and runtime files...")
 	if err := m.vm.Delete(); err != nil {
 		return err
 	}
+	fmt.Println("Removing local cluster runtime state...")
 	if err := removeState(m.runtimeDir, m.clusterID); err != nil {
 		return fmt.Errorf("failed to remove state: %w", err)
 	}
+	fmt.Println("Removing local cluster data...")
 	if err := m.deleteClusterData(); err != nil {
 		return err
 	}
-	color.Green("✓ VM deleted successfully")
+	color.Green("✓ Local cluster deleted successfully")
 	return nil
 }
 
