@@ -30,6 +30,9 @@ podplane local status [flags]
 `--json` includes the local server and components source details that developer
 automation can consume without hardcoding local runtime values:
 
+The `components.source.secretRef.name` field is used by local development
+bootstrap to wire Flux GitRepository to the local HTTPS server CA Secret.
+
 ```sh
 podplane local status --json
 ```
@@ -56,6 +59,9 @@ Example fields:
       "url": "https://10.0.2.15:19443/git/components.git",
       "ref": {
         "branch": "local-dev"
+      },
+      "secretRef": {
+        "name": "podplane-components-git"
       }
     }
   }

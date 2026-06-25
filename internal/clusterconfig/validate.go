@@ -51,6 +51,9 @@ func ValidateComponents(components Components) error {
 	if components.Source == nil {
 		return nil
 	}
+	if strings.TrimSpace(components.Source.URL) == "" {
+		return fmt.Errorf("components.source.url is required")
+	}
 	refCount := 0
 	if components.Source.Ref.Branch != "" {
 		refCount++
@@ -66,6 +69,9 @@ func ValidateComponents(components Components) error {
 	}
 	if refCount > 1 {
 		return fmt.Errorf("components.source.ref must set at most one of branch, tag, semver, or commit")
+	}
+	if components.Source.SecretRef != nil && strings.TrimSpace(components.Source.SecretRef.Name) == "" {
+		return fmt.Errorf("components.source.secretRef.name is required when secretRef is set")
 	}
 	return nil
 }

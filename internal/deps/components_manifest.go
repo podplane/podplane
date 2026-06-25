@@ -43,6 +43,7 @@ type ComponentsSource struct {
 type ComponentsSourceRef struct {
 	Branch string `json:"branch,omitempty"`
 	Tag    string `json:"tag,omitempty"`
+	Semver string `json:"semver,omitempty"`
 	Commit string `json:"commit,omitempty"`
 }
 
@@ -58,11 +59,14 @@ func validateComponentsSource(source *ComponentsSource) error {
 	if source.Ref.Tag != "" {
 		refs++
 	}
+	if source.Ref.Semver != "" {
+		refs++
+	}
 	if source.Ref.Commit != "" {
 		refs++
 	}
 	if refs != 1 {
-		return fmt.Errorf("components source ref must set exactly one of branch, tag, or commit")
+		return fmt.Errorf("components source ref must set exactly one of branch, tag, semver, or commit")
 	}
 	return nil
 }

@@ -43,13 +43,19 @@ type StatusReportComponents struct {
 
 // StatusReportComponentsSource describes the effective local components Git source.
 type StatusReportComponentsSource struct {
-	URL string                          `json:"url"`
-	Ref StatusReportComponentsSourceRef `json:"ref"`
+	URL       string                                 `json:"url"`
+	Ref       StatusReportComponentsSourceRef        `json:"ref"`
+	SecretRef *StatusReportComponentsSourceSecretRef `json:"secretRef,omitempty"`
 }
 
 // StatusReportComponentsSourceRef describes the effective local components Git ref.
 type StatusReportComponentsSourceRef struct {
 	Branch string `json:"branch,omitempty"`
+}
+
+// StatusReportComponentsSourceSecretRef describes the local Flux Git Secret.
+type StatusReportComponentsSourceSecretRef struct {
+	Name string `json:"name"`
 }
 
 // Running reports whether the local cluster VM currently exists and is running.
@@ -168,8 +174,9 @@ func (m *Local) StatusReport() (StatusReport, error) {
 		LocalServer: StatusReportServer{CACertFile: m.OIDCCACertPath()},
 		Components: StatusReportComponents{
 			Source: StatusReportComponentsSource{
-				URL: localGitURL(m.vm.NodeIP(), "components.git"),
-				Ref: StatusReportComponentsSourceRef{Branch: "local-dev"},
+				URL:       localGitURL(m.vm.NodeIP(), "components.git"),
+				Ref:       StatusReportComponentsSourceRef{Branch: "local-dev"},
+				SecretRef: &StatusReportComponentsSourceSecretRef{Name: localComponentsGitSecretName},
 			},
 		},
 	}

@@ -13,6 +13,8 @@ const localOIDCHostname = "oidc.localhost"
 
 const localVMForwardPortToLocalServerHTTPS = 19443
 
+const localComponentsGitSecretName = "podplane-components-git"
+
 const LocalClusterConfigFilename = "cluster.jsonc"
 
 // ClusterDataDir returns the users data directory for a local cluster.

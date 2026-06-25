@@ -14,6 +14,8 @@ Provider-specific dependencies are opt-in. By default, `deps download` downloads
 - Use `--addons snapshot` or `--addons all` to include extra addon components beyond the recommended defaults.
 - Pass `-f/--cluster-config <path>` specifying a cluster config file to infer providers.
 
+The components manifest also declares the Git source Flux uses for platform component charts. `deps download` clones or fetches that repository into the local Git dependency cache unless `--skip-components-git` is set.
+
 The local components images mirror only downloads images for the target architecture, such as `arm64` or `amd64`.
 
 - You can specify one or both architectures with the `--arch` flag e.g. `--arch arm64,amd64`.
@@ -24,6 +26,8 @@ The local components images mirror only downloads images for the target architec
 For development, pass `--vmconfig <path>`, `--components <path>`, or `--templates <path>` to use local manifest JSON files instead of fetching published manifests from `deps.podplane.dev`. See [Development](../development.md) for more information.
 
 Pass `--skip-seeds` to skip seed file downloads while still downloading VMConfig artifacts, component images, and template charts.
+
+Pass `--skip-components-git` to skip cloning or fetching the components Git source while still downloading component images.
 
 ```
 podplane deps download [flags]
@@ -43,3 +47,4 @@ podplane deps download [flags]
 | `--templates string` | Path to a local templates manifest JSON file |
 | `--seeds string` | Path to a local seeds manifest JSON file |
 | `--skip-seeds` | Skip downloading seed manifests and snapshots |
+| `--skip-components-git` | Skip cloning or fetching the Git source declared by the components manifest |

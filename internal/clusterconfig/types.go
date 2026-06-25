@@ -89,8 +89,9 @@ type ComponentsRegistryMirror struct {
 
 // ComponentsSource overrides the Git repository used by platform-components.
 type ComponentsSource struct {
-	URL string              `json:"url"`
-	Ref ComponentsSourceRef `json:"ref,omitempty"`
+	URL       string                     `json:"url"`
+	Ref       ComponentsSourceRef        `json:"ref,omitempty"`
+	SecretRef *ComponentsSourceSecretRef `json:"secretRef,omitempty"`
 }
 
 // ComponentsSourceRef selects a Git ref for the components source. At most one
@@ -100,6 +101,12 @@ type ComponentsSourceRef struct {
 	Tag    string `json:"tag,omitempty"`
 	Semver string `json:"semver,omitempty"`
 	Commit string `json:"commit,omitempty"`
+}
+
+// ComponentsSourceSecretRef references Flux-native Git credentials in the
+// GitRepository namespace.
+type ComponentsSourceSecretRef struct {
+	Name string `json:"name"`
 }
 
 // ACME describes cluster-level ACME account configuration for ingress certs.

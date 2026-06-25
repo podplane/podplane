@@ -243,6 +243,11 @@ func interpolateComponentsSource(records []*datafile.Record, source *clusterconf
 		}
 		spec := ensureMap(obj, "spec")
 		spec["url"] = source.URL
+		if source.SecretRef != nil && source.SecretRef.Name != "" {
+			spec["secretRef"] = map[string]any{"name": source.SecretRef.Name}
+		} else {
+			delete(spec, "secretRef")
+		}
 		ref := map[string]any{}
 		if source.Ref.Branch != "" {
 			ref["branch"] = source.Ref.Branch

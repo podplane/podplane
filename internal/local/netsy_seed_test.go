@@ -48,9 +48,9 @@ func TestLocalComponentsSourceUsesBranchForDevManifest(t *testing.T) {
 	}
 }
 
-// TestLocalComponentsSourceUsesTagForReleasedManifest verifies released
-// components manifests keep using matching version tags for reproducibility.
-func TestLocalComponentsSourceUsesTagForReleasedManifest(t *testing.T) {
+// TestLocalComponentsSourceUsesSemverForReleasedManifest verifies released
+// components manifests keep using matching semver selectors for reproducibility.
+func TestLocalComponentsSourceUsesSemverForReleasedManifest(t *testing.T) {
 	manager := deps.NewManager("https://example.invalid", t.TempDir())
 	if err := manager.WriteCachedComponentsManifest([]byte(`{"components":{"version":"1.2.1"}}`)); err != nil {
 		t.Fatalf("WriteCachedComponentsManifest: %v", err)
@@ -63,8 +63,8 @@ func TestLocalComponentsSourceUsesTagForReleasedManifest(t *testing.T) {
 	if source == nil {
 		t.Fatalf("source is nil")
 	}
-	if got, want := source.Ref.Tag, "v1.2.1"; got != want {
-		t.Fatalf("source.Ref.Tag = %q, want %q", got, want)
+	if got, want := source.Ref.Semver, "v1.2.1"; got != want {
+		t.Fatalf("source.Ref.Semver = %q, want %q", got, want)
 	}
 	if source.Ref.Branch != "" {
 		t.Fatalf("source.Ref.Branch = %q, want empty", source.Ref.Branch)

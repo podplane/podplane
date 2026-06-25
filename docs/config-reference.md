@@ -120,7 +120,7 @@ New cluster configs include a relative `$schema` reference to `./podplane.cluste
       "source": {
         "url": "https://github.com/podplane/components.git",
         "ref": {
-          "branch": "main"
+          "semver": "v1.2.3"
         }
       }
     }
@@ -201,6 +201,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.components.source.ref.tag` | Git tag to use for component Helm charts. Mutually exclusive with other `source.ref` selectors. |
 | `cluster.components.source.ref.semver` | Git semver range to use for component Helm charts. Mutually exclusive with other `source.ref` selectors. |
 | `cluster.components.source.ref.commit` | Git commit to use for component Helm charts. Mutually exclusive with other `source.ref` selectors. |
+| `cluster.components.source.secretRef.name` | Optional Flux Git credentials Secret name in the `platform-components` namespace. Use this for private/enterprise components repos; Podplane wires the reference but does not create the Secret. |
 
 **Validation rules:**
 - `cluster.id` must be lowercase alphanumeric with hyphens only, no leading/trailing/consecutive hyphens, max 32 characters.

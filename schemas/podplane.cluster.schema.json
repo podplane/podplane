@@ -370,7 +370,8 @@
       "required": ["url"],
       "properties": {
         "url": { "type": "string", "description": "Git repository URL for platform-components." },
-        "ref": { "$ref": "#/$defs/componentsSourceRef" }
+        "ref": { "$ref": "#/$defs/componentsSourceRef" },
+        "secretRef": { "$ref": "#/$defs/componentsSourceSecretRef" }
       }
     },
     "componentsSourceRef": {
@@ -381,6 +382,14 @@
         "tag": { "type": "string", "description": "Git tag to use." },
         "semver": { "type": "string", "description": "Semver constraint to use." },
         "commit": { "type": "string", "description": "Git commit SHA to use." }
+      }
+    },
+    "componentsSourceSecretRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "description": "Name of a Flux Git credentials Secret in the platform-components namespace." }
       }
     }
   }

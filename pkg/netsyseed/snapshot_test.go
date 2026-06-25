@@ -55,8 +55,9 @@ func TestInterpolateComponentsSourceUpdatesGitRepository(t *testing.T) {
 		{Key: []byte(podplaneComponentsGitKey), Value: []byte(`{"apiVersion":"source.toolkit.fluxcd.io/v1","kind":"GitRepository","metadata":{"name":"podplane-components","namespace":"platform-components"},"spec":{"url":"https://github.com/podplane/components.git","ref":{"branch":"main"}}}`)},
 	}
 	source := &clusterconfig.ComponentsSource{
-		URL: "https://github.com/example/components.git",
-		Ref: clusterconfig.ComponentsSourceRef{Branch: "feature"},
+		URL:       "https://github.com/example/components.git",
+		Ref:       clusterconfig.ComponentsSourceRef{Branch: "feature"},
+		SecretRef: &clusterconfig.ComponentsSourceSecretRef{Name: "components-git-auth"},
 	}
 
 	if err := interpolateComponentsSource(records, source); err != nil {
@@ -73,6 +74,36 @@ func TestInterpolateComponentsSourceUpdatesGitRepository(t *testing.T) {
 	ref := spec["ref"].(map[string]any)
 	if got, want := ref["branch"], "feature"; got != want {
 		t.Fatalf("spec.ref.branch = %v, want %v", got, want)
+	}
+	secretRef := spec["secretRef"].(map[string]any)
+	if got, want := secretRef["name"], "components-git-auth"; got != want {
+		t.Fatalf("spec.secretRef.name = %v, want %v", got, want)
+	}
+}
+
+func TestInterpolateComponentsSourceRemovesSecretRefWhenUnset(t *testing.T) {
+	records := []*datafile.Record{
+		{Key: []byte(podplaneComponentsGitKey), Value: []byte(`{"apiVersion":"source.toolkit.fluxcd.io/v1","kind":"GitRepository","metadata":{"name":"podplane-components","namespace":"platform-components"},"spec":{"url":"https://github.com/podplane/components.git","secretRef":{"name":"stale"},"ref":{"branch":"main"}}}`)},
+	}
+	source := &clusterconfig.ComponentsSource{
+		URL: "https://github.com/example/components.git",
+		Ref: clusterconfig.ComponentsSourceRef{Semver: "v1.2.3"},
+	}
+
+	if err := interpolateComponentsSource(records, source); err != nil {
+		t.Fatalf("interpolateComponentsSource error = %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(records[0].Value, &got); err != nil {
+		t.Fatalf("unmarshal interpolated GitRepository: %v", err)
+	}
+	spec := got["spec"].(map[string]any)
+	if _, ok := spec["secretRef"]; ok {
+		t.Fatalf("spec.secretRef was not removed: %#v", spec["secretRef"])
+	}
+	ref := spec["ref"].(map[string]any)
+	if got, want := ref["semver"], "v1.2.3"; got != want {
+		t.Fatalf("spec.ref.semver = %v, want %v", got, want)
 	}
 }
 

@@ -125,6 +125,18 @@ func verifyCachedComponentsGitRef(repo *git.Repository, source *ComponentsSource
 		if err != nil {
 			return fmt.Errorf("cached components git repository is missing tag %q: %w", source.Ref.Tag, err)
 		}
+	case source.Ref.Semver != "":
+		if tag, ok := exactSemverTag(source.Ref.Semver); ok {
+			if _, err := repo.Reference(plumbing.NewTagReferenceName(tag), true); err == nil {
+				break
+			}
+			if !strings.HasPrefix(tag, "v") {
+				if _, err := repo.Reference(plumbing.NewTagReferenceName("v"+tag), true); err == nil {
+					break
+				}
+			}
+			return fmt.Errorf("cached components git repository is missing semver tag %q", source.Ref.Semver)
+		}
 	case source.Ref.Commit != "":
 		_, err := repo.CommitObject(plumbing.NewHash(source.Ref.Commit))
 		if err != nil {
@@ -132,4 +144,28 @@ func verifyCachedComponentsGitRef(repo *git.Repository, source *ComponentsSource
 		}
 	}
 	return nil
+}
+
+// exactSemverTag returns a tag to verify for exact semver selectors.
+func exactSemverTag(value string) (string, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || strings.ContainsAny(trimmed, "<>=~^* xX|") {
+		return "", false
+	}
+	version := strings.TrimPrefix(trimmed, "v")
+	parts := strings.Split(version, ".")
+	if len(parts) < 2 || len(parts) > 3 {
+		return "", false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return "", false
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return "", false
+			}
+		}
+	}
+	return trimmed, true
 }

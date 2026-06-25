@@ -615,17 +615,27 @@ func (m *Local) WriteLocalClusterConfig(clusterID, oidcIssuerURL, oidcCACertPath
 		if componentsSource.Ref.Branch != "" {
 			refKey = "branch"
 			refValue = componentsSource.Ref.Branch
+		} else if componentsSource.Ref.Semver != "" {
+			refKey = "semver"
+			refValue = componentsSource.Ref.Semver
 		} else if componentsSource.Ref.Commit != "" {
 			refKey = "commit"
 			refValue = componentsSource.Ref.Commit
+		}
+		secretRefBlock := ""
+		if componentsSource.SecretRef != nil && componentsSource.SecretRef.Name != "" {
+			secretRefBlock = fmt.Sprintf(`,
+        "secretRef": {
+          "name": %q
+        }`, componentsSource.SecretRef.Name)
 		}
 		componentsSourceBlock = fmt.Sprintf(`      "source": {
         "url": %q,
         "ref": {
           %q: %q
-        }
+        }%s
       },
-`, componentsSource.URL, refKey, refValue)
+`, componentsSource.URL, refKey, refValue, secretRefBlock)
 	}
 	registryHostname := localRegistryHostname(clusterID)
 	vaultAddress := m.localVaultServerURLForConfig(clusterID)
@@ -703,8 +713,9 @@ func localComponentsSource(depsManager *deps.Manager, seed clusterconfig.Seed, n
 	}
 	if _, err := os.Stat(filepath.Join(depsManager.GitCachePath("components.git"), "config")); err == nil {
 		return &clusterconfig.ComponentsSource{
-			URL: localGitURL(nodeIP, "components.git"),
-			Ref: clusterconfig.ComponentsSourceRef{Branch: "local-dev"},
+			URL:       localGitURL(nodeIP, "components.git"),
+			Ref:       clusterconfig.ComponentsSourceRef{Branch: "local-dev"},
+			SecretRef: &clusterconfig.ComponentsSourceSecretRef{Name: localComponentsGitSecretName},
 		}, nil
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("inspect local components git cache: %w", err)
@@ -718,8 +729,9 @@ func localComponentsSource(depsManager *deps.Manager, seed clusterconfig.Seed, n
 		if repoPath, err := deps.GitCacheRepoPath(source.URL); err == nil {
 			if _, statErr := os.Stat(filepath.Join(depsManager.GitCachePath(repoPath), "config")); statErr == nil {
 				return &clusterconfig.ComponentsSource{
-					URL: localGitURL(nodeIP, repoPath),
-					Ref: clusterconfig.ComponentsSourceRef{Branch: source.Ref.Branch, Tag: source.Ref.Tag, Commit: source.Ref.Commit},
+					URL:       localGitURL(nodeIP, repoPath),
+					Ref:       clusterconfig.ComponentsSourceRef{Branch: source.Ref.Branch, Tag: source.Ref.Tag, Semver: source.Ref.Semver, Commit: source.Ref.Commit},
+					SecretRef: &clusterconfig.ComponentsSourceSecretRef{Name: localComponentsGitSecretName},
 				}, nil
 			} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 				return nil, fmt.Errorf("inspect components git cache: %w", statErr)
@@ -727,7 +739,7 @@ func localComponentsSource(depsManager *deps.Manager, seed clusterconfig.Seed, n
 		}
 		return &clusterconfig.ComponentsSource{
 			URL: source.URL,
-			Ref: clusterconfig.ComponentsSourceRef{Branch: source.Ref.Branch, Tag: source.Ref.Tag, Commit: source.Ref.Commit},
+			Ref: clusterconfig.ComponentsSourceRef{Branch: source.Ref.Branch, Tag: source.Ref.Tag, Semver: source.Ref.Semver, Commit: source.Ref.Commit},
 		}, nil
 	}
 	if manifest.Components.Version == "dev" {
@@ -741,7 +753,7 @@ func localComponentsSource(depsManager *deps.Manager, seed clusterconfig.Seed, n
 	}
 	return &clusterconfig.ComponentsSource{
 		URL: "https://github.com/podplane/components.git",
-		Ref: clusterconfig.ComponentsSourceRef{Tag: "v" + manifest.Components.Version},
+		Ref: clusterconfig.ComponentsSourceRef{Semver: "v" + manifest.Components.Version},
 	}, nil
 }
 

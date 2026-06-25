@@ -29,6 +29,13 @@ func TestValidateComponentsRejectsMultipleSourceRefs(t *testing.T) {
 	}
 }
 
+func TestValidateComponentsRejectsEmptySourceSecretRefName(t *testing.T) {
+	err := ValidateComponents(Components{Source: &ComponentsSource{URL: "https://github.com/example/components.git", SecretRef: &ComponentsSourceSecretRef{}}})
+	if err == nil {
+		t.Fatal("ValidateComponents returned nil, want error")
+	}
+}
+
 func TestValidateClusterID(t *testing.T) {
 	tests := []struct {
 		name      string

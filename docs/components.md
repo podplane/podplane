@@ -88,6 +88,26 @@ It acts as the single control point for all component installations. The platfor
 - `podplane uninstall <component>` disables a component in the platform chart values; Flux CD removes it.
 - Core components cannot be uninstalled.
 
+By default, Flux sources component charts from the published Podplane [components](https://github.com/podplane/components) repository. For private or forked components repositories, configure the Flux source directly in cluster config and create the referenced Kubernetes Secret (per `source.secretRef.name` below) in the `platform-components` namespace:
+
+```jsonc
+{
+  "cluster": {
+    "components": {
+      "source": {
+        "url": "https://github.com/acme/components.git",
+        "ref": {
+          "semver": "v1.2.3-acme.1"
+        },
+        "secretRef": {
+          "name": "components-git-auth"
+        }
+      }
+    }
+  }
+}
+```
+
 ### Component Dependencies
 
 Component dependency metadata lives in the platform chart within the cluster itself - not hardcoded in the CLI. The CLI queries the Kubernetes API to read the platform chart's metadata to determine what's installed and what dependencies exist.
