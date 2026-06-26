@@ -208,6 +208,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		shard.Body.Attr("shard", str(zone))
 		shard.Body.Attr("zone", str(zone))
 		shard.Body.Attr("enable_ssm", expr("var.enable_ssm"))
+		shard.Body.Attr("certificates", nstanceCertificatesValue())
 		shard.Body.Attr("templates", templatesValue(cfg, opts, provider.Kind))
 		shard.Body.Attr("groups", groupsValue(cfg, provider))
 		mainDoc.AddBlock(shard)
@@ -611,18 +612,112 @@ func templatesValue(cfg *clusterconfig.ClusterConfig, opts ClusterOptions, provi
 				identField("encoding", str("base64")),
 				identField("content", expr("base64encode("+quote(userdataTemplate)+")")),
 			)),
-			identField("files", inlineObject(
-				field("mutable.env", inlineObject(
-					identField("kind", str("env")),
-					identField("template", expr("local.mutable_env")),
-				)),
-			)),
+			identField("files", nstanceTemplateFilesValue(kind)),
 			identField("args", inlineObject(
 				identField("ImageId", str("{{ .Image.debian_13_"+pool.Arch+" }}")),
 			)),
 		)))
 	}
 	return object(fields...)
+}
+
+// nstanceCertificatesValue returns the certificate templates required by the
+// vmconfig runtime files generated for Nstance-managed Podplane VMs.
+func nstanceCertificatesValue() hclObject {
+	fields := []hclObjectField{}
+	for _, name := range []string{
+		"containerd.client",
+		"front-proxy.client",
+		"kube-apiserver.client",
+		"kube-apiserver.server",
+		"kube-controller-manager.client",
+		"kube-scheduler.client",
+		"kube2iam.client",
+		"kubelet.client",
+		"kubelet.server",
+		"netsy.client",
+		"netsy.server",
+		"registry.server",
+	} {
+		kind := "client"
+		if strings.HasSuffix(name, ".server") {
+			kind = "server"
+		}
+		cn := name
+		certFields := []hclObjectField{
+			identField("kind", str(kind)),
+			identField("cn", str(cn)),
+			identField("dns", stringValueList([]string{"{{ .Instance.Hostname }}", "localhost"})),
+			identField("ip", stringValueList([]string{"{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1"})),
+			identField("ttl", num(8760)),
+		}
+		if strings.HasPrefix(name, "netsy.") {
+			certFields = append(certFields, identField("uri", stringValueList([]string{"netsy://{{ .Cluster.ID }}/peer/{{ .Instance.ID }}"})))
+		}
+		if name == "kube-apiserver.server" {
+			certFields[2] = identField("dns", stringValueList([]string{"{{ .Instance.Hostname }}", "localhost", "kube-apiserver.podplane.internal"}))
+			certFields[3] = identField("ip", stringValueList([]string{"{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1", "198.18.0.1", "fdc6::1"}))
+		}
+		if name == "front-proxy.client" {
+			certFields[1] = identField("cn", str("front-proxy-client"))
+		}
+		if name == "kube-apiserver.client" {
+			certFields = append(certFields, identField("organization", stringValueList([]string{"system:masters"})))
+			certFields = append(certFields, identField("uri", stringValueList([]string{"netsy://{{ .Cluster.ID }}/client/kube-apiserver"})))
+		}
+		if name == "kube-controller-manager.client" {
+			certFields[1] = identField("cn", str("system:kube-controller-manager"))
+		}
+		if name == "kube-scheduler.client" {
+			certFields[1] = identField("cn", str("system:kube-scheduler"))
+		}
+		if name == "kubelet.client" {
+			certFields[1] = identField("cn", str("system:node:{{ .Instance.ID }}"))
+			certFields = append(certFields, identField("organization", stringValueList([]string{"system:nodes"})))
+		}
+		fields = append(fields, field(name, inlineObject(certFields...)))
+	}
+	return object(fields...)
+}
+
+// nstanceTemplateFilesValue returns the runtime files Nstance should generate
+// for one vmconfig kind, including certificate files backed by agent keys.
+func nstanceTemplateFilesValue(kind string) hclInlineObject {
+	names := []string{
+		"containerd.client",
+		"kube2iam.client",
+		"kubelet.client",
+		"kubelet.server",
+		"registry.server",
+	}
+	if kind == "knc" {
+		names = append(names,
+			"front-proxy.client",
+			"kube-apiserver.client",
+			"kube-apiserver.server",
+			"kube-controller-manager.client",
+			"kube-scheduler.client",
+			"netsy.client",
+			"netsy.server",
+		)
+	}
+	fields := []hclObjectField{
+		field("mutable.env", inlineObject(
+			identField("kind", str("env")),
+			identField("template", expr("local.mutable_env")),
+		)),
+	}
+	for _, name := range names {
+		fields = append(fields, field(name+".crt", inlineObject(
+			identField("kind", str("certificate")),
+			identField("template", str(name)),
+			identField("key", inlineObject(
+				identField("source", str("agent")),
+				identField("name", str(name)),
+			)),
+		)))
+	}
+	return inlineObject(fields...)
 }
 
 // poolKind returns the Nstance three-letter instance kind for a Podplane pool.

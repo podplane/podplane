@@ -197,6 +197,7 @@ func podplaneRuntimeConfig(clusterID string, staticFiles map[string]string) fake
 		"kube-apiserver.server",
 		"kubelet.server",
 		"kube-apiserver.client",
+		"front-proxy.client",
 		"kubelet.client",
 		"kube2iam.client",
 		"kube-scheduler.client",
@@ -207,6 +208,9 @@ func podplaneRuntimeConfig(clusterID string, staticFiles map[string]string) fake
 			kind = "server"
 		}
 		cn := name
+		if name == "front-proxy.client" {
+			cn = "front-proxy-client"
+		}
 		certs[name] = fakeserver.CertificateConfig{
 			Kind: kind,
 			CN:   &cn,
