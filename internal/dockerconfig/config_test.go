@@ -79,6 +79,38 @@ func TestSetCredentialHelperUpdatesExistingDockerConfig(t *testing.T) {
 	}
 }
 
+func TestSetCredentialHelperPreservesExistingHelperForHostname(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	setDockerInstalled(t, true)
+	dockerDir := filepath.Join(home, ".docker")
+	if err := os.MkdirAll(dockerDir, 0o700); err != nil {
+		t.Fatalf("create Docker config dir: %v", err)
+	}
+	configPath := filepath.Join(dockerDir, "config.json")
+	original := []byte(`{
+  "credHelpers": {"registry.example.com": "osxkeychain"}
+}`)
+	if err := os.WriteFile(configPath, original, 0o600); err != nil {
+		t.Fatalf("write Docker config: %v", err)
+	}
+
+	configured, err := SetCredentialHelper("registry.example.com")
+	if err != nil {
+		t.Fatalf("SetCredentialHelper error = %v", err)
+	}
+	if configured {
+		t.Fatal("SetCredentialHelper configured = true, want false")
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read Docker config: %v", err)
+	}
+	if string(raw) != string(original) {
+		t.Fatalf("Docker config was changed:\n%s", raw)
+	}
+}
+
 func TestSetCredentialHelperSkipsWhenDockerMissing(t *testing.T) {
 	setDockerInstalled(t, false)
 

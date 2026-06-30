@@ -51,6 +51,9 @@ func SetCredentialHelper(hostname string) (bool, error) {
 		credHelpers = map[string]any{}
 		config["credHelpers"] = credHelpers
 	}
+	if _, ok := credHelpers[hostname]; ok {
+		return false, nil
+	}
 	credHelpers[hostname] = "podplane"
 	raw, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
