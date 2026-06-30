@@ -181,13 +181,13 @@ func applySecretsComponents(components map[string]any, clusterID string, secrets
 	for _, provider := range secrets.Providers {
 		switch provider.Kind {
 		case "aws":
-			apps["secrets-store-csi-driver-provider-aws"] = map[string]any{"enabled": true}
+			apps["secrets-store-csi-provider-aws"] = map[string]any{"enabled": true}
 		case "gcp":
-			apps["secrets-store-csi-driver-provider-gcp"] = map[string]any{"enabled": true}
+			apps["secrets-store-csi-provider-gcp"] = map[string]any{"enabled": true}
 		case "vault":
-			apps["secrets-store-csi-driver-provider-vault"] = map[string]any{"enabled": true}
+			apps["secrets-store-csi-provider-vault"] = map[string]any{"enabled": true}
 		case "openbao":
-			apps["secrets-store-csi-driver-provider-openbao"] = map[string]any{"enabled": true}
+			apps["secrets-store-csi-provider-openbao"] = map[string]any{"enabled": true}
 		}
 	}
 }

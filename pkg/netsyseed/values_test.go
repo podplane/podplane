@@ -63,8 +63,8 @@ func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *tes
 	for _, name := range []string{
 		"podplane-operator",
 		"secrets-store-csi-driver",
-		"secrets-store-csi-driver-provider-aws",
-		"secrets-store-csi-driver-provider-openbao",
+		"secrets-store-csi-provider-aws",
+		"secrets-store-csi-provider-openbao",
 	} {
 		app := apps[name].(map[string]any)
 		if got, want := app["enabled"], true; got != want {
