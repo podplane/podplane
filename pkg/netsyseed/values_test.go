@@ -107,6 +107,72 @@ func TestBuildPlatformComponentsValuesRegistryMirror(t *testing.T) {
 	}
 }
 
+func TestBuildPlatformComponentsValuesZotRegistry(t *testing.T) {
+	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+		ID: "test-cluster",
+		OIDC: clusterconfig.OIDC{
+			IssuerURL:     "https://auth.example.com",
+			ClientID:      "registry-client",
+			UsernameClaim: "preferred_username",
+			GroupsClaim:   "roles",
+		},
+		Registry: clusterconfig.Registry{Hostname: "registry.example.com"},
+		Providers: []clusterconfig.Provider{{
+			Kind:    "aws",
+			Account: "123456789012",
+			Region:  "us-east-1",
+		}},
+	}}
+	values, err := buildPlatformComponentsValues(cfg)
+	if err != nil {
+		t.Fatalf("buildPlatformComponentsValues error = %v", err)
+	}
+	zotRegistry := componentValues(values, "zot-registry")["platform"].(map[string]any)["zotRegistry"].(map[string]any)
+	if got, want := zotRegistry["registryHostname"], "registry.example.com"; got != want {
+		t.Fatalf("registryHostname = %v, want %v", got, want)
+	}
+	storage := zotRegistry["storage"].(map[string]any)
+	if got, want := storage["bucket"], "test-cluster-123456789012-registry"; got != want {
+		t.Fatalf("storage.bucket = %v, want %v", got, want)
+	}
+	if got, want := storage["region"], "us-east-1"; got != want {
+		t.Fatalf("storage.region = %v, want %v", got, want)
+	}
+	oidc := zotRegistry["oidc"].(map[string]any)
+	if got, want := oidc["issuer"], "https://auth.example.com"; got != want {
+		t.Fatalf("oidc.issuer = %v, want %v", got, want)
+	}
+	if got, want := oidc["audience"], "registry-client"; got != want {
+		t.Fatalf("oidc.audience = %v, want %v", got, want)
+	}
+	if got, want := oidc["usernameClaim"], "preferred_username"; got != want {
+		t.Fatalf("oidc.usernameClaim = %v, want %v", got, want)
+	}
+	if got, want := oidc["groupsClaim"], "roles"; got != want {
+		t.Fatalf("oidc.groupsClaim = %v, want %v", got, want)
+	}
+}
+
+func TestBuildPlatformComponentsValuesZotRegistryLocalBucket(t *testing.T) {
+	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+		ID:       "dev",
+		OIDC:     clusterconfig.OIDC{IssuerURL: "https://oidc.localhost"},
+		Registry: clusterconfig.Registry{Hostname: "dev-registry.local"},
+	}}
+	values, err := buildPlatformComponentsValues(cfg)
+	if err != nil {
+		t.Fatalf("buildPlatformComponentsValues error = %v", err)
+	}
+	zotRegistry := componentValues(values, "zot-registry")["platform"].(map[string]any)["zotRegistry"].(map[string]any)
+	storage := zotRegistry["storage"].(map[string]any)
+	if got, want := storage["bucket"], "registry"; got != want {
+		t.Fatalf("storage.bucket = %v, want %v", got, want)
+	}
+	if got, want := storage["region"], "local"; got != want {
+		t.Fatalf("storage.region = %v, want %v", got, want)
+	}
+}
+
 func TestBuildPlatformComponentsValuesGroupsAWSSolvers(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ACME:      &clusterconfig.ACME{Server: "https://acme.example/directory", Email: "ops@example.com"},

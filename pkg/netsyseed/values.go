@@ -37,16 +37,14 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig) (map[string
 		componentValues = ensureChildMap(components, "values")
 		componentValues["zot-registry"] = map[string]any{
 			"platform": map[string]any{
-				"registry": map[string]any{
-					"bucket": map[string]any{
-						"name": cfg.Cluster.ID + "-registry",
-					},
-					"hostname": cfg.Cluster.Registry.Hostname,
-					"ingress": map[string]any{
-						"enabled": cfg.Cluster.Registry.Ingress.Enabled,
+				"zotRegistry": map[string]any{
+					"registryHostname": cfg.Cluster.Registry.Hostname,
+					"storage": map[string]any{
+						"bucket": registryBucketName(cfg.Cluster),
+						"region": registryRegion(cfg.Cluster),
 					},
 					"oidc": map[string]any{
-						"issuerURL":     cfg.Cluster.OIDC.IssuerURL,
+						"issuer":        cfg.Cluster.OIDC.IssuerURL,
 						"audience":      cfg.ResolvedClientID(),
 						"usernameClaim": cfg.ResolvedUsernameClaim(),
 						"groupsClaim":   cfg.ResolvedGroupsClaim(),
@@ -110,6 +108,37 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig) (map[string
 		platformCerts["platform"].(map[string]any)["certs"].(map[string]any)["secretSync"] = secretSync
 	}
 	return values, nil
+}
+
+// registryBucketName returns the backing bucket name used by the in-cluster
+// zot-registry component. Local clusters use the fake-S3 bucket named
+// "registry"; AWS clusters use the same account-qualified name as generated
+// Terraform when the account is known from cluster config.
+func registryBucketName(cluster clusterconfig.Cluster) string {
+	if len(cluster.Providers) == 0 {
+		return "registry"
+	}
+	for _, provider := range cluster.Providers {
+		if provider.Kind == "aws" && provider.Account != "" {
+			return fmt.Sprintf("%s-%s-registry", cluster.ID, provider.Account)
+		}
+	}
+	return cluster.ID + "-registry"
+}
+
+// registryRegion returns the object-storage region for the in-cluster
+// zot-registry component, defaulting to the chart's local development region
+// when the cluster config does not include a cloud provider.
+func registryRegion(cluster clusterconfig.Cluster) string {
+	if len(cluster.Providers) == 0 {
+		return "local"
+	}
+	for _, provider := range cluster.Providers {
+		if provider.Kind == "aws" && provider.Region != "" {
+			return provider.Region
+		}
+	}
+	return "local"
 }
 
 // applyRegistryMirror configures platform-components to render explicit image
