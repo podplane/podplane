@@ -5,7 +5,10 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +20,7 @@ import (
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/config"
 	"github.com/podplane/podplane/internal/deps"
+	"github.com/podplane/podplane/internal/execwrap"
 	"github.com/podplane/podplane/internal/health"
 	"github.com/podplane/podplane/internal/kubectl"
 	"github.com/podplane/podplane/internal/local"
@@ -96,6 +100,7 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 		}
 		var stashPath string
 		var cluster *clusterconfig.ClusterConfig
+		hostSetupDone := false
 		if !localStartFollow {
 			kubeContext := kubectl.ContextKey(localClusterID, true)
 			var seedName string
@@ -115,6 +120,8 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 				{Key: "api-live", Name: "kubernetes live", Group: "VM", Success: "live", Expected: 4 * time.Second, Timeout: 2 * time.Minute},
 				{Key: "api-ready", Name: "kubernetes ready", Group: "VM", Success: "ready", Expected: 2 * time.Second, Timeout: 2 * time.Minute},
 				{Key: "kubectl", Name: fmt.Sprintf("kubectl works with context %q", kubeContext), Ready: true, Success: "ready"},
+				{Key: "kubectl-test", Name: "kubectl test", Success: "ready", Expected: 2 * time.Second, Timeout: 30 * time.Second},
+				{Key: "local-git-flux-auth", Name: "local git server auth", Exclude: seedName != seeds.Recommended, Success: "configured", Expected: time.Second, Timeout: 30 * time.Second},
 				{Key: "deploy-ready", Name: "podplane deploy can publish apps to this cluster", Ready: true, Success: "ready"},
 				{Key: "ingress-ready", Name: fmt.Sprintf("deployed app hostnames will resolve under *.%s.localhost", localClusterID), Ready: true, Success: "ready"},
 			}
@@ -138,6 +145,13 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 				if configureErr != nil {
 					return configureErr
 				}
+				if testErr := testLocalKubectl(cluster, progress); testErr != nil {
+					return testErr
+				}
+				if authErr := configureLocalGitServerFluxAuth(cluster, manager, progress); authErr != nil {
+					return authErr
+				}
+				hostSetupDone = true
 				if len(checks) > 0 {
 					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 					defer cancel()
@@ -165,6 +179,14 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 		if cluster == nil {
 			cluster, err = configureLocalKubectl(stashPath, manager, nil)
 			if err != nil {
+				return err
+			}
+		}
+		if !hostSetupDone {
+			if err := testLocalKubectl(cluster, nil); err != nil {
+				return err
+			}
+			if err := configureLocalGitServerFluxAuth(cluster, manager, nil); err != nil {
 				return err
 			}
 		}
@@ -276,6 +298,92 @@ func configureLocalKubectl(stashPath string, manager *local.Local, progress tui.
 		progress.Done("kubectl", fmt.Sprintf("kubectl works with context %q", kubectl.ContextKey(cluster.Cluster.ID, true)), "ready")
 	}
 	return cluster, nil
+}
+
+// testLocalKubectl verifies the configured local kubectl context can reach the
+// cluster API from the host.
+func testLocalKubectl(cluster *clusterconfig.ClusterConfig, progress tui.TaskProgress) error {
+	name := "kubectl test"
+	if progress != nil {
+		progress.Started("kubectl-test", name, "")
+	}
+	kubeContext := kubectl.ContextKey(cluster.Cluster.ID, true)
+	args := append(kubectl.Args(kubeContext, ""), "get", "--raw=/readyz")
+	cmd := execwrap.Command("kubectl", args...)
+	var stderr bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		wrapped := &kubectl.Error{Stage: "test", Err: err, Stderr: strings.TrimSpace(stderr.String())}
+		if progress != nil {
+			progress.Failed("kubectl-test", name, wrapped)
+		}
+		return wrapped
+	}
+	if progress != nil {
+		progress.Done("kubectl-test", name, "ready")
+	}
+	return nil
+}
+
+// configureLocalGitServerFluxAuth applies the local Flux Git CA Secret for
+// recommended seeded clusters that source components from the local Git server.
+func configureLocalGitServerFluxAuth(cluster *clusterconfig.ClusterConfig, manager *local.Local, progress tui.TaskProgress) error {
+	if cluster.Cluster.Seed.Name != seeds.Recommended {
+		return nil
+	}
+	name := "local git server auth"
+	if progress != nil {
+		progress.Started("local-git-flux-auth", name, "")
+	}
+	source := cluster.Cluster.Components.Source
+	if source == nil || source.SecretRef == nil || source.SecretRef.Name == "" {
+		if progress != nil {
+			progress.Skipped("local-git-flux-auth", name, "not needed")
+		}
+		return nil
+	}
+	caPEM, err := os.ReadFile(manager.OIDCCACertPath())
+	if err != nil {
+		wrapped := fmt.Errorf("read local server CA certificate: %w", err)
+		if progress != nil {
+			progress.Failed("local-git-flux-auth", name, wrapped)
+		}
+		return wrapped
+	}
+	manifest, err := json.Marshal(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata": map[string]string{
+			"name":      source.SecretRef.Name,
+			"namespace": "platform-components",
+		},
+		"type": "Opaque",
+		"data": map[string]string{
+			"ca.crt": base64.StdEncoding.EncodeToString(caPEM),
+		},
+	})
+	if err != nil {
+		return err
+	}
+	kubeContext := kubectl.ContextKey(cluster.Cluster.ID, true)
+	args := append(kubectl.Args(kubeContext, ""), "apply", "-f", "-")
+	cmd := execwrap.Command("kubectl", args...)
+	var stderr bytes.Buffer
+	cmd.Stdin = bytes.NewReader(manifest)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		wrapped := &kubectl.Error{Stage: "apply local git server auth", Err: err, Stderr: strings.TrimSpace(stderr.String())}
+		if progress != nil {
+			progress.Failed("local-git-flux-auth", name, wrapped)
+		}
+		return wrapped
+	}
+	if progress != nil {
+		progress.Done("local-git-flux-auth", name, "configured")
+	}
+	return nil
 }
 
 // localStartCheckProgressItems converts component health checks into task
