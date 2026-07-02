@@ -2,6 +2,9 @@ module github.com/podplane/podplane
 
 go 1.26.2
 
+// Temporary fork until https://github.com/johannesboyne/gofakes3/pull/123 lands.
+replace github.com/johannesboyne/gofakes3 => github.com/ryan0x44/gofakes3 v0.0.0-20260702074919-19077ade6ce9
+
 require (
 	github.com/99designs/keyring v1.2.2
 	github.com/aws/aws-sdk-go-v2 v1.41.0
