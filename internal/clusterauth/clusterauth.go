@@ -227,12 +227,10 @@ func NewOIDCHTTPClient(c *config.Config, cluster *clusterconfig.ClusterConfig) (
 	}
 	issuerURL, issuerErr := url.Parse(cluster.Cluster.OIDC.IssuerURL)
 	if issuerErr == nil && strings.EqualFold(issuerURL.Hostname(), "oidc.localhost") {
-		localHTTPSPort := issuerURL.Port()
-		if localHTTPSPort == "19443" {
-			manager := local.NewManager(c, cluster.Cluster.ID)
-			if port, err := manager.LocalServerHTTPSPort(); err == nil && port != "" {
-				localHTTPSPort = port
-			}
+		manager := local.NewManager(c, cluster.Cluster.ID)
+		localHTTPSPort, err := manager.LocalServerHTTPSPort()
+		if err != nil {
+			return nil, err
 		}
 		// Local clusters use a fake OIDC server run by the Podplane CLI at oidc.localhost
 		// Some host resolvers do not treat subdomains of localhost as loopback.

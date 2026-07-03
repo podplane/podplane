@@ -263,7 +263,8 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vault
 	}
 
 	// Create the guest-facing HTTPS listener on a random available port. The
-	// selected port is published through the PID metadata as part of oidc_issuer.
+	// selected host-side port is published through PID metadata as https_port;
+	// local VMs reach it through the stable forwarded port in OIDC issuer URLs.
 	httpsListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", addr, 0))
 	if err != nil {
 		httpListener.Close()
