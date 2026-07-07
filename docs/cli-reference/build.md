@@ -31,6 +31,14 @@ Note: `Containerfile` is the OCI-neutral name for what many tools historically c
 
 If multiple supported templates match, Podplane prompts you to choose one. If no safe template matches, Podplane prints an error and asks you to create a `Containerfile` or `Dockerfile` first.
 
+## ocimage and Docker fallback
+
+Podplane first tries to build with its built-in ocimage support directly. If your `Containerfile` or `Dockerfile` uses syntax ocimage cannot build, such as `RUN` or multi-stage `COPY --from`, Podplane falls back to Docker Buildx when available.
+
+The fallback runs one `docker buildx build --output type=docker,dest=...` build per target platform, then imports the resulting Docker archive into Podplane's local registry cache under the same normalized `apps/` tag. This approach enables support for multi-arch image builds on par with the ocimage approach and avoids leaving temporary images in Docker's local image store.
+
+If Docker or Buildx is not available, Podplane prints the unsupported instruction with file and line context and asks you to either simplify the build file or install Docker with Buildx support.
+
 ## Options
 
 | Flag | Description |
@@ -40,6 +48,7 @@ If multiple supported templates match, Podplane prompts you to choose one. If no
 | `--platform string` | Target platform(s), comma-separated. Defaults to the local Podplane VM architecture. |
 | `--build-arg KEY=VALUE` | Set build-time variables. May be specified multiple times. |
 | `--label KEY=VALUE` | Set image labels. May be specified multiple times. |
+| `--docker[=PATH\|false]` | Use Docker Buildx fallback, optionally with a Docker binary path. Defaults to `docker`; use `--docker=false` to disable fallback. |
 | `--pull` | Always attempt to pull base images instead of using the local OCI store first |
 | `--sbom[=true\|false]` | Generate an SBOM attestation with syft |
 

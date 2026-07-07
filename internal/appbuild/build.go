@@ -43,6 +43,7 @@ type Options struct {
 	Labels              []string
 	StoreRoot           string
 	DefaultRegistryHost string
+	Docker              string
 	Pull                bool
 	SBOM                bool
 	ChooseTemplate      TemplateChooser
@@ -95,7 +96,7 @@ func Build(ctx context.Context, opts Options) (*Result, error) {
 	if opts.Platform != "" {
 		platforms = []string{opts.Platform}
 	}
-	res, err := ocibuild.Build(ctx, ocibuild.Options{ContextDir: ctxDir, File: opts.File, Tags: storeTags, Platforms: platforms, BuildArgs: buildArgs, Labels: labels, StoreRoot: opts.StoreRoot, Pull: opts.Pull, SBOM: opts.SBOM, Progress: opts.Progress})
+	res, err := ocibuild.Build(ctx, ocibuild.Options{ContextDir: ctxDir, File: opts.File, Tags: storeTags, Platforms: platforms, BuildArgs: buildArgs, Labels: labels, StoreRoot: opts.StoreRoot, Pull: opts.Pull, SBOM: opts.SBOM, Docker: opts.Docker, Progress: opts.Progress})
 	if err != nil {
 		return nil, err
 	}

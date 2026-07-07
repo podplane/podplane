@@ -7,6 +7,7 @@ package cmd
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/podplane/ocimage/pkg/initfile"
@@ -24,6 +25,7 @@ type podplaneBuildFlags struct {
 	platform              string
 	buildArgs             []string
 	labels                []string
+	docker                string
 	pull                  bool
 	sbom                  string
 	unsupportedTarget     string
@@ -40,6 +42,7 @@ func newBuildCmd(c *config.Config) *cobra.Command {
 		Short: "Build an OCI container image",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			docker := normalizeDockerFlag(flags.docker)
 			if flags.unsupportedTarget != "" {
 				return fmt.Errorf("--target is not supported because podplane build does not support multi-stage builds")
 			}
@@ -65,7 +68,7 @@ func newBuildCmd(c *config.Config) *cobra.Command {
 			progress := func(msg string) {
 				fmt.Fprintf(cmd.OutOrStdout(), "=> %s\n", msg)
 			}
-			res, err := appbuild.Build(cmd.Context(), appbuild.Options{ContextDir: ctxDir, File: flags.file, Tags: flags.tags, Platform: flags.platform, Arch: c.Arch(), BuildArgs: flags.buildArgs, Labels: flags.labels, StoreRoot: storeRoot, DefaultRegistryHost: registryHost, Pull: flags.pull, SBOM: sbom, ChooseTemplate: selectBuildTemplate, Progress: progress})
+			res, err := appbuild.Build(cmd.Context(), appbuild.Options{ContextDir: ctxDir, File: flags.file, Tags: flags.tags, Platform: flags.platform, Arch: c.Arch(), BuildArgs: flags.buildArgs, Labels: flags.labels, StoreRoot: storeRoot, DefaultRegistryHost: registryHost, Docker: docker, Pull: flags.pull, SBOM: sbom, ChooseTemplate: selectBuildTemplate, Progress: progress})
 			if err != nil {
 				return err
 			}
@@ -78,6 +81,8 @@ func newBuildCmd(c *config.Config) *cobra.Command {
 	cmd.Flags().StringVar(&flags.platform, "platform", "", "target platform(s), comma-separated")
 	cmd.Flags().StringArrayVar(&flags.buildArgs, "build-arg", nil, "set build-time variables")
 	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "set image labels")
+	cmd.Flags().StringVar(&flags.docker, "docker", "docker", "use Docker Buildx fallback, optionally with a Docker binary path; use --docker=false to disable")
+	cmd.Flags().Lookup("docker").NoOptDefVal = "docker"
 	cmd.Flags().BoolVar(&flags.pull, "pull", false, "always attempt to pull base images instead of using the local OCI store first")
 	cmd.Flags().StringVar(&flags.sbom, "sbom", "false", "generate an SBOM attestation with syft")
 	cmd.Flags().Lookup("sbom").NoOptDefVal = "true"
@@ -86,6 +91,18 @@ func newBuildCmd(c *config.Config) *cobra.Command {
 	cmd.Flags().StringVar(&flags.unsupportedProvenance, "provenance", "", "unsupported")
 	cmd.Flags().StringArrayVarP(&flags.unsupportedOutput, "output", "o", nil, "unsupported")
 	return cmd
+}
+
+// normalizeDockerFlag converts the build --docker flag into an ocimage Docker option.
+func normalizeDockerFlag(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "false", "none", "no", "off":
+		return ""
+	case "true":
+		return "docker"
+	default:
+		return value
+	}
 }
 
 // selectBuildTemplate prompts the user to choose a detected build template.

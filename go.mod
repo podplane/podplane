@@ -25,7 +25,7 @@ require (
 	github.com/lima-vm/go-qcow2reader v0.7.1
 	github.com/netsy-dev/netsy v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/podplane/ocimage v1.0.3
+	github.com/podplane/ocimage v1.0.4
 	github.com/puidv7/puidv7-go v1.0.0
 	github.com/shirou/gopsutil/v4 v4.26.4
 	github.com/spf13/cobra v1.10.2
