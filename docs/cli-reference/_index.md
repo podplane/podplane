@@ -34,6 +34,7 @@ These options are available on all commands:
 
 ## App Commands
 
+- [podplane build](build.md) – Build a container image for your local Podplane VM.
 - [podplane push](push.md) – Push a local image to the cluster registry.
 - [podplane deploy](deploy.md) – Deploy an app using a template.
 - [podplane remove](remove.md) – Remove a previously deployed app.

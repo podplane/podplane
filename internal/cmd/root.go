@@ -115,6 +115,9 @@ func NewRootCmd(c *config.Config) *cobra.Command {
 	rootCmd.AddCommand(logoutCmd)
 
 	// Add subcommands to Dev group
+	buildCmd := newBuildCmd(c)
+	buildCmd.GroupID = "dev"
+	rootCmd.AddCommand(buildCmd)
 	pushCmd := newPushCmd(c)
 	pushCmd.GroupID = "dev"
 	rootCmd.AddCommand(pushCmd)

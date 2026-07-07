@@ -356,7 +356,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 			"KUBE_API_ETCD_SERVERS":    "https://127.0.0.1:2378",
 			"TELEMETRY_LOG_SERVICES":   "first-boot-env,cron,ssh,netsy,nstance-agent,nstance-recv-watch,containerd,kube-apiserver,kube-controller-manager,kube-scheduler,kubelet,zot",
 			"REGISTRY_ENABLED":         "true",
-			"REGISTRY_HOSTNAME":        localRegistryHostname(clusterID),
+			"REGISTRY_HOSTNAME":        LocalRegistryHostname(clusterID),
 			"REGISTRY_BUCKET":          "registry",
 		},
 		Nonce: nstanceBootstrap.RegistrationNonceJWT,
@@ -638,7 +638,7 @@ func (m *Local) WriteLocalClusterConfig(clusterID, oidcIssuerURL, oidcCACertPath
       },
 `, componentsSource.URL, refKey, refValue, secretRefBlock)
 	}
-	registryHostname := localRegistryHostname(clusterID)
+	registryHostname := LocalRegistryHostname(clusterID)
 	vaultAddress, err := m.localVaultServerURLForConfig(clusterID)
 	if err != nil {
 		return "", err
@@ -772,7 +772,8 @@ func localClusterComponentsSourceRef(ref deps.ComponentsSourceRef, version strin
 	return clusterRef
 }
 
-func localRegistryHostname(clusterID string) string {
+// LocalRegistryHostname returns the VM-local registry hostname for a local cluster.
+func LocalRegistryHostname(clusterID string) string {
 	return fmt.Sprintf("%s-registry.local", clusterID)
 }
 
