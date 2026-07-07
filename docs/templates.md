@@ -43,7 +43,7 @@ The `web` template deploys a web application with automatic TLS and ingress rout
 - A cert-manager Certificate for pod-internal mTLS
 - A BackendTLSPolicy ensuring encrypted gateway-to-service traffic
 
-Your app container serves plain HTTP on port 80 by default - the Caddy sidecar handles all TLS. No TLS configuration is needed in your app. Use `--set app.port=<port>` if your image listens on a different plain HTTP port.
+Your app container serves plain HTTP on port 8080 by default - the Caddy sidecar handles all TLS. No TLS configuration is needed in your app. Use `--set app.port=<port>` if your image listens on a different plain HTTP port.
 
 ### Template values
 
@@ -58,7 +58,7 @@ Template-specific values can be set with `--set` e.g.:
 | `images.app` | `ghcr.io/podplane/hello:latest` | App container image default; `--image` maps here |
 | `images.caddy` | `docker.io/library/caddy:2` | Caddy sidecar image |
 | `app.env` | `{}` | Non-secret environment variables for the app container; `--env` maps here |
-| `app.port` | `80` | Plain HTTP port exposed by the app container |
+| `app.port` | `8080` | Plain HTTP port exposed by the app container |
 | `route.hostname` | `""` | External hostname for routing; `--hostname` maps here |
 | `route.path` | `/` | URL path prefix for routing; `--path` maps here |
 | `route.port` | `443` | External HTTPS port for the browser-facing route URL |
