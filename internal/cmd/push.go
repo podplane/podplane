@@ -44,6 +44,7 @@ func newPushCmd(c *config.Config) *cobra.Command {
 				Context:    pushContext,
 				Kubeconfig: pushKubeconfig,
 				Stderr:     os.Stderr,
+				Verbose:    flagVerbose,
 				Confirm: func(message string) (bool, error) {
 					return tui.Confirm(message, pushApprove)
 				},

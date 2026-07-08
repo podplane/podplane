@@ -31,6 +31,7 @@ type Options struct {
 	Context    string
 	Kubeconfig string
 	Stderr     io.Writer
+	Verbose    bool
 	Confirm    func(string) (bool, error)
 }
 
@@ -80,11 +81,14 @@ func Push(ctx context.Context, opts Options) (string, error) {
 	if err := ensureStoreImage(ctx, st, source, opts); err != nil {
 		return "", err
 	}
-	localPort, stopForward, err := startRegistryPortForward(ctx, opts.Context, opts.Kubeconfig, opts.Stderr)
+	_, _ = fmt.Fprintln(opts.Stderr, "Connecting to cluster registry...")
+	localPort, stopForward, err := startRegistryPortForward(ctx, opts.Context, opts.Kubeconfig, opts.Stderr, opts.Verbose)
 	if err != nil {
 		return "", err
 	}
 	defer stopForward()
+	_, _ = fmt.Fprintln(opts.Stderr, "Connected to cluster registry.")
+	_, _ = fmt.Fprintf(opts.Stderr, "Pushing %s...\n", sourceDisplay(source))
 
 	pfRef, err := name.NewTag("127.0.0.1:"+localPort+"/"+remoteRef.Context().RepositoryStr()+":"+remoteRef.Identifier(), name.Insecure)
 	if err != nil {

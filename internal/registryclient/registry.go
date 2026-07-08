@@ -53,7 +53,7 @@ func ensureZotRegistryReady(kubeContext, kubeconfig string) error {
 }
 
 // startRegistryPortForward opens a local port-forward to the zot-registry Service.
-func startRegistryPortForward(ctx context.Context, kubeContext, kubeconfig string, stderr io.Writer) (string, func(), error) {
+func startRegistryPortForward(ctx context.Context, kubeContext, kubeconfig string, output io.Writer, verbose bool) (string, func(), error) {
 	port, err := freeLocalPort()
 	if err != nil {
 		return "", nil, err
@@ -78,7 +78,7 @@ func startRegistryPortForward(ctx context.Context, kubeContext, kubeconfig strin
 		_ = cmd.Wait()
 	}
 	ready := make(chan error, 1)
-	go waitForPortForwardReady([]io.Reader{pfStdout, pfStderr}, stderr, ready)
+	go waitForPortForwardReady([]io.Reader{pfStdout, pfStderr}, output, verbose, ready)
 	select {
 	case err := <-ready:
 		if err != nil {
@@ -96,11 +96,14 @@ func startRegistryPortForward(ctx context.Context, kubeContext, kubeconfig strin
 }
 
 // waitForPortForwardReady watches kubectl port-forward output until it reports
-// a ready forwarding line or all output streams close before readiness.
-func waitForPortForwardReady(readers []io.Reader, output io.Writer, ready chan<- error) {
+// a ready forwarding line or all output streams close before readiness. Routine
+// kubectl port-forward chatter is suppressed by default, while unexpected lines
+// are still surfaced and all lines are retained for startup failure diagnostics.
+func waitForPortForwardReady(readers []io.Reader, output io.Writer, verbose bool, ready chan<- error) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	reported := false
+	var transcript bytes.Buffer
 	report := func(err error) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -108,6 +111,11 @@ func waitForPortForwardReady(readers []io.Reader, output io.Writer, ready chan<-
 			return
 		}
 		reported = true
+		if err != nil {
+			if lines := strings.TrimSpace(transcript.String()); lines != "" {
+				err = fmt.Errorf("%w:\n%s", err, lines)
+			}
+		}
 		ready <- err
 	}
 
@@ -118,7 +126,10 @@ func waitForPortForwardReady(readers []io.Reader, output io.Writer, ready chan<-
 			scanner := bufio.NewScanner(reader)
 			for scanner.Scan() {
 				line := scanner.Text()
-				if output != nil {
+				mu.Lock()
+				_, _ = fmt.Fprintln(&transcript, line)
+				mu.Unlock()
+				if output != nil && (verbose || (!strings.Contains(line, "Forwarding from") && !strings.Contains(line, "Handling connection for"))) {
 					_, _ = fmt.Fprintln(output, line)
 				}
 				if strings.Contains(line, "Forwarding from") {

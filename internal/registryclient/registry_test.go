@@ -72,7 +72,7 @@ sleep 30
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var output bytes.Buffer
-	port, stop, err := startRegistryPortForward(ctx, "", "", &output)
+	port, stop, err := startRegistryPortForward(ctx, "", "", &output, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,8 +80,8 @@ sleep 30
 	if port == "" {
 		t.Fatal("startRegistryPortForward() returned an empty port")
 	}
-	if !strings.Contains(output.String(), "Forwarding from") {
-		t.Fatalf("forward output = %q, want readiness line", output.String())
+	if output.String() != "" {
+		t.Fatalf("forward output = %q, want routine readiness line suppressed", output.String())
 	}
 }
 
@@ -90,12 +90,55 @@ sleep 30
 func TestWaitForPortForwardReadyReadsStdout(t *testing.T) {
 	ready := make(chan error, 1)
 	var output bytes.Buffer
-	waitForPortForwardReady([]io.Reader{strings.NewReader("Forwarding from 127.0.0.1:12345 -> 5000\n"), strings.NewReader("")}, &output, ready)
+	waitForPortForwardReady([]io.Reader{strings.NewReader("Forwarding from 127.0.0.1:12345 -> 5000\n"), strings.NewReader("")}, &output, false, ready)
+	if err := <-ready; err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "" {
+		t.Fatalf("output = %q, want forwarded readiness line suppressed", output.String())
+	}
+}
+
+// TestWaitForPortForwardReadySurfacesUnexpectedOutput verifies non-routine
+// port-forward lines are still printed during normal push output.
+func TestWaitForPortForwardReadySurfacesUnexpectedOutput(t *testing.T) {
+	ready := make(chan error, 1)
+	var output bytes.Buffer
+	waitForPortForwardReady([]io.Reader{strings.NewReader("error handling connection\nForwarding from 127.0.0.1:12345 -> 5000\nHandling connection for 12345\n"), strings.NewReader("")}, &output, false, ready)
+	if err := <-ready; err != nil {
+		t.Fatal(err)
+	}
+	if got := output.String(); got != "error handling connection\n" {
+		t.Fatalf("output = %q, want only unexpected line", got)
+	}
+}
+
+// TestWaitForPortForwardReadyVerboseIncludesRoutineOutput verifies verbose mode
+// preserves kubectl's normal port-forward status lines.
+func TestWaitForPortForwardReadyVerboseIncludesRoutineOutput(t *testing.T) {
+	ready := make(chan error, 1)
+	var output bytes.Buffer
+	waitForPortForwardReady([]io.Reader{strings.NewReader("Forwarding from 127.0.0.1:12345 -> 5000\n"), strings.NewReader("")}, &output, true, ready)
 	if err := <-ready; err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "Forwarding from") {
-		t.Fatalf("output = %q, want forwarded readiness line", output.String())
+		t.Fatalf("output = %q, want verbose port-forward lines", output.String())
+	}
+}
+
+// TestWaitForPortForwardReadyIncludesOutputInStartupFailure verifies buffered
+// kubectl output is retained when the port-forward exits before readiness.
+func TestWaitForPortForwardReadyIncludesOutputInStartupFailure(t *testing.T) {
+	ready := make(chan error, 1)
+	var output bytes.Buffer
+	waitForPortForwardReady([]io.Reader{strings.NewReader("unable to listen on port\n"), strings.NewReader("")}, &output, false, ready)
+	err := <-ready
+	if err == nil {
+		t.Fatal("waitForPortForwardReady() succeeded, want startup failure")
+	}
+	if !strings.Contains(err.Error(), "registry port-forward exited before becoming ready") || !strings.Contains(err.Error(), "unable to listen on port") {
+		t.Fatalf("error = %q, want startup failure with kubectl output", err)
 	}
 }
 
