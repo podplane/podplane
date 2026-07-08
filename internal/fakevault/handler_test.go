@@ -234,6 +234,60 @@ func TestHandlerWriteListAndDeleteSecret(t *testing.T) {
 	}
 }
 
+// TestHandlerWithFileStoreWriteReadAndList verifies the HTTP handler works with
+// the encrypted file-backed fakevault store used by the local server.
+func TestHandlerWithFileStoreWriteReadAndList(t *testing.T) {
+	store := NewFileStore(&testKeyring{}, t.TempDir())
+	handler := NewHandler(store, nil)
+	token := loginToken(t, handler, "dev")
+
+	writeReq := httptest.NewRequest(http.MethodPut, "/vault/dev/v1/secret/data/apps/app/api", bytes.NewBufferString(`{"data":{"token":"secret"}}`))
+	writeReq.Header.Set("X-Vault-Token", token)
+	writeRec := httptest.NewRecorder()
+	handler.ServeHTTP(writeRec, writeReq)
+	if writeRec.Code != http.StatusOK {
+		t.Fatalf("write status = %d, body = %s", writeRec.Code, writeRec.Body.String())
+	}
+
+	readReq := httptest.NewRequest(http.MethodGet, "/vault/dev/v1/secret/data/apps/app/api", nil)
+	readReq.Header.Set("X-Vault-Token", token)
+	readRec := httptest.NewRecorder()
+	handler.ServeHTTP(readRec, readReq)
+	if readRec.Code != http.StatusOK {
+		t.Fatalf("read status = %d, body = %s", readRec.Code, readRec.Body.String())
+	}
+	var readResp struct {
+		Data struct {
+			Data map[string]string `json:"data"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(readRec.Body.Bytes(), &readResp); err != nil {
+		t.Fatalf("decode read response: %v", err)
+	}
+	if got, want := readResp.Data.Data["token"], "secret"; got != want {
+		t.Fatalf("token = %q, want %q", got, want)
+	}
+
+	listReq := httptest.NewRequest(methodList, "/vault/dev/v1/secret/metadata/apps/app", nil)
+	listReq.Header.Set("X-Vault-Token", token)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body = %s", listRec.Code, listRec.Body.String())
+	}
+	var listResp struct {
+		Data struct {
+			Keys []string `json:"keys"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listResp.Data.Keys) != 1 || listResp.Data.Keys[0] != "api" {
+		t.Fatalf("list keys = %#v, want [api]", listResp.Data.Keys)
+	}
+}
+
 // TestHandlerAcceptsBaoWriteBody verifies flat bao write payloads are accepted.
 func TestHandlerAcceptsBaoWriteBody(t *testing.T) {
 	store := &memoryStore{}

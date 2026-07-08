@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -90,7 +91,7 @@ func newLocalServerCmd(c *config.Config) *cobra.Command {
 		}()
 
 		// Start a local server.
-		vaultStore := fakevault.NewKeyringStore(c)
+		vaultStore := fakevault.NewFileStore(c, filepath.Join(c.DataDirectory(), "local"))
 		server, err := local.NewServer(pidFile, c, serverAddr, 0, vaultStore)
 		if err != nil {
 			return fmt.Errorf("failed to start local server: %w", err)

@@ -3,6 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package fakevault exposes a small local-only Vault/OpenBao-compatible API
-// backed by the Podplane keyring, enabling the use of Secrets Store CSI
-// Driver in local VMs.
+// for local VMs. It stores encrypted secret files per local cluster, protected
+// by one cluster-scoped key in the Podplane/system keyring.
 package fakevault
