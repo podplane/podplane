@@ -44,8 +44,8 @@ func (l *Local) UserdataPath(clusterID string) string {
 
 // LocalServerURL returns the HTTP URL to the local server.
 func (l *Local) LocalServerURL() (string, error) {
-	if l.webserverPIDFile.PID() == 0 {
-		return "", fmt.Errorf("local server PID not found")
+	if err := l.ensureLocalServerPIDFile(); err != nil {
+		return "", err
 	}
 	host := l.webserverPIDFile.GetData("host")
 	port := l.webserverPIDFile.GetData("http_port")
@@ -57,8 +57,8 @@ func (l *Local) LocalServerURL() (string, error) {
 
 // LocalServerPort returns the HTTP port of the local server.
 func (l *Local) LocalServerPort() (string, error) {
-	if l.webserverPIDFile.PID() == 0 {
-		return "", fmt.Errorf("local server PID not found")
+	if err := l.ensureLocalServerPIDFile(); err != nil {
+		return "", err
 	}
 	port := l.webserverPIDFile.GetData("http_port")
 	if port == "" {
@@ -69,14 +69,31 @@ func (l *Local) LocalServerPort() (string, error) {
 
 // LocalServerHTTPSPort returns the HTTPS port of the local server.
 func (l *Local) LocalServerHTTPSPort() (string, error) {
-	if l.webserverPIDFile.PID() == 0 {
-		return "", fmt.Errorf("local server PID not found")
+	if err := l.ensureLocalServerPIDFile(); err != nil {
+		return "", err
 	}
 	port := l.webserverPIDFile.GetData("https_port")
 	if port == "" {
 		return "", fmt.Errorf("local server PID file missing HTTPS port")
 	}
 	return port, nil
+}
+
+// ensureLocalServerPIDFile loads the local server PID file when this manager
+// was created outside the local start/server path.
+func (l *Local) ensureLocalServerPIDFile() error {
+	if l.webserverPIDFile.PID() != 0 {
+		return nil
+	}
+	pidFile, err := ServerPIDFile(l.runtimeDir)
+	if err != nil {
+		return fmt.Errorf("load local server PID file: %w", err)
+	}
+	if pidFile.PID() == 0 {
+		return fmt.Errorf("local server PID not found")
+	}
+	l.webserverPIDFile = pidFile
+	return nil
 }
 
 // LocalIngressURL returns the browser-facing local ingress proxy URL for this
