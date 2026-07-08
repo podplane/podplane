@@ -33,7 +33,7 @@ func newLocalSyncCmd(c *config.Config) *cobra.Command {
 		// Check the required rsync version is installed.
 		// Note: chown support was added starting from version 3.1.0.
 		if err := execwrap.Installed([]string{"rsync"}); err != nil {
-			return fmt.Errorf("Error checking for runtime dependencies: %w", err)
+			return fmt.Errorf("error checking for runtime dependencies: %w", err)
 		}
 
 		// Ensure we have exactly one source and one destination path.
@@ -45,7 +45,7 @@ func newLocalSyncCmd(c *config.Config) *cobra.Command {
 
 		manager := local.NewManager(c, localClusterID)
 		if err := manager.Sync(fromPath, toPath, localStartChown, localSyncExcludes); err != nil {
-			return fmt.Errorf("Failed to run rsync: %w", err)
+			return fmt.Errorf("failed to run rsync: %w", err)
 		}
 		return nil
 	}

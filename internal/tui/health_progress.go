@@ -45,7 +45,7 @@ func RunHealthProgress(opts HealthProgressOptions, checks []health.Check) error 
 		return err
 	}
 	if opts.ShowTiming && opts.SuccessMessage != "" {
-		fmt.Fprintf(os.Stdout, "✓ %s in %s\n", opts.SuccessMessage, formatDuration(poller.elapsed()))
+		_, _ = fmt.Fprintf(os.Stdout, "✓ %s in %s\n", opts.SuccessMessage, formatDuration(poller.elapsed()))
 	}
 	return nil
 }

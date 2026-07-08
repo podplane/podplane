@@ -129,7 +129,7 @@ func (m *Manager) cacheLocalTemplateChart(chart TemplateChart, manifestPath stri
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 	if progress != nil {
 		progress(DownloadEvent{Type: DownloadEventStarted, Name: chart.Name})
 	}

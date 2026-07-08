@@ -134,7 +134,7 @@ func Logout(c *config.Config, stdout io.Writer, clusterID string, local bool) er
 		subs = append(subs, oidcserver.LocalSub)
 	}
 	if len(entries) == 0 && !local {
-		fmt.Fprintf(stdout, "No cached credentials for cluster %q\n", clusterID)
+		_, _ = fmt.Fprintf(stdout, "No cached credentials for cluster %q\n", clusterID)
 	}
 	for _, e := range entries {
 		subs = append(subs, e.Sub)
@@ -145,7 +145,7 @@ func Logout(c *config.Config, stdout io.Writer, clusterID string, local bool) er
 		if user == "" {
 			user = e.Sub
 		}
-		fmt.Fprintf(stdout, "Cleared credentials for %s on cluster %s\n", user, e.ClusterID)
+		_, _ = fmt.Fprintf(stdout, "Cleared credentials for %s on cluster %s\n", user, e.ClusterID)
 	}
 	if local {
 		if err := c.AuthDelete(oidcserver.LocalSub, clusterID, true); err != nil {
@@ -155,7 +155,7 @@ func Logout(c *config.Config, stdout io.Writer, clusterID string, local bool) er
 	if err := kubectl.DeleteClusterAccess(stdout, clusterID, subs, local); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "Cleared kubectl access for cluster %q\n", clusterID)
+	_, _ = fmt.Fprintf(stdout, "Cleared kubectl access for cluster %q\n", clusterID)
 	return nil
 }
 

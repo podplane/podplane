@@ -187,7 +187,7 @@ func (m downloadProgressModel) View() string {
 	}
 
 	current, total := m.overallProgress()
-	b.WriteString(fmt.Sprintf("Overall  %s  %s\n\n", renderBar(current, total, downloadProgressBarWidth), renderBytesProgress(current, total)))
+	fmt.Fprintf(&b, "Overall  %s  %s\n\n", renderBar(current, total, downloadProgressBarWidth), renderBytesProgress(current, total))
 
 	visibleItems, hiddenItems := m.visibleItems()
 	for _, item := range visibleItems {
@@ -412,20 +412,20 @@ func runTextDownloadProgress(run func(func(deps.DownloadEvent)) error) error {
 		switch event.Type {
 		case deps.DownloadEventStatus:
 			if event.Message != "" {
-				fmt.Fprintln(os.Stdout, event.Message)
+				_, _ = fmt.Fprintln(os.Stdout, event.Message)
 			}
 		case deps.DownloadEventCached:
 			name := event.Name
 			if event.Path != "" {
 				name = filepath.Base(event.Path)
 			}
-			fmt.Fprintf(os.Stdout, "Found %s in cache.\n", name)
+			_, _ = fmt.Fprintf(os.Stdout, "Found %s in cache.\n", name)
 		case deps.DownloadEventStarted:
-			fmt.Fprintf(os.Stdout, "Downloading %s...\n", event.Name)
+			_, _ = fmt.Fprintf(os.Stdout, "Downloading %s...\n", event.Name)
 		case deps.DownloadEventDone:
-			fmt.Fprintf(os.Stdout, "Downloaded %s.\n", event.Name)
+			_, _ = fmt.Fprintf(os.Stdout, "Downloaded %s.\n", event.Name)
 		case deps.DownloadEventFailed:
-			fmt.Fprintf(os.Stdout, "Failed %s: %v\n", event.Name, event.Err)
+			_, _ = fmt.Fprintf(os.Stdout, "Failed %s: %v\n", event.Name, event.Err)
 		}
 	})
 }

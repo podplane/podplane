@@ -33,7 +33,7 @@ func TestFindFreePortFallsBackWhenPreferredPortIsBusy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	busy := ln.Addr().(*net.TCPAddr).Port
 
 	got, err := findFreePort("127.0.0.1", busy, nil)

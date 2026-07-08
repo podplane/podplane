@@ -115,7 +115,7 @@ func loadSeedFile(ctx context.Context, seed string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("download Podplane seed file %s: %w", seed, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("download Podplane seed file %s: HTTP %s", seed, resp.Status)
 	}
@@ -159,7 +159,7 @@ func interpolatePlatformComponents(records []*datafile.Record, values map[string
 		records[i].Value = buf.Bytes()
 		return nil
 	}
-	return fmt.Errorf("Podplane seed file does not contain the platform-components HelmRelease at %s", platformComponentsHelmReleaseKey)
+	return fmt.Errorf("podplane seed file does not contain the platform-components HelmRelease at %s", platformComponentsHelmReleaseKey)
 }
 
 // rewriteSeedImages prefixes JSON image fields with the configured registry
@@ -280,7 +280,7 @@ func interpolateComponentsSource(records []*datafile.Record, source *clusterconf
 		records[i].Value = buf.Bytes()
 		return nil
 	}
-	return fmt.Errorf("Podplane seed file does not contain the podplane-components GitRepository at %s", podplaneComponentsGitKey)
+	return fmt.Errorf("podplane seed file does not contain the podplane-components GitRepository at %s", podplaneComponentsGitKey)
 }
 
 // ensureMap returns the existing map value for key or creates and stores a new

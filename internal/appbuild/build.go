@@ -6,7 +6,6 @@ package appbuild
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -125,7 +124,7 @@ func EnsureBuildFile(ctxDir string, file string, choose TemplateChooser) ([]stri
 		}
 	}
 	if len(selfContained) == 0 {
-		return nil, "", errors.New(NoBuildFileError)
+		return nil, "", fmt.Errorf("%s", NoBuildFileError)
 	}
 	match := selfContained[0]
 	if len(selfContained) > 1 {

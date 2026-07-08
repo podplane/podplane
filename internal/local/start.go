@@ -156,7 +156,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	// Get URLs - note that all errors after the first are the same path.
 	depsServerURL, err := m.DepsServerURL(hostMachineAddr, "")
 	if err != nil {
-		return "", fmt.Errorf("Unexpectedly failed to get URL of server for local clusters (maybe local server isn't running yet?): %w", err)
+		return "", fmt.Errorf("unexpectedly failed to get URL of server for local clusters (maybe local server isn't running yet?): %w", err)
 	}
 	oidcIssuerURL, err := m.OIDCServerURL(hostMachineAddr)
 	if err != nil {

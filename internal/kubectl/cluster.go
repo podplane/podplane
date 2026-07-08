@@ -59,10 +59,10 @@ func SetCluster(stdout io.Writer, clusterID string, kubeApiUrl string, caCertPat
 	} else {
 		outString := strings.TrimSpace(outBuf.String())
 		if outString == serverURL && (!local || tlsServerName == "") {
-			fmt.Fprintf(stdout, "Cluster already exist for %s\n", key)
+			_, _ = fmt.Fprintf(stdout, "Cluster already exist for %s\n", key)
 			return nil
 		} else if outString != "" && !local && !strings.Contains(outString, "podplane") {
-			fmt.Fprintf(stdout, "Skipping configuration of kubectl cluster '%s' due to unknown conflict.\n", key)
+			_, _ = fmt.Fprintf(stdout, "Skipping configuration of kubectl cluster '%s' due to unknown conflict.\n", key)
 			return nil
 		}
 	}

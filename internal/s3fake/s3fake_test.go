@@ -75,7 +75,7 @@ func TestBucketHandlerHeadIncludesLastModifiedForFilesystemFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadObject: %v", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
 	}
@@ -92,7 +92,7 @@ func getListBucketResult(t *testing.T, url string) listBucketResult {
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
 	}

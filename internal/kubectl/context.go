@@ -51,10 +51,10 @@ func SetContext(stdout io.Writer, sub string, clusterID string, local bool) erro
 		err := json.Unmarshal([]byte(outString), &outJson)
 		if err == nil {
 			if outJson.Cluster != clusterKey {
-				fmt.Fprintf(stdout, "Skipping configuration of kubectl context '%s' due to cluster mismatch.\n", key)
+				_, _ = fmt.Fprintf(stdout, "Skipping configuration of kubectl context '%s' due to cluster mismatch.\n", key)
 				return nil
 			} else if outJson.User == credentialsKey {
-				fmt.Fprintf(stdout, "Context already exist for %s\n", key)
+				_, _ = fmt.Fprintf(stdout, "Context already exist for %s\n", key)
 				return nil
 			}
 		}

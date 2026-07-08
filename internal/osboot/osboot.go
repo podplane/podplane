@@ -113,7 +113,7 @@ func extractFiles(imagePath string, files []imageFile) error {
 	if err != nil {
 		return fmt.Errorf("open qcow2 image %s: %w", imagePath, err)
 	}
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 
 	img, err := qcow2reader.Open(raw)
 	if err != nil {
@@ -125,7 +125,7 @@ func extractFiles(imagePath string, files []imageFile) error {
 		_ = storage.Close()
 		return fmt.Errorf("open disk image %s: %w", imagePath, err)
 	}
-	defer disk.Close()
+	defer func() { _ = disk.Close() }()
 
 	filesystems := map[int]fs.ReadFileFS{}
 	for _, file := range files {
@@ -187,7 +187,7 @@ func extractFile(filesystem fs.ReadFileFS, file imageFile) error {
 		return fmt.Errorf("create boot cache directory: %w", err)
 	}
 	tmpPath := file.Destination + ".tmp"
-	defer os.Remove(tmpPath)
+	defer func() { _ = os.Remove(tmpPath) }()
 	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 		return fmt.Errorf("write boot artifact %s: %w", tmpPath, err)
 	}

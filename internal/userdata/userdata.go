@@ -234,7 +234,7 @@ func validateServiceList(fl validator.FieldLevel) bool {
 // Validate checks the TemplateVars are populated correctly enough to render.
 func (v *TemplateVars) Validate() error {
 	if v.Manifest == nil {
-		return fmt.Errorf("Manifest failed validation on 'required' validator")
+		return fmt.Errorf("manifest failed validation on 'required' validator")
 	}
 	if err := validateCanonicalValues(v); err != nil {
 		return err

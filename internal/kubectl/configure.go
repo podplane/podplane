@@ -25,7 +25,7 @@ func ConfigureClusterAccess(stdout io.Writer, clusterID, serverURL, sub, caCertP
 		return fmt.Errorf("kubectl configure: user sub is required")
 	}
 
-	fmt.Fprintf(stdout, "Configuring kubectl...\n")
+	_, _ = fmt.Fprintf(stdout, "Configuring kubectl...\n")
 
 	// Buffer kubectl's own output (e.g. "User ... set.") so it stays
 	// quiet on success but is available for debugging on failure.

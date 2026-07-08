@@ -64,7 +64,7 @@ func Download(ctx context.Context, url string, path string, algo string, checksu
 	if err != nil {
 		return "", fmt.Errorf("failed to download file %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Check server response
 	if resp.StatusCode != http.StatusOK {

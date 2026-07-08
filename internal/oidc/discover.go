@@ -33,7 +33,7 @@ func Discover(ctx context.Context, client *http.Client, issuerURL string) (*Disc
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("discovery %s: HTTP %d: %s", url, resp.StatusCode, string(body))

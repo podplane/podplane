@@ -81,12 +81,12 @@ func readValuesSchemaArchive(chartPath string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read template values schema: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return nil, fmt.Errorf("read template values schema archive: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
 	for {
 		header, err := tr.Next()

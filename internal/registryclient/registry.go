@@ -140,7 +140,7 @@ func freeLocalPort() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("allocate local port: %w", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	_, port, err := net.SplitHostPort(listener.Addr().String())
 	if err != nil {
 		return "", err

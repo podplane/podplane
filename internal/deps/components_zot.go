@@ -426,7 +426,7 @@ func existingBlobComplete(path, digest string, size int64) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return false, err
@@ -515,7 +515,7 @@ func writeDigestBlob(repoDir, digest string, body []byte) error {
 
 // writeReader atomically writes a streamed blob to disk.
 func writeReader(path string, r io.ReadCloser) error {
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	tmp := path + ".tmp"
 	f, err := os.Create(tmp)
 	if err != nil {

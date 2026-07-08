@@ -40,7 +40,7 @@ func newLocalServerCmd(c *config.Config) *cobra.Command {
 		// load pid file
 		pidFile, err := local.ServerPIDFile(c.RuntimeDirectory())
 		if err != nil {
-			return fmt.Errorf("Failed to load local server PID file: %w", err)
+			return fmt.Errorf("failed to load local server PID file: %w", err)
 		}
 
 		// check if exit flag is set
@@ -56,7 +56,7 @@ func newLocalServerCmd(c *config.Config) *cobra.Command {
 		// check if the server is already running
 		isRunning, err := pidFile.IsRunning()
 		if err != nil {
-			return fmt.Errorf("Failed to check if local server process is running: %w", err)
+			return fmt.Errorf("failed to check if local server process is running: %w", err)
 		}
 		if isRunning {
 			// Check if dir/host/ports match.

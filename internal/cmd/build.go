@@ -66,7 +66,7 @@ func newBuildCmd(c *config.Config) *cobra.Command {
 			registryHost := local.LocalRegistryHostname("default")
 			storeRoot := deps.NewManager(c.DepsBaseURL(), c.DepsCacheDir()).RegistryCacheDir()
 			progress := func(msg string) {
-				fmt.Fprintf(cmd.OutOrStdout(), "=> %s\n", msg)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "=> %s\n", msg)
 			}
 			res, err := appbuild.Build(cmd.Context(), appbuild.Options{ContextDir: ctxDir, File: flags.file, Tags: flags.tags, Platform: flags.platform, Arch: c.Arch(), BuildArgs: flags.buildArgs, Labels: flags.labels, StoreRoot: storeRoot, DefaultRegistryHost: registryHost, Docker: docker, Pull: flags.pull, SBOM: sbom, ChooseTemplate: selectBuildTemplate, Progress: progress})
 			if err != nil {
@@ -129,10 +129,10 @@ func printGeneratedBuildFiles(cmd *cobra.Command, res *appbuild.Result) {
 	if len(res.GeneratedFiles) == 0 {
 		return
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), "No Containerfile or Dockerfile found.")
-	fmt.Fprintf(cmd.OutOrStdout(), "Detected %s.\n\n", res.DetectedReason)
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No Containerfile or Dockerfile found.")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Detected %s.\n\n", res.DetectedReason)
 	for _, path := range res.GeneratedFiles {
-		fmt.Fprintf(cmd.OutOrStdout(), "Created ./%s for you.\n", path)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Created ./%s for you.\n", path)
 	}
 }
 

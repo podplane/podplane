@@ -48,7 +48,7 @@ func WriteCloudInitDataISO(outputPath, userData, metaData, networkConfig string)
 	if err != nil {
 		return fmt.Errorf("failed to create seed ISO filesystem: %w", err)
 	}
-	defer fs.Close()
+	defer func() { _ = fs.Close() }()
 
 	if err := writeSeedFile(fs, "user-data", userData); err != nil {
 		return err
@@ -79,7 +79,7 @@ func writeSeedFile(fs filesystem.FileSystem, path, contents string) error {
 	if err != nil {
 		return fmt.Errorf("failed to add %s to ISO: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := io.Copy(f, strings.NewReader(contents)); err != nil {
 		return fmt.Errorf("failed to write %s to ISO: %w", path, err)

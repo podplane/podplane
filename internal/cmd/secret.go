@@ -128,9 +128,9 @@ func readSecretValue(operation, key string, fromStdin bool, filePath string) ([]
 		}
 		return value, nil
 	}
-	fmt.Fprintf(os.Stderr, "Enter value for %s %q: ", operation, key)
+	_, _ = fmt.Fprintf(os.Stderr, "Enter value for %s %q: ", operation, key)
 	value, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Fprintln(os.Stderr)
+	_, _ = fmt.Fprintln(os.Stderr)
 	if err != nil {
 		return nil, fmt.Errorf("read secret value: %w", err)
 	}

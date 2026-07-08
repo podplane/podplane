@@ -262,9 +262,9 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 	}
 
 	if opts.DryRun {
-		fmt.Fprintf(output, "VMConfig manifest: %s\n", vmconfigManifestSource)
-		fmt.Fprintf(output, "VMConfig cache directory: %s\n", m.VMConfigCacheDir())
-		fmt.Fprintln(output, "VMConfig artifacts that would be downloaded:")
+		_, _ = fmt.Fprintf(output, "VMConfig manifest: %s\n", vmconfigManifestSource)
+		_, _ = fmt.Fprintf(output, "VMConfig cache directory: %s\n", m.VMConfigCacheDir())
+		_, _ = fmt.Fprintln(output, "VMConfig artifacts that would be downloaded:")
 	} else {
 		totalItems := len(items) + len(vmconfigImages) + len(componentIndexes) + len(templateImageIndexes)
 		emit(DownloadEvent{Type: DownloadEventStatus, Message: fmt.Sprintf("Checking %d vmconfig artifacts and image mirror entries in cache...", totalItems)})
@@ -318,7 +318,7 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 				strings.TrimPrefix(dest, m.depsCacheDir),
 				string(filepath.Separator),
 			)
-			fmt.Fprintf(output, "  • %s\n", rel)
+			_, _ = fmt.Fprintf(output, "  • %s\n", rel)
 			continue
 		}
 
@@ -384,24 +384,24 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 
 	if opts.DryRun {
 		if missing == 0 && imageMissing == 0 {
-			fmt.Fprintln(output, "All dependencies already cached, nothing to download.")
+			_, _ = fmt.Fprintln(output, "All dependencies already cached, nothing to download.")
 		}
 		if !opts.SkipCrossArchDependencies {
-			fmt.Fprintf(output, "Components manifest: %s\n", componentsSource)
-			fmt.Fprintf(output, "Registry cache directory: %s\n", m.RegistryCacheDir())
-			fmt.Fprintf(output, "VMConfig images: %d\n", len(vmconfigImages))
-			fmt.Fprintf(output, "Component images: %d\n", len(componentIndexes))
+			_, _ = fmt.Fprintf(output, "Components manifest: %s\n", componentsSource)
+			_, _ = fmt.Fprintf(output, "Registry cache directory: %s\n", m.RegistryCacheDir())
+			_, _ = fmt.Fprintf(output, "VMConfig images: %d\n", len(vmconfigImages))
+			_, _ = fmt.Fprintf(output, "Component images: %d\n", len(componentIndexes))
 		}
 		if !opts.SkipCrossArchDependencies {
-			fmt.Fprintf(output, "Templates manifest: %s\n", templatesSource)
-			fmt.Fprintf(output, "Template chart cache directory: %s\n", m.TemplatesChartsCacheDir())
-			fmt.Fprintf(output, "Template charts: %d\n", len(templatesManifest.Templates.Charts))
-			fmt.Fprintf(output, "Template images: %d\n", len(templateImageIndexes))
+			_, _ = fmt.Fprintf(output, "Templates manifest: %s\n", templatesSource)
+			_, _ = fmt.Fprintf(output, "Template chart cache directory: %s\n", m.TemplatesChartsCacheDir())
+			_, _ = fmt.Fprintf(output, "Template charts: %d\n", len(templatesManifest.Templates.Charts))
+			_, _ = fmt.Fprintf(output, "Template images: %d\n", len(templateImageIndexes))
 		}
 		if !opts.SkipCrossArchDependencies && !opts.SkipSeeds {
-			fmt.Fprintf(output, "Seeds manifest: %s\n", seedsSource)
-			fmt.Fprintf(output, "Seed snapshot cache directory: %s\n", m.SeedsSnapshotsCacheDir())
-			fmt.Fprintf(output, "Seed snapshots: %d\n", len(seedsManifest.Seeds.Snapshots))
+			_, _ = fmt.Fprintf(output, "Seeds manifest: %s\n", seedsSource)
+			_, _ = fmt.Fprintf(output, "Seed snapshot cache directory: %s\n", m.SeedsSnapshotsCacheDir())
+			_, _ = fmt.Fprintf(output, "Seed snapshots: %d\n", len(seedsManifest.Seeds.Snapshots))
 		}
 		return nil
 	}

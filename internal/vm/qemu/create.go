@@ -42,7 +42,7 @@ func (m *Qemu) Create(baseImage string) error {
 
 	// Create the VM image
 	output := m.output
-	fmt.Fprintln(output, "Creating VM image...")
+	_, _ = fmt.Fprintln(output, "Creating VM image...")
 	cmd := execwrap.Command("qemu-img", "create", "-F", "qcow2", "-b", baseImage, "-f", "qcow2", vmImage, "128G")
 	var errBuf bytes.Buffer
 	cmd.Stdout = io.Discard

@@ -41,7 +41,7 @@ func TestWriteCloudInitDataISO(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open seed ISO: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	img, err := iso9660.Read(file.New(f, true), info.Size(), 0, 2048)
 	if err != nil {

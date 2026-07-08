@@ -78,7 +78,7 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 			return fmt.Errorf("--components can only be used when creating a new local cluster; existing local cluster %q already has its initial components recorded in cluster.jsonc", localClusterID)
 		}
 		if running {
-			fmt.Fprintln(os.Stdout, "VM is already running")
+			_, _ = fmt.Fprintln(os.Stdout, "VM is already running")
 			if localStartConsole {
 				if err := manager.Console(); err != nil {
 					return fmt.Errorf("attach console: %w", err)
@@ -172,7 +172,7 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 		}
 		if err != nil {
 			if errors.Is(err, vm.ErrAlreadyRunning) {
-				fmt.Fprintln(os.Stdout, "VM is already running")
+				_, _ = fmt.Fprintln(os.Stdout, "VM is already running")
 				return nil
 			}
 			return fmt.Errorf("failed to start: %w", err)

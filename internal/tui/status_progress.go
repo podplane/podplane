@@ -185,7 +185,7 @@ func runTextStatusProgress(items, required []StatusProgressItem, poll func() (ma
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(os.Stdout, statusProgressSummary(statuses, items, required))
+		_, _ = fmt.Fprintln(os.Stdout, statusProgressSummary(statuses, items, required))
 		if statusProgressRequiredReady(statuses, required) {
 			return nil
 		}

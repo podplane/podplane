@@ -19,7 +19,7 @@ func Exists(path string, algo string, checksum string) (bool, error) {
 	if _, err := os.Stat(path); err == nil {
 		f, err := os.Open(path)
 		if err == nil {
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 			h, err := newHash(algo)
 			if err != nil {
 				return false, err

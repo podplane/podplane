@@ -433,11 +433,11 @@ func (m taskProgressModel) View() string {
 		body.WriteString("Ready\n")
 		body.WriteString("\n")
 		for _, row := range m.readyRows() {
-			body.WriteString(fmt.Sprintf("• %s", row.item.Name))
+			fmt.Fprintf(&body, "• %s", row.item.Name)
 			body.WriteString("\n")
 		}
 		body.WriteString("\n")
-		body.WriteString(fmt.Sprintf("Cluster started in %s\n", formatDuration(m.completedElapsed())))
+		fmt.Fprintf(&body, "Cluster started in %s\n", formatDuration(m.completedElapsed()))
 	} else {
 		body.WriteString(m.subtitle)
 		body.WriteString("\n\n")
@@ -447,7 +447,7 @@ func (m taskProgressModel) View() string {
 			if m.width > 0 && m.width < 90 {
 				barWidth = 28
 			}
-			body.WriteString(fmt.Sprintf("%s  %d%%\n", renderBar(int64(current), int64(total), barWidth), progressPercent(current, total)))
+			fmt.Fprintf(&body, "%s  %d%%\n", renderBar(int64(current), int64(total), barWidth), progressPercent(current, total))
 			body.WriteString(faintStyle.Render(label))
 			body.WriteString("\n\n")
 		}
@@ -474,7 +474,7 @@ func (m taskProgressModel) View() string {
 			body.WriteString("\n")
 		} else {
 			for _, row := range ready {
-				body.WriteString(fmt.Sprintf("✓ %s", row.item.Name))
+				fmt.Fprintf(&body, "✓ %s", row.item.Name)
 				body.WriteString("\n")
 			}
 		}
@@ -831,7 +831,7 @@ func runTextTaskProgress(items []TaskProgressItem, run func(TaskProgress) error)
 	return run(TaskProgress(func(event TaskProgressEvent) {
 		switch event.Type {
 		case TaskProgressStarted:
-			fmt.Fprintf(os.Stdout, "%s...\n", event.Name)
+			_, _ = fmt.Fprintf(os.Stdout, "%s...\n", event.Name)
 		case TaskProgressDone:
 			message := event.Message
 			if message == "" {
@@ -840,20 +840,20 @@ func runTextTaskProgress(items []TaskProgressItem, run func(TaskProgress) error)
 			if message == "" {
 				message = "done"
 			}
-			fmt.Fprintf(os.Stdout, "✓ %s %s\n", event.Name, message)
+			_, _ = fmt.Fprintf(os.Stdout, "✓ %s %s\n", event.Name, message)
 		case TaskProgressSkipped:
 			if event.Message != "" {
-				fmt.Fprintf(os.Stdout, "✓ %s %s\n", event.Name, event.Message)
+				_, _ = fmt.Fprintf(os.Stdout, "✓ %s %s\n", event.Name, event.Message)
 			}
 		case TaskProgressOmitted:
 			// Omitted items intentionally produce no non-TTY output.
 		case TaskProgressFailed:
 			if event.Err != nil {
-				fmt.Fprintf(os.Stdout, "❌ %s failed: %v\n", event.Name, event.Err)
+				_, _ = fmt.Fprintf(os.Stdout, "❌ %s failed: %v\n", event.Name, event.Err)
 			}
 		case TaskProgressInfo:
 			if event.Message != "" {
-				fmt.Fprintln(os.Stdout, event.Message)
+				_, _ = fmt.Fprintln(os.Stdout, event.Message)
 			}
 		}
 	}))
@@ -891,7 +891,7 @@ func drainTextTaskProgress(items []TaskProgressItem, events <-chan TaskProgressE
 func printTextTaskProgressEvent(successByKey map[string]string, event TaskProgressEvent) {
 	switch event.Type {
 	case TaskProgressStarted:
-		fmt.Fprintf(os.Stdout, "%s...\n", event.Name)
+		_, _ = fmt.Fprintf(os.Stdout, "%s...\n", event.Name)
 	case TaskProgressDone:
 		message := event.Message
 		if message == "" {
@@ -900,20 +900,20 @@ func printTextTaskProgressEvent(successByKey map[string]string, event TaskProgre
 		if message == "" {
 			message = "done"
 		}
-		fmt.Fprintf(os.Stdout, "✓ %s %s\n", event.Name, message)
+		_, _ = fmt.Fprintf(os.Stdout, "✓ %s %s\n", event.Name, message)
 	case TaskProgressSkipped:
 		if event.Message != "" {
-			fmt.Fprintf(os.Stdout, "✓ %s %s\n", event.Name, event.Message)
+			_, _ = fmt.Fprintf(os.Stdout, "✓ %s %s\n", event.Name, event.Message)
 		}
 	case TaskProgressOmitted:
 		// Omitted items intentionally produce no fallback output.
 	case TaskProgressFailed:
 		if event.Err != nil {
-			fmt.Fprintf(os.Stdout, "❌ %s failed: %v\n", event.Name, event.Err)
+			_, _ = fmt.Fprintf(os.Stdout, "❌ %s failed: %v\n", event.Name, event.Err)
 		}
 	case TaskProgressInfo:
 		if event.Message != "" {
-			fmt.Fprintln(os.Stdout, event.Message)
+			_, _ = fmt.Fprintln(os.Stdout, event.Message)
 		}
 	}
 }

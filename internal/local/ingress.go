@@ -322,5 +322,5 @@ var localIngressPlaceholderHTML string
 func localIngressPlaceholder(rw http.ResponseWriter, _ *http.Request, reason error) {
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.WriteHeader(http.StatusNotFound)
-	fmt.Fprintf(rw, localIngressPlaceholderHTML, localIngressHTTPSPort, html.EscapeString(reason.Error()))
+	_, _ = fmt.Fprintf(rw, localIngressPlaceholderHTML, localIngressHTTPSPort, html.EscapeString(reason.Error()))
 }

@@ -46,7 +46,7 @@ var Dependencies = map[string]Dependency{
 					return parts[1], nil
 				}
 			}
-			return "", fmt.Errorf("Unable to determine rsync version")
+			return "", fmt.Errorf("unable to determine rsync version")
 		},
 		MinVersion: 3, // TODO: should be 3.1.0+
 	},

@@ -51,10 +51,7 @@ func NewRootCmd(c *config.Config) *cobra.Command {
 	// Define root command
 	rootCmd.Run = func(cmd *cobra.Command, args []string) {
 		// Determine if we should be silent (hooks commands need clean stdout)
-		silentMode := false
-		if (cmd.HasParent() && cmd.Parent().Name() == "hooks") || cmd.Name() == "hooks" {
-			silentMode = true
-		}
+		silentMode := (cmd.HasParent() && cmd.Parent().Name() == "hooks") || cmd.Name() == "hooks"
 
 		// Apply log level filtering based on silent and verbose settings
 		filteredLogger := logger

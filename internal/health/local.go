@@ -178,7 +178,7 @@ func checkLocalIngressProxy(ctx context.Context, localIngressURL func() (string,
 	if err != nil {
 		return Result{Exists: true, Status: StatusPending, Message: fmt.Sprintf("waiting for Traefik via %s: %v", url, err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
 		return Result{Exists: true, Status: StatusPending, Message: fmt.Sprintf("waiting for Traefik via %s: HTTP %d", url, resp.StatusCode)}
 	}

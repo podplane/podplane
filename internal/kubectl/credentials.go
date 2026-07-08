@@ -60,10 +60,10 @@ func SetCredentials(stdout io.Writer, sub string, clusterID string, local bool) 
 	} else {
 		outString := strings.TrimSpace(outBuf.String())
 		if outString == cliBinaryPath {
-			fmt.Fprintf(stdout, "Credentials already exist for %s\n", key)
+			_, _ = fmt.Fprintf(stdout, "Credentials already exist for %s\n", key)
 			return nil
 		} else if outString != "" && !strings.Contains(outString, "podplane") {
-			fmt.Fprintf(stdout, "Skipping configuration of kubectl credentials '%s' due to unknown conflict.\n", key)
+			_, _ = fmt.Fprintf(stdout, "Skipping configuration of kubectl credentials '%s' due to unknown conflict.\n", key)
 			return nil
 		}
 	}

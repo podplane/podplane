@@ -86,7 +86,7 @@ func (m *Local) ServerEnsure(output io.Writer) error {
 		return err
 	}
 	// Start the local server in the background.
-	fmt.Fprintln(output, "Starting local server...")
+	_, _ = fmt.Fprintln(output, "Starting local server...")
 	logPath := ServerLogPath(m.runtimeDir)
 	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
 		return fmt.Errorf("failed to create local server log directory: %w", err)
@@ -95,7 +95,7 @@ func (m *Local) ServerEnsure(output io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("failed to open local server log file %s: %w", logPath, err)
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	cmd := execwrap.Command(cmdBin, "local", "server", "--background", "true")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -146,9 +146,9 @@ func (m *Local) ServerEnsure(output io.Writer) error {
 			return fmt.Errorf("local server failed to start\nLog: %s", logPath)
 		}
 	}
-	fmt.Fprintf(output, "- HTTP port: %s\n", newPidFile.GetData("http_port"))
-	fmt.Fprintf(output, "- HTTPS port: %s\n", newPidFile.GetData("https_port"))
-	fmt.Fprintf(output, "- Log: %s\n", logPath)
+	_, _ = fmt.Fprintf(output, "- HTTP port: %s\n", newPidFile.GetData("http_port"))
+	_, _ = fmt.Fprintf(output, "- HTTPS port: %s\n", newPidFile.GetData("https_port"))
+	_, _ = fmt.Fprintf(output, "- Log: %s\n", logPath)
 	_, _ = color.New(color.FgGreen).Fprintln(output, "✓ Local server started successfully")
 	// Save the PID file into the Local struct and return
 	m.webserverPIDFile = newPidFile
@@ -162,11 +162,11 @@ func ServerKill(pidFile pid.PIDFile) error {
 		return nil
 	}
 	// print pid
-	fmt.Printf("Stopping local HTTP(S) server on ports %s and %s...\n", pidFile.GetData("http_port"), pidFile.GetData("https_port"))
+	_, _ = fmt.Printf("Stopping local HTTP(S) server on ports %s and %s...\n", pidFile.GetData("http_port"), pidFile.GetData("https_port"))
 	// close the server if it is running and remove the pid file
 	err := pidFile.Kill()
 	if err != nil {
-		return fmt.Errorf("Failed to stop local server: %w", err)
+		return fmt.Errorf("failed to stop local server: %w", err)
 	}
 	return nil
 }
@@ -179,7 +179,7 @@ func (m *Local) ServerCleanup() error {
 	// load pid file
 	pidFile, err := ServerPIDFile(m.runtimeDir)
 	if err != nil {
-		return fmt.Errorf("Failed to load local server PID file: %w", err)
+		return fmt.Errorf("failed to load local server PID file: %w", err)
 	}
 	return ServerKill(pidFile)
 }
@@ -267,7 +267,7 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vault
 	// local VMs reach it through the stable forwarded port in OIDC issuer URLs.
 	httpsListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", addr, 0))
 	if err != nil {
-		httpListener.Close()
+		_ = httpListener.Close()
 		return nil, fmt.Errorf("failed to create local HTTPS listener: %w", err)
 	}
 
@@ -275,8 +275,8 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vault
 	// localhost-only path from the VM-facing HTTP/HTTPS services.
 	ingressListener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localIngressHTTPSPort))
 	if err != nil {
-		httpListener.Close()
-		httpsListener.Close()
+		_ = httpListener.Close()
+		_ = httpsListener.Close()
 		return nil, fmt.Errorf("failed to create local ingress TLS listener on 127.0.0.1:%d: %w", localIngressHTTPSPort, err)
 	}
 
@@ -411,17 +411,17 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vault
 	// Start the HTTP, HTTPS, and ingress servers in goroutines.
 	go func() {
 		if err := w.httpServer.Serve(w.httpListener); err != nil && err != http.ErrServerClosed {
-			fmt.Fprintf(os.Stderr, "Local HTTP server error: %v\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Local HTTP server error: %v\n", err)
 		}
 	}()
 	go func() {
 		if err := w.httpsServer.ServeTLS(w.httpsListener, oidcCertFile, oidcKeyFile); err != nil && err != http.ErrServerClosed {
-			fmt.Fprintf(os.Stderr, "Local HTTPS server error: %v\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Local HTTPS server error: %v\n", err)
 		}
 	}()
 	go func() {
 		if err := w.ingressServer.ServeTLS(w.ingressListener, "", ""); err != nil && err != http.ErrServerClosed {
-			fmt.Fprintf(os.Stderr, "Local ingress proxy error: %v\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Local ingress proxy error: %v\n", err)
 		}
 	}()
 

@@ -153,7 +153,7 @@ func (p *Provider) scaleShardConfigToZero(ctx context.Context, bucket, key strin
 	if err != nil {
 		return fmt.Errorf("get s3://%s/%s: %w", bucket, key, err)
 	}
-	defer got.Body.Close()
+	defer func() { _ = got.Body.Close() }()
 	body, err := io.ReadAll(got.Body)
 	if err != nil {
 		return fmt.Errorf("read s3://%s/%s: %w", bucket, key, err)

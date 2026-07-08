@@ -319,7 +319,7 @@ func copyLocalSeedSnapshot(dest, source, manifestPath string) error {
 	if err != nil {
 		return fmt.Errorf("open seed snapshot %s: %w", source, err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("create seed snapshot cache directory: %w", err)
 	}

@@ -38,7 +38,7 @@ func (m *Qemu) Delete() error {
 	}
 
 	// Delete the cloud-init data ISO (best-effort; may not exist)
-	os.Remove(m.CloudInitDataDiskPath())
+	_ = os.Remove(m.CloudInitDataDiskPath())
 
 	// Delete stopped-VM runtime artifacts (best-effort; may not exist). Running
 	// VMs returned above, so removing stale runtime files here is safe.

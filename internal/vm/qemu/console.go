@@ -30,15 +30,15 @@ func (m *Qemu) Console() error {
 	if err != nil {
 		return fmt.Errorf("connect to serial console %s: %w", path, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
-	fmt.Fprintln(os.Stderr, "Connected to VM serial console. Press Ctrl-] to detach.")
+	_, _ = fmt.Fprintln(os.Stderr, "Connected to VM serial console. Press Ctrl-] to detach.")
 	if err := withRawTerminal(os.Stdin, func() error {
 		return attachConsole(conn, os.Stdin, os.Stdout)
 	}); err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr, "\nDetached from VM serial console.")
+	_, _ = fmt.Fprintln(os.Stderr, "\nDetached from VM serial console.")
 	return nil
 }
 

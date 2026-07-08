@@ -88,7 +88,7 @@ func (m *Qemu) Shell(ctx context.Context, command string, sshPort int, identityF
 	if dialErr != nil {
 		return nil, fmt.Errorf("VM is running but SSH is not reachable on %s (is the VM still booting?): %w", addr, dialErr)
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	fmt.Println("Connecting via SSH...")
 

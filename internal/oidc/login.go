@@ -206,7 +206,7 @@ func headlessAuthorize(ctx context.Context, client *http.Client, authorizeURL, e
 	if err != nil {
 		return "", fmt.Errorf("authorize: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 300 || resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("authorize: expected redirect, got HTTP %d: %s", resp.StatusCode, string(body))
@@ -247,7 +247,7 @@ func postToken(ctx context.Context, client *http.Client, endpoint string, form u
 	if err != nil {
 		return nil, fmt.Errorf("token request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("token endpoint %s: HTTP %d: %s", endpoint, resp.StatusCode, string(body))

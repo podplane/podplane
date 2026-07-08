@@ -541,7 +541,7 @@ func TestLocalIngressProxyStreamingResponseIsNotBuffered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("watch request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Wait for backend to declare it sent the first chunk.
 	select {

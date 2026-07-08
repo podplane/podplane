@@ -46,7 +46,7 @@ func withValuesFile(image string, env map[string]string, hostname, path string, 
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err := f.Write(append(raw, '\n')); err != nil {
 		_ = f.Close()
 		return err

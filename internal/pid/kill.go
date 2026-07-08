@@ -17,10 +17,10 @@ func (p *PIDFile) Kill() error {
 	// attempt to kill the PID process
 	process, err := process.NewProcess(int32(p.PID()))
 	if err != nil {
-		return fmt.Errorf("Failed to find process: %w", err)
+		return fmt.Errorf("failed to find process: %w", err)
 	}
 	if err := process.Kill(); err != nil {
-		return fmt.Errorf("Failed to kill process: %w", err)
+		return fmt.Errorf("failed to kill process: %w", err)
 	}
 	// Wait for up to 10 seconds for the process to exit
 	for i := range 10 {
@@ -31,13 +31,13 @@ func (p *PIDFile) Kill() error {
 		}
 		if i > 9 {
 			// Process is still running after 10 seconds
-			return fmt.Errorf("Process %d is still running after 10 seconds", p.PID())
+			return fmt.Errorf("process %d is still running after 10 seconds", p.PID())
 		}
 		time.Sleep(time.Second)
 	}
 	// remove the PID file
 	if err := p.Clean(); err != nil {
-		return fmt.Errorf("Failed to clean PID file: %w", err)
+		return fmt.Errorf("failed to clean PID file: %w", err)
 	}
 	slog.Debug("process stopped", "pid", p.PID())
 	// Remove the PID file
