@@ -115,7 +115,8 @@ See [CLI Storage](cli-storage.md) for more details about these files and how the
 
 These commands help you deploy workloads using templates such as the `web` or `worker` app template.
 
-- `build [PATH] [-t <image>]` builds an OCI image with ocimage and stores it in the local Podplane registry cache so a local VM can use it immediately. If no `Containerfile` or `Dockerfile` exists, Podplane can generate a conservative `Containerfile` for supported project types.
+- `build [PATH] [-t <image>]` builds an OCI image with ocimage and stores it in the local Podplane registry so a local VM can use it immediately. If no `Containerfile` or `Dockerfile` exists, Podplane can generate a conservative `Containerfile` for supported project types.
+- `push <local-image> [<remote-image>]` pushes an image from the local Podplane registry to the current cluster registry. If the image is not cached but exists in Docker, Podplane can import and push it after confirmation.
 - `deploy <template> --name <name> [--image <image>] [-e KEY=value]` deploy an app using a template. The CLI will prompt to install addon components if they have required dependencies which are not installed. Repeat `-e` / `--env` to set non-secret environment variables on the app container. If `--image` is omitted, the template default image is used.
 - `remove --name <name>` remove a previously deployed app.
 - `secret <command> --for <secret-provider-class-name>` create, update, list, archive, restore, and destroy application secret values through the Podplane operator. Values are encrypted locally before they are sent to Kubernetes.

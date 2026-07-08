@@ -328,8 +328,8 @@ github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10/go.mod h1
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/podplane/ocimage v1.0.4 h1:s/ncO9g4EOIjgg4lxhEhpxfLmVeqbRoWZv8+x2sBNzs=
-github.com/podplane/ocimage v1.0.4/go.mod h1:JIQBQz0PM/jYkBRMieb1I4NXUzb+iD4cUTbfzAS3d9E=
+github.com/podplane/ocimage v1.0.6 h1:CjZUiiAhm4ZNDPudBj45WBrJd9s2a3jj5ScoQ+ly1vs=
+github.com/podplane/ocimage v1.0.6/go.mod h1:JIQBQz0PM/jYkBRMieb1I4NXUzb+iD4cUTbfzAS3d9E=
 github.com/podplane/s3lect v1.0.3 h1:yJiId2Ml6ZG253njr9fP7NOtIwqDJHG3SijV+DJTD6k=
 github.com/podplane/s3lect v1.0.3/go.mod h1:x/HxWOFZ3PPbiH47nEmDprMXq2n/MbKG93mR2aGrC5w=
 github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 h1:o4JXh1EVt9k/+g42oCprj/FisM4qX9L3sZB3upGN2ZU=
