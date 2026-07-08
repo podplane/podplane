@@ -248,7 +248,10 @@
         "project_id": { "type": "string", "description": "GCP project ID used for SecretProviderClass rendering." },
         "location": { "type": "string", "description": "Optional GCP regional Secret Manager location." },
         "address": { "type": "string", "description": "Vault/OpenBao server address used by operator/runtime configuration." },
-        "mount_path": { "type": "string", "description": "Vault/OpenBao KV-v2 mount name." }
+        "mount_path": { "type": "string", "description": "Vault/OpenBao KV-v2 mount name." },
+        "ca_cert": { "type": "string", "description": "Optional PEM CA bundle for the Vault/OpenBao endpoint." },
+        "auth_path": { "type": "string", "description": "Vault/OpenBao Kubernetes auth mount path used by the operator. Defaults to auth/kubernetes." },
+        "operator_role": { "type": "string", "description": "Vault/OpenBao role used by the operator service account. Defaults to the provider name." }
       }
     },
     "vpc": {

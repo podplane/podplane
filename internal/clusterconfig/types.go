@@ -71,8 +71,11 @@ type SecretsProvider struct {
 
 	// Vault/OpenBao fields for operator/runtime configuration. These
 	// fields are not persisted in cached cluster summaries.
-	Address   string `json:"address,omitempty"`
-	MountPath string `json:"mount_path,omitempty"`
+	Address      string `json:"address,omitempty"`
+	MountPath    string `json:"mount_path,omitempty"`
+	CACert       string `json:"ca_cert,omitempty"`
+	AuthPath     string `json:"auth_path,omitempty"`
+	OperatorRole string `json:"operator_role,omitempty"`
 }
 
 // Seed describes the Podplane seed file used to create the initial Netsy snapshot.

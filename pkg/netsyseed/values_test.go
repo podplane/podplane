@@ -54,7 +54,8 @@ func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *tes
 		Domains: []clusterconfig.Domain{{Zone: "internaltools.localhost", Provider: clusterconfig.DomainProvider{Kind: "local"}}},
 		Secrets: clusterconfig.Secrets{Providers: map[string]clusterconfig.SecretsProvider{
 			"aws-secrets-manager": {Kind: "aws", KeyPrefix: "shared-secrets", ObjectType: "secretsmanager"},
-			"local-fakevault":     {Kind: "openbao"},
+			"hashicorp-vault":     {Kind: "vault", CACert: "-----BEGIN CERTIFICATE-----\nvault\n-----END CERTIFICATE-----"},
+			"local-fakevault":     {Kind: "openbao", CACert: "-----BEGIN CERTIFICATE-----\nlocal\n-----END CERTIFICATE-----", AuthPath: "auth/podplane", OperatorRole: "podplane-operator"},
 		}},
 	}}
 	values, err := buildPlatformComponentsValues(cfg, buildPlatformComponentsValuesOptions{})
@@ -78,6 +79,7 @@ func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *tes
 		"secrets-store-csi-driver",
 		"secrets-store-csi-provider-aws",
 		"secrets-store-csi-provider-openbao",
+		"secrets-store-csi-provider-vault",
 	} {
 		app := apps[name].(map[string]any)
 		if got, want := app["enabled"], true; got != want {
@@ -101,6 +103,51 @@ func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *tes
 	provider := providers["aws-secrets-manager"].(map[string]any)
 	if got, want := provider["keyPrefix"], "shared-secrets"; got != want {
 		t.Fatalf("provider keyPrefix = %v, want %v", got, want)
+	}
+	localProvider := providers["local-fakevault"].(map[string]any)
+	if got, want := localProvider["caCert"], "-----BEGIN CERTIFICATE-----\nlocal\n-----END CERTIFICATE-----"; got != want {
+		t.Fatalf("local provider caCert = %v, want %v", got, want)
+	}
+	if got, want := localProvider["authPath"], "auth/podplane"; got != want {
+		t.Fatalf("local provider authPath = %v, want %v", got, want)
+	}
+	if got, want := localProvider["operatorRole"], "podplane-operator"; got != want {
+		t.Fatalf("local provider operatorRole = %v, want %v", got, want)
+	}
+	openBaoProvider := componentValues(values, "secrets-store-csi-provider-openbao")
+	podplaneProviders := openBaoProvider["podplane"].(map[string]any)["secrets"].(map[string]any)["providers"].(map[string]any)
+	localCA := podplaneProviders["local-fakevault"].(map[string]any)
+	if got, want := localCA["caCert"], "-----BEGIN CERTIFICATE-----\nlocal\n-----END CERTIFICATE-----"; got != want {
+		t.Fatalf("openbao provider caCert = %v, want %v", got, want)
+	}
+	csi := openBaoProvider["openbao"].(map[string]any)["csi"].(map[string]any)
+	volumes := csi["volumes"].([]map[string]any)
+	if got, want := volumes[0]["name"], "provider-ca-local-fakevault"; got != want {
+		t.Fatalf("openbao csi volume name = %v, want %v", got, want)
+	}
+	configMap := volumes[0]["configMap"].(map[string]any)
+	if got, want := configMap["name"], "podplane-secrets-provider-ca-local-fakevault"; got != want {
+		t.Fatalf("openbao csi volume configMap = %v, want %v", got, want)
+	}
+	volumeMounts := csi["volumeMounts"].([]map[string]any)
+	if got, want := volumeMounts[0]["mountPath"], "/var/run/podplane/secrets-providers/local-fakevault"; got != want {
+		t.Fatalf("openbao csi volume mountPath = %v, want %v", got, want)
+	}
+	vaultProvider := componentValues(values, "secrets-store-csi-provider-vault")
+	vaultPodplaneProviders := vaultProvider["podplane"].(map[string]any)["secrets"].(map[string]any)["providers"].(map[string]any)
+	vaultCA := vaultPodplaneProviders["hashicorp-vault"].(map[string]any)
+	if got, want := vaultCA["caCert"], "-----BEGIN CERTIFICATE-----\nvault\n-----END CERTIFICATE-----"; got != want {
+		t.Fatalf("vault provider caCert = %v, want %v", got, want)
+	}
+	vaultCSI := vaultProvider["vault"].(map[string]any)["csi"].(map[string]any)
+	vaultVolumes := vaultCSI["volumes"].([]map[string]any)
+	vaultConfigMap := vaultVolumes[0]["configMap"].(map[string]any)
+	if got, want := vaultConfigMap["name"], "podplane-secrets-provider-ca-hashicorp-vault"; got != want {
+		t.Fatalf("vault csi volume configMap = %v, want %v", got, want)
+	}
+	vaultVolumeMounts := vaultCSI["volumeMounts"].([]map[string]any)
+	if got, want := vaultVolumeMounts[0]["mountPath"], "/var/run/podplane/secrets-providers/hashicorp-vault"; got != want {
+		t.Fatalf("vault csi volume mountPath = %v, want %v", got, want)
 	}
 }
 

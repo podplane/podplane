@@ -230,7 +230,13 @@ func applySecretsComponents(components map[string]any, clusterID string, secrets
 			},
 		},
 	}
-	for _, provider := range secrets.Providers {
+	names := make([]string, 0, len(secrets.Providers))
+	for name := range secrets.Providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		provider := secrets.Providers[name]
 		switch provider.Kind {
 		case "aws":
 			apps["secrets-store-csi-provider-aws"] = map[string]any{"enabled": true}
@@ -238,8 +244,10 @@ func applySecretsComponents(components map[string]any, clusterID string, secrets
 			apps["secrets-store-csi-provider-gcp"] = map[string]any{"enabled": true}
 		case "vault":
 			apps["secrets-store-csi-provider-vault"] = map[string]any{"enabled": true}
+			applyVaultLikeCSIProviderCAValues(componentValues, "secrets-store-csi-provider-vault", "vault", name, provider)
 		case "openbao":
 			apps["secrets-store-csi-provider-openbao"] = map[string]any{"enabled": true}
+			applyVaultLikeCSIProviderCAValues(componentValues, "secrets-store-csi-provider-openbao", "openbao", name, provider)
 		}
 	}
 }
@@ -262,9 +270,42 @@ func secretsValues(secrets clusterconfig.Secrets) map[string]any {
 		setIfNotEmpty(entry, "location", provider.Location)
 		setIfNotEmpty(entry, "address", provider.Address)
 		setIfNotEmpty(entry, "mountPath", provider.MountPath)
+		setIfNotEmpty(entry, "caCert", provider.CACert)
+		setIfNotEmpty(entry, "authPath", provider.AuthPath)
+		setIfNotEmpty(entry, "operatorRole", provider.OperatorRole)
 		providers[name] = entry
 	}
 	return map[string]any{"providers": providers}
+}
+
+// applyVaultLikeCSIProviderCAValues configures a Vault/OpenBao CSI provider
+// chart to render and mount a provider-specific CA bundle.
+func applyVaultLikeCSIProviderCAValues(componentValues map[string]any, componentName, chartRoot, providerName string, provider clusterconfig.SecretsProvider) {
+	if provider.CACert == "" {
+		return
+	}
+	entry := ensureChildMap(componentValues, componentName)
+	podplane := ensureChildMap(entry, "podplane")
+	secrets := ensureChildMap(podplane, "secrets")
+	providers := ensureChildMap(secrets, "providers")
+	providers[providerName] = map[string]any{"caCert": provider.CACert}
+
+	chart := ensureChildMap(entry, chartRoot)
+	csi := ensureChildMap(chart, "csi")
+	volumes, _ := csi["volumes"].([]map[string]any)
+	volumeMounts, _ := csi["volumeMounts"].([]map[string]any)
+	volumeName := "provider-ca-" + providerName
+	csi["volumes"] = append(volumes, map[string]any{
+		"name": volumeName,
+		"configMap": map[string]any{
+			"name": "podplane-secrets-provider-ca-" + providerName,
+		},
+	})
+	csi["volumeMounts"] = append(volumeMounts, map[string]any{
+		"name":      volumeName,
+		"mountPath": "/var/run/podplane/secrets-providers/" + providerName,
+		"readOnly":  true,
+	})
 }
 
 // setIfNotEmpty stores a string value in m when value is not empty.

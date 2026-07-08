@@ -192,6 +192,11 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.secrets.providers.<name>.kind` | Secrets provider kind, such as `aws`, `gcp`, or `openbao`. |
 | `cluster.secrets.providers.<name>.key_prefix` | Optional backend key prefix for this provider. Defaults to `cluster.id`; set it only when clusters should intentionally share a provider backend prefix. |
 | `cluster.secrets.providers.<name>.object_type` | AWS Secrets Store CSI object type, such as `secretsmanager` or `ssmparameter`. |
+| `cluster.secrets.providers.<name>.address` | Vault/OpenBao server address used by the operator and rendered into generated `SecretProviderClass` objects. |
+| `cluster.secrets.providers.<name>.mount_path` | Vault/OpenBao KV-v2 mount name. Defaults to `secret`. |
+| `cluster.secrets.providers.<name>.ca_cert` | Optional PEM CA bundle for a Vault/OpenBao endpoint served by a private CA. Local fakevault config sets this automatically. |
+| `cluster.secrets.providers.<name>.auth_path` | Vault/OpenBao Kubernetes/JWT auth mount path used by the operator. Defaults to `auth/kubernetes`. |
+| `cluster.secrets.providers.<name>.operator_role` | Vault/OpenBao role used by the operator service account. Defaults to the provider name. Workload CSI reads use the binding/service account role separately. |
 | `cluster.kubernetes.api_hostname` | External hostname for the kube-apiserver (defaults to `k8s.<first domain zone>`) |
 | `cluster.kubernetes.api_port` | Port for the kube-apiserver (default: `6443`) |
 | `cluster.kubernetes.cluster_cidr` | CIDR ranges for Pod IPs, joined with commas for kube-controller-manager `--cluster-cidr` |

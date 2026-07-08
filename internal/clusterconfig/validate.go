@@ -110,8 +110,9 @@ func ValidateSecrets(secrets Secrets) error {
 				return fmt.Errorf("%s.project_id is required for gcp", prefix)
 			}
 		case "vault", "openbao":
-			// Address and mount_path are operator/runtime routing fields and are
-			// intentionally stripped from cached cluster summaries.
+			// Address, mount_path, ca_cert, auth_path, and operator_role are
+			// operator/runtime routing fields and are intentionally stripped from
+			// cached cluster summaries.
 		case "":
 			return fmt.Errorf("%s.kind is required", prefix)
 		default:
