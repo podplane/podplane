@@ -88,17 +88,31 @@ func Push(ctx context.Context, opts Options) (string, error) {
 	}
 	defer stopForward()
 	_, _ = fmt.Fprintln(opts.Stderr, "Connected to cluster registry.")
-	_, _ = fmt.Fprintf(opts.Stderr, "Pushing %s...\n", sourceDisplay(source))
+	_, _ = fmt.Fprintf(opts.Stderr, "Pushing %s to %s:%s...\n", sourceDisplay(source), remoteRef.Context().RepositoryStr(), remoteRef.Identifier())
 
 	pfRef, err := name.NewTag("127.0.0.1:"+localPort+"/"+remoteRef.Context().RepositoryStr()+":"+remoteRef.Identifier(), name.Insecure)
 	if err != nil {
 		return "", fmt.Errorf("build port-forward registry reference: %w", err)
 	}
 	auth := authn.FromConfig(authn.AuthConfig{RegistryToken: token})
-	if err := st.Push(ctx, source, store.PushOptions{Destination: pfRef, RemoteOptions: []remote.Option{remote.WithAuth(auth)}}); err != nil {
+	if err := st.Push(ctx, source, store.PushOptions{
+		Destination:   pfRef,
+		RemoteOptions: []remote.Option{remote.WithAuthFromKeychain(tokenKeychain{auth: auth})},
+	}); err != nil {
 		return "", fmt.Errorf("push image: %w", err)
 	}
 	return remoteRef.Name(), nil
+}
+
+// tokenKeychain adapts a fixed authenticator to authn.Keychain so it can
+// override ocimage's default keychain without conflicting with remote.WithAuth.
+type tokenKeychain struct {
+	auth authn.Authenticator
+}
+
+// Resolve returns the fixed authenticator for any registry resource.
+func (k tokenKeychain) Resolve(authn.Resource) (authn.Authenticator, error) {
+	return k.auth, nil
 }
 
 // ensureStoreImage ensures source exists in the Podplane local registry cache.
