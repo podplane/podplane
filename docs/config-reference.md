@@ -196,7 +196,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.secrets.providers.<name>.mount_path` | Vault/OpenBao KV-v2 mount name. Defaults to `secret`. |
 | `cluster.secrets.providers.<name>.ca_cert` | Optional PEM CA bundle for a Vault/OpenBao endpoint served by a private CA. Local fakevault config sets this automatically. |
 | `cluster.secrets.providers.<name>.auth_path` | Vault/OpenBao Kubernetes/JWT auth mount path used by the operator. Defaults to `auth/kubernetes`. |
-| `cluster.secrets.providers.<name>.operator_role` | Vault/OpenBao role used by the operator service account. Defaults to the provider name. Workload CSI reads use the binding/service account role separately. |
+| `cluster.secrets.providers.<name>.operator_role` | Vault/OpenBao role used by the operator service account. Defaults to `podplane-operator`. Workload CSI reads use the binding/service account role separately. |
 | `cluster.kubernetes.api_hostname` | External hostname for the kube-apiserver (defaults to `k8s.<first domain zone>`) |
 | `cluster.kubernetes.api_port` | Port for the kube-apiserver (default: `6443`) |
 | `cluster.kubernetes.cluster_cidr` | CIDR ranges for Pod IPs, joined with commas for kube-controller-manager `--cluster-cidr` |

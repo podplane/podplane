@@ -150,7 +150,7 @@ In `podplane.cluster.jsonc`, secrets provider metadata lives under `cluster.secr
 
 `key_prefix` is optional per provider and defaults to `cluster.id`; set it when multiple clusters should intentionally share a backend prefix for that provider, for example.
 
-Vault/OpenBao providers use Kubernetes/JWT auth, which is the mechanism as the Secrets Store CSI providers used by workloads. The operator authenticates with its own Kubernetes service account token using `auth_path` (default `auth/kubernetes`) and `operator_role` (default provider name). The workload read path authenticates separately as the workload pod service account through the generated `SecretProviderClass` `roleName`.
+Vault/OpenBao providers use Kubernetes/JWT auth, which is the mechanism as the Secrets Store CSI providers used by workloads. The operator authenticates with its own Kubernetes service account token using `auth_path` (default `auth/kubernetes`) and `operator_role` (default `podplane-operator`). The workload read path authenticates separately as the workload pod service account through the generated `SecretProviderClass` `roleName`.
 
 `ca_cert` may be used for Vault/OpenBao endpoints served by a private CA. Local Podplane clusters set this for the local fakevault endpoint automatically.
 
