@@ -28,7 +28,8 @@ podplane secret create --for hello secure-message
 podplane deploy web --name hello \
   --image default-registry.local/mirror/ghcr.io/podplane/hello:latest \
   --hostname hello.default.localhost \
-  --secret secure-message
+  --secret secure-message \
+  -e HELLO_MESSAGE='/var/run/podplane/secrets/secure-message'
 ```
 
 Now when you view the hello app in your browser (the deploy command prints the URL), you will see the contents of `secure-message` on the page. Obviously this is for demonstration purposes, do not print secrets in production!
