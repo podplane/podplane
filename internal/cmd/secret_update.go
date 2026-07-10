@@ -49,7 +49,7 @@ func newSecretUpdateCmd(c *config.Config) *cobra.Command {
 			if secretFlags.Output != "" {
 				return printKeyspace(response, secretFlags.Output)
 			}
-			fmt.Printf("Updated secret %q in %s/%s\n", args[0], ctx.Namespace, ctx.KeyspaceName)
+			fmt.Printf("Updated secret %q for %q in namespace %q using provider %q\n", args[0], secretFlags.For, ctx.Namespace, ctx.Provider)
 			return nil
 		},
 	}

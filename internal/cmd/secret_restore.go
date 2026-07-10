@@ -25,8 +25,11 @@ func newSecretRestoreCmd(c *config.Config) *cobra.Command {
 				return err
 			}
 			client := secrets.Client{Context: secretFlags.Context, Kubeconfig: secretFlags.Kubeconfig}
-			_, err = client.Put(secrets.NewKeyspaceRequest(ctx.Namespace, ctx.KeyspaceName, args[0], "restore", nil))
-			return err
+			if _, err := client.Put(secrets.NewKeyspaceRequest(ctx.Namespace, ctx.KeyspaceName, args[0], "restore", nil)); err != nil {
+				return err
+			}
+			cmd.Printf("Restored secret %q for %q in namespace %q using provider %q\n", args[0], secretFlags.For, ctx.Namespace, ctx.Provider)
+			return nil
 		},
 	}
 }

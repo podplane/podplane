@@ -37,7 +37,11 @@ func newSecretDestroyCmd(c *config.Config) *cobra.Command {
 				}
 			}
 			client := secrets.Client{Context: secretFlags.Context, Kubeconfig: secretFlags.Kubeconfig}
-			return client.Delete(ctx.Namespace, ctx.KeyspaceName, args[0], true)
+			if err := client.Delete(ctx.Namespace, ctx.KeyspaceName, args[0], true); err != nil {
+				return err
+			}
+			cmd.Printf("Destroyed secret %q for %q in namespace %q using provider %q\n", args[0], secretFlags.For, ctx.Namespace, ctx.Provider)
+			return nil
 		},
 	}
 	cmd.Flags().BoolVarP(&secretFlags.AutoApprove, "auto-approve", "y", false, "Skip confirmation prompts")

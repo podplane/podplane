@@ -56,7 +56,19 @@ func newSecretDeleteCmd(c *config.Config) *cobra.Command {
 				}
 			}
 			client := secrets.Client{Context: secretFlags.Context, Kubeconfig: secretFlags.Kubeconfig}
-			return client.Delete(ctx.Namespace, ctx.KeyspaceName, key, secretFlags.Destroy)
+			if err := client.Delete(ctx.Namespace, ctx.KeyspaceName, key, secretFlags.Destroy); err != nil {
+				return err
+			}
+			action := "Archived"
+			if secretFlags.Destroy {
+				action = "Destroyed"
+			}
+			if key == "" {
+				cmd.Printf("%s all secrets for %q in namespace %q using provider %q\n", action, secretFlags.For, ctx.Namespace, ctx.Provider)
+				return nil
+			}
+			cmd.Printf("%s secret %q for %q in namespace %q using provider %q\n", action, key, secretFlags.For, ctx.Namespace, ctx.Provider)
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&secretFlags.All, "all", false, "Delete every key under the selected SecretProviderClass boundary")
