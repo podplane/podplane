@@ -59,6 +59,70 @@ func TestKubernetesTokenValidatorAcceptsServiceAccountJWT(t *testing.T) {
 	}
 }
 
+// TestKubernetesTokenValidatorAcceptsOperatorRole verifies local fakevault
+// accepts the operator role only for the operator service account.
+func TestKubernetesTokenValidatorAcceptsOperatorRole(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	validator := testKubernetesTokenValidator(t, key)
+	rawToken, err := testServiceAccountJWTForSubject(key, "system:serviceaccount:platform-podplane-operator:platform-podplane-operator")
+	if err != nil {
+		t.Fatalf("sign jwt: %v", err)
+	}
+	if err := validator.ValidateToken(context.Background(), "dev", "podplane-operator", rawToken); err != nil {
+		t.Fatalf("validate token: %v", err)
+	}
+}
+
+// TestKubernetesTokenValidatorRejectsMismatchedRole verifies workload roles
+// must match the service account name and cannot claim the operator role.
+func TestKubernetesTokenValidatorRejectsMismatchedRole(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	validator := testKubernetesTokenValidator(t, key)
+	rawToken, err := testServiceAccountJWTForSubject(key, "system:serviceaccount:default:hello")
+	if err != nil {
+		t.Fatalf("sign jwt: %v", err)
+	}
+	if err := validator.ValidateToken(context.Background(), "dev", "hello", rawToken); err != nil {
+		t.Fatalf("validate matching workload role: %v", err)
+	}
+	if err := validator.ValidateToken(context.Background(), "dev", "other", rawToken); err == nil {
+		t.Fatalf("expected mismatched workload role error")
+	}
+	if err := validator.ValidateToken(context.Background(), "dev", "podplane-operator", rawToken); err == nil {
+		t.Fatalf("expected operator role error for non-operator service account")
+	}
+}
+
+func testKubernetesTokenValidator(t *testing.T, key *rsa.PrivateKey) *KubernetesTokenValidator {
+	t.Helper()
+	set, err := testJWKS(key)
+	if err != nil {
+		t.Fatalf("build jwks: %v", err)
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openid/v1/jwks" {
+			http.NotFound(rw, r)
+			return
+		}
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			http.Error(rw, "missing bearer token", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(rw).Encode(set)
+	}))
+	t.Cleanup(server.Close)
+	return &KubernetesTokenValidator{
+		KubernetesAPIURL: func(string) (string, error) { return server.URL, nil },
+		Client:           server.Client(),
+	}
+}
+
 // testJWKS returns a single-key JWKS for signing local validator tests.
 func testJWKS(key *rsa.PrivateKey) (jwk.Set, error) {
 	pub, err := jwk.FromRaw(key.Public())
@@ -81,10 +145,14 @@ func testJWKS(key *rsa.PrivateKey) (jwk.Set, error) {
 // testServiceAccountJWT signs a Kubernetes service-account-shaped JWT for
 // local validator tests.
 func testServiceAccountJWT(key *rsa.PrivateKey) (string, error) {
+	return testServiceAccountJWTForSubject(key, "system:serviceaccount:default:default")
+}
+
+func testServiceAccountJWTForSubject(key *rsa.PrivateKey, subject string) (string, error) {
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
 		Issuer(kubernetesServiceAccountIssuer).
-		Subject("system:serviceaccount:default:default").
+		Subject(subject).
 		IssuedAt(now).
 		Expiration(now.Add(time.Hour)).
 		Build()

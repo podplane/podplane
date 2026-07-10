@@ -19,6 +19,12 @@ import (
 
 const kubernetesServiceAccountIssuer = "https://localhost"
 
+const (
+	operatorRole                    = "podplane-operator"
+	operatorServiceAccountNamespace = "platform-podplane-operator"
+	operatorServiceAccountName      = "platform-podplane-operator"
+)
+
 // KubernetesTokenValidator validates Kubernetes service-account JWTs against
 // the kube-apiserver JWKS endpoint for a cluster.
 type KubernetesTokenValidator struct {
@@ -28,7 +34,7 @@ type KubernetesTokenValidator struct {
 }
 
 // ValidateToken validates a Vault/OpenBao Kubernetes auth login JWT.
-func (v *KubernetesTokenValidator) ValidateToken(ctx context.Context, clusterID, _, rawToken string) error {
+func (v *KubernetesTokenValidator) ValidateToken(ctx context.Context, clusterID, role, rawToken string) error {
 	if v.KubernetesAPIURL == nil {
 		return fmt.Errorf("kubernetes api url resolver is required")
 	}
@@ -51,10 +57,29 @@ func (v *KubernetesTokenValidator) ValidateToken(ctx context.Context, clusterID,
 	if err != nil {
 		return fmt.Errorf("verify kubernetes service-account jwt: %w", err)
 	}
-	if !strings.HasPrefix(tok.Subject(), "system:serviceaccount:") {
+	serviceAccountNamespace, serviceAccountName, ok := serviceAccountSubject(tok.Subject())
+	if !ok {
 		return fmt.Errorf("jwt subject is not a kubernetes service account")
 	}
+	if role == operatorRole {
+		if serviceAccountNamespace != operatorServiceAccountNamespace || serviceAccountName != operatorServiceAccountName {
+			return fmt.Errorf("operator role %q is only valid for service account %s/%s", role, operatorServiceAccountNamespace, operatorServiceAccountName)
+		}
+		return nil
+	}
+	if role != serviceAccountName {
+		return fmt.Errorf("role %q does not match service account %q", role, serviceAccountName)
+	}
 	return nil
+}
+
+// serviceAccountSubject parses a Kubernetes service-account JWT subject.
+func serviceAccountSubject(subject string) (namespace, name string, ok bool) {
+	parts := strings.Split(subject, ":")
+	if len(parts) != 4 || parts[0] != "system" || parts[1] != "serviceaccount" || parts[2] == "" || parts[3] == "" {
+		return "", "", false
+	}
+	return parts[2], parts[3], true
 }
 
 // fetchJWKSet fetches and parses a kube-apiserver JWKS endpoint using the
