@@ -70,7 +70,7 @@ first if you have not yet logged in.`,
 			}
 			if len(extra) > 0 {
 				fmt.Printf("Installing %q will also enable the following dependencies:\n  %s\n", name, strings.Join(extra, ", "))
-				ok, err := tui.Confirm("Continue?", installAutoApprove)
+				ok, err := tui.Confirm("Continue?", installAutoApprove, 0)
 				if err != nil {
 					return err
 				}

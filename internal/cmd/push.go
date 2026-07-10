@@ -46,7 +46,7 @@ func newPushCmd(c *config.Config) *cobra.Command {
 				Stderr:     os.Stderr,
 				Verbose:    flagVerbose,
 				Confirm: func(message string) (bool, error) {
-					return tui.Confirm(message, pushApprove)
+					return tui.Confirm(message, pushApprove, 0)
 				},
 			})
 			if err != nil {

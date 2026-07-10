@@ -40,6 +40,7 @@ These options are available on all commands:
 - [podplane remove](remove.md) – Remove a previously deployed app.
 - [podplane secret](secret.md) – Manage application secrets through the Podplane operator.
 - [podplane logs](logs.md) – Tail logs for a deployed app.
+- [podplane shell](shell.md) – Open a shell or run a command in a deployed app.
 
 ## Component Commands
 

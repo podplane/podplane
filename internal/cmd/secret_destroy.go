@@ -28,7 +28,7 @@ func newSecretDestroyCmd(c *config.Config) *cobra.Command {
 				return err
 			}
 			if !secretFlags.AutoApprove {
-				ok, err := tui.Confirm("Permanently destroy "+args[0]+"?", secretFlags.AutoApprove)
+				ok, err := tui.Confirm("Permanently destroy "+args[0]+"?", secretFlags.AutoApprove, 0)
 				if err != nil {
 					return err
 				}

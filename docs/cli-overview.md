@@ -121,8 +121,9 @@ These commands help you deploy workloads using templates such as the `web` or `w
 - `remove --name <name>` remove a previously deployed app.
 - `secret <command> --for <secret-provider-class-name>` create, update, list, archive, restore, and destroy application secret values through the Podplane operator. Values are encrypted locally before they are sent to Kubernetes.
 - `logs <name>` tail logs for a deployed app.
+- `shell <name> [-- command...]` open a shell in a deployed app or run one command in the app container.
 
-The `build` command packages prebuilt files into OCI images without requiring Docker. The `deploy` and `remove` commands are convenience functions which wrap `helm` commands. The `logs` command wraps `kubectl logs`.
+The `build` command packages prebuilt files into OCI images without requiring Docker. The `deploy` and `remove` commands are convenience functions which wrap `helm` commands. The `logs` command wraps `kubectl logs`; the `shell` command wraps `kubectl exec` and can fall back to `kubectl debug` or a small client-side prompt when an interactive container has no `bash` or `sh`.
 
 ### `install` / `uninstall` commands
 

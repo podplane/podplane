@@ -66,7 +66,7 @@ func newClusterDeleteCmd(c *config.Config) *cobra.Command {
 				Provider:      provider,
 				AutoApprove:   autoApprove,
 				Confirm: func(message string) (bool, error) {
-					return tui.Confirm(message, autoApprove)
+					return tui.Confirm(message, autoApprove, 0)
 				},
 				Status: func(message string) {
 					fmt.Println(message)

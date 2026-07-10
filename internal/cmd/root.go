@@ -130,6 +130,9 @@ func NewRootCmd(c *config.Config) *cobra.Command {
 	logsCmd := newLogsCmd(c)
 	logsCmd.GroupID = "dev"
 	rootCmd.AddCommand(logsCmd)
+	shellCmd := newShellCmd(c)
+	shellCmd.GroupID = "dev"
+	rootCmd.AddCommand(shellCmd)
 
 	// Add subcommands to Local group
 	localCmd := newLocalCmd(c)

@@ -47,7 +47,7 @@ func newSecretDeleteCmd(c *config.Config) *cobra.Command {
 				if secretFlags.All {
 					target = "all keys under this SecretProviderClass boundary"
 				}
-				ok, err := tui.Confirm("Permanently destroy "+target+"?", secretFlags.AutoApprove)
+				ok, err := tui.Confirm("Permanently destroy "+target+"?", secretFlags.AutoApprove, 0)
 				if err != nil {
 					return err
 				}

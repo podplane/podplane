@@ -66,7 +66,7 @@ func Run(ctx context.Context, opts Options) (string, error) {
 	if err := executor.Init(applyCtx, dir); err != nil {
 		return "", err
 	}
-	ok, err := tui.Confirm("Apply generated OpenTofu/Terraform changes?", opts.AutoApprove)
+	ok, err := tui.Confirm("Apply generated OpenTofu/Terraform changes?", opts.AutoApprove, 0)
 	if err != nil {
 		return "", err
 	}

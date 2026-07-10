@@ -133,7 +133,7 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 			if err := executor.Init(ctx, dir); err != nil {
 				return err
 			}
-			ok, err := tui.Confirm("Apply generated OpenTofu/Terraform changes?", autoApprove)
+			ok, err := tui.Confirm("Apply generated OpenTofu/Terraform changes?", autoApprove, 0)
 			if err != nil {
 				return err
 			}
@@ -152,14 +152,14 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 // clusterCreateOIDCIssuer collects or creates the OIDC issuer URL needed by a
 // new cluster config.
 func clusterCreateOIDCIssuer(originDir string, noApply bool, autoApprove bool) (string, error) {
-	hasOIDC, err := tui.Confirm("Do you already have an OIDC issuer for this cluster?", false)
+	hasOIDC, err := tui.Confirm("Do you already have an OIDC issuer for this cluster?", false, 0)
 	if err != nil {
 		return "", err
 	}
 	if hasOIDC {
 		return tui.Input("Cluster OIDC", "OIDC issuer URL", "https://auth.example.com", tui.Required("OIDC issuer URL"))
 	}
-	createOIDC, err := tui.Confirm("Set up a new Easy OIDC <https://easy-oidc.dev> server now?", false)
+	createOIDC, err := tui.Confirm("Set up a new Easy OIDC <https://easy-oidc.dev> server now?", false, 0)
 	if err != nil {
 		return "", err
 	}

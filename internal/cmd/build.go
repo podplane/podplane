@@ -162,6 +162,10 @@ Deploy it locally:
 View logs:
 
   podplane logs %s
-`, name, tags[0], name, appbuild.RegistryClusterID(tags[0])+".localhost", name)
+
+Open a shell:
+
+  podplane shell %s
+`, name, tags[0], name, appbuild.RegistryClusterID(tags[0])+".localhost", name, name)
 	return err
 }

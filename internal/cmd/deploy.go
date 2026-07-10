@@ -182,7 +182,7 @@ func ensureTemplateDependencies(required []string) error {
 	all := append([]string{}, plan.Apps...)
 	all = append(all, plan.CRDs...)
 	fmt.Printf("Template requires components that are not installed. Podplane will enable:\n  %s\n", strings.Join(all, ", "))
-	ok, err := tui.Confirm("Install missing template dependencies?", deployAutoApprove)
+	ok, err := tui.Confirm("Install missing template dependencies?", deployAutoApprove, 0)
 	if err != nil {
 		return err
 	}
