@@ -70,7 +70,7 @@ __Control Plane VMs__:
 
 While most of the configuration for each VM kind is the same, there are a set of variable inputs to the `vmconfig` package, propagated to each service via environment variable `.env` files:
 
-1. `/opt/podplane/etc/user-data.env`: immutable, created on first-boot by the cloud-init `user-data.sh` script, read only by the `/opt/podplane/bin/configure.sh` script. Contains for example the instance ID, Nstance nonce JWT, and OIDC issuer URL.
+1. `/opt/podplane/etc/user-data.env`: immutable, created on first-boot by the cloud-init `user-data.sh` script, read only by the `/opt/podplane/bin/configure.sh` script. Contains for example the instance ID and Nstance server addresses. The Nstance registration nonce and CA certificate are written to separate identity files.
 
 2. `/opt/podplane/etc/detected.env`: immutable, created during the first run of the `/opt/podplane/bin/bootstrap.sh` script, and read only by the `/opt/podplane/bin/configure.sh` script. Contains for example the detected instance hostname and IPv4 / IPv6 addresses.
 
@@ -161,8 +161,6 @@ The Podplane `.tf` configuration derives the following variables which can also 
 | `KUBE_API_PUBLIC_HOSTNAME` | `local.kubernetes_api_hostname` |
 | `KUBE_API_PORT` | `tostring(local.kubernetes_api_port)` |
 | `KUBE_API_INTERNAL_LB_HOSTNAME` | Internal Kubernetes API load balancer hostname, when generated for worker nodes |
-| `NSTANCE_SERVER_REGISTRATION_ADDR` | Nstance server template value `{{ .Server.RegistrationAddr }}` |
-| `NSTANCE_SERVER_AGENT_ADDR` | Nstance server template value `{{ .Server.AgentAddr }}` |
 | `OIDC_ISSUER` | `local.oidc_issuer_url` |
 | `NETSY_BUCKET` | `aws_s3_bucket.netsy.bucket` |
 | `NETSY_ASSUME_ROLE` | `aws_iam_role.netsy.arn` |

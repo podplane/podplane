@@ -23,6 +23,7 @@ func TestConfigureLocalNstancePreparesBootstrap(t *testing.T) {
 		"10.0.2.2:1234",
 		"10.0.2.2:5678",
 		"10.0.2.2",
+		"OIDC_CA_CERT='test'\n",
 	)
 	if err != nil {
 		t.Fatalf("configureLocalNstance: %v", err)
@@ -38,6 +39,16 @@ func TestConfigureLocalNstancePreparesBootstrap(t *testing.T) {
 	}
 	if bootstrap.ServerAgentAddr != "10.0.2.2:5678" {
 		t.Fatalf("agent addr = %q", bootstrap.ServerAgentAddr)
+	}
+
+	tenant := readFakeNstanceTenantState(t, dataDir, "cluster-a")
+	files, ok := tenant["Files"].(map[string]any)
+	if !ok {
+		t.Fatalf("tenant files missing or invalid: %#v", tenant["Files"])
+	}
+	mutableEnv, ok := files["mutable.env"].(map[string]any)
+	if !ok || mutableEnv["template"] != "OIDC_CA_CERT='test'\n" {
+		t.Fatalf("tenant mutable.env = %#v", files["mutable.env"])
 	}
 
 	instance := readFakeNstanceInstanceState(t, dataDir, "knc123")
@@ -58,6 +69,7 @@ func TestConfigureLocalNstancePreservesRegisteredInstanceIdentity(t *testing.T) 
 		"10.0.2.2:1234",
 		"10.0.2.2:5678",
 		"10.0.2.2",
+		"OIDC_CA_CERT='test'\n",
 	); err != nil {
 		t.Fatalf("configureLocalNstance initial: %v", err)
 	}
@@ -93,6 +105,7 @@ func TestConfigureLocalNstancePreservesRegisteredInstanceIdentity(t *testing.T) 
 		"10.0.2.2:2234",
 		"10.0.2.2:6678",
 		"10.0.2.2",
+		"OIDC_CA_CERT='updated'\n",
 	); err != nil {
 		t.Fatalf("configureLocalNstance existing: %v", err)
 	}
@@ -126,6 +139,20 @@ func readFakeNstanceInstanceState(t *testing.T, dataDir, instanceID string) fake
 		t.Fatalf("decode fake nstance instance state: %v", err)
 	}
 	return instance
+}
+
+func readFakeNstanceTenantState(t *testing.T, dataDir, tenantID string) map[string]any {
+	t.Helper()
+	tenantPath := filepath.Join(dataDir, "nstance-fake", "fakeserver", "tenants", tenantID, "runtime.json")
+	tenantData, err := os.ReadFile(tenantPath)
+	if err != nil {
+		t.Fatalf("read fake nstance tenant state: %v", err)
+	}
+	var tenant map[string]any
+	if err := json.Unmarshal(tenantData, &tenant); err != nil {
+		t.Fatalf("decode fake nstance tenant state: %v", err)
+	}
+	return tenant
 }
 
 func TestPodplaneRuntimeConfigIncludesInternalKubeAPISAN(t *testing.T) {

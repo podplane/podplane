@@ -402,8 +402,6 @@ func mutableEnvValue() hclExpression {
   KUBE_API_PUBLIC_HOSTNAME = local.kubernetes_api_hostname
   KUBE_API_PORT = tostring(local.kubernetes_api_port)
   KUBE_API_INTERNAL_LB_HOSTNAME = ""
-  NSTANCE_SERVER_REGISTRATION_ADDR = "{{ .Server.RegistrationAddr }}"
-  NSTANCE_SERVER_AGENT_ADDR = "{{ .Server.AgentAddr }}"
   KUBE_API_ETCD_SERVERS = var.kube_api_etcd_servers
   OIDC_ISSUER = local.oidc_issuer_url
   OIDC_CA_CERT = var.oidc_ca_cert

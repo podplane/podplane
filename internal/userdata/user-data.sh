@@ -6,11 +6,6 @@
 # Manifest version: {{.Manifest.VMConfig.Version}}
 # OS: {{.Manifest.VMConfig.OS.Name}}
 # Arch: {{.Manifest.VMConfig.OS.Arch}}
-# Cluster bucket names (cluster-prefixed):
-#   netsy={{.Vars.NETSY_BUCKET}}
-#   registry={{.Vars.REGISTRY_BUCKET}}
-#   telemetry={{.Vars.TELEMETRY_S3_BUCKET}}
-# OIDC Issuer: {{.Vars.OIDC_ISSUER}}
 {{- if .DepsMirrorURL}}
 # Deps Mirror={{.DepsMirrorURL}}
 {{- end}}
@@ -122,46 +117,9 @@ PROVIDER_INSTANCE_TYPE='{{.Instance.Type}}'
 AWS_ACCOUNT_ID='{{.AWSAccountID}}'
 GOOGLE_PROJECT_ID='{{.GoogleProjectID}}'
 
-OIDC_ISSUER='{{.Vars.OIDC_ISSUER}}'
-OIDC_CA_CERT='{{.Vars.OIDC_CA_CERT}}'
-
-KUBE_LOG_LEVEL='{{.Vars.KUBE_LOG_LEVEL}}'
-KUBE_API_PUBLIC_HOSTNAME='{{.Vars.KUBE_API_PUBLIC_HOSTNAME}}'
-KUBE_API_PORT='{{.Vars.KUBE_API_PORT}}'
-KUBE_API_INTERNAL_LB_HOSTNAME='{{.Vars.KUBE_API_INTERNAL_LB_HOSTNAME}}'
-KUBE_API_ETCD_SERVERS='{{.Vars.KUBE_API_ETCD_SERVERS}}'
-
 NSTANCE_CA_CERT='{{.Cluster.CACert}}'
 NSTANCE_SERVER_REGISTRATION_ADDR='{{.Server.RegistrationAddr}}'
 NSTANCE_SERVER_AGENT_ADDR='{{.Server.AgentAddr}}'
-
-NETSY_BUCKET='{{.Vars.NETSY_BUCKET}}'
-NETSY_ENDPOINT='{{.Vars.NETSY_ENDPOINT}}'
-NETSY_REGION='{{.Vars.NETSY_REGION}}'
-NETSY_ASSUME_ROLE='{{.Vars.NETSY_ASSUME_ROLE}}'
-NETSY_ACCESS_KEY_ID='{{.Vars.NETSY_ACCESS_KEY_ID}}'
-NETSY_SECRET_ACCESS_KEY='{{.Vars.NETSY_SECRET_ACCESS_KEY}}'
-
-TELEMETRY_ENABLED='{{.Vars.TELEMETRY_ENABLED}}'
-TELEMETRY_S3_BUCKET='{{.Vars.TELEMETRY_S3_BUCKET}}'
-TELEMETRY_S3_ENDPOINT='{{.Vars.TELEMETRY_S3_ENDPOINT}}'
-TELEMETRY_S3_REGION='{{.Vars.TELEMETRY_S3_REGION}}'
-TELEMETRY_S3_ASSUME_ROLE='{{.Vars.TELEMETRY_S3_ASSUME_ROLE}}'
-TELEMETRY_LOG_SERVICES='{{.Vars.TELEMETRY_LOG_SERVICES}}'
-TELEMETRY_LOG_CLOUDINIT='{{.Vars.TELEMETRY_LOG_CLOUDINIT}}'
-TELEMETRY_S3_ACCESS_KEY_ID='{{.Vars.TELEMETRY_S3_ACCESS_KEY_ID}}'
-TELEMETRY_S3_SECRET_ACCESS_KEY='{{.Vars.TELEMETRY_S3_SECRET_ACCESS_KEY}}'
-TELEMETRY_OTLP_ENDPOINT='{{.Vars.TELEMETRY_OTLP_ENDPOINT}}'
-
-REGISTRY_ENABLED='{{.Vars.REGISTRY_ENABLED}}'
-REGISTRY_BUCKET='{{.Vars.REGISTRY_BUCKET}}'
-REGISTRY_HOSTNAME='{{.Vars.REGISTRY_HOSTNAME}}'
-REGISTRY_ENDPOINT='{{.Vars.REGISTRY_ENDPOINT}}'
-REGISTRY_REGION='{{.Vars.REGISTRY_REGION}}'
-REGISTRY_ASSUME_ROLE='{{.Vars.REGISTRY_ASSUME_ROLE}}'
-REGISTRY_ACCESS_KEY_ID='{{.Vars.REGISTRY_ACCESS_KEY_ID}}'
-REGISTRY_SECRET_ACCESS_KEY='{{.Vars.REGISTRY_SECRET_ACCESS_KEY}}'
-AWS_S3_USE_PATH_STYLE='{{.Vars.AWS_S3_USE_PATH_STYLE}}'
 USERDATA_ENV
 chmod 0600 /opt/podplane/etc/user-data.env
 
@@ -213,43 +171,11 @@ log "Applying local provider VM preparation..."
 set +u
 # shellcheck source=/dev/null
 source /opt/podplane/etc/user-data.env
-# shellcheck source=/dev/null
-source /opt/podplane/etc/detected.env
-# shellcheck source=/dev/null
-source /opt/podplane/etc/mutable.env
 set -u
 
-for url in \
-  "${OIDC_ISSUER:-}" \
-  "${NSTANCE_SERVER_REGISTRATION_ADDR:-}" \
-  "${NSTANCE_SERVER_AGENT_ADDR:-}" \
-  "${NETSY_ENDPOINT:-}" \
-  "${TELEMETRY_S3_ENDPOINT:-}" \
-  "${REGISTRY_ENDPOINT:-}"
-do
-  [ -n "$url" ] || continue
-  host="${url#*://}"
-  host="${host%%/*}"
-  host="${host##*@}"
-  if [[ "$host" == \[*\]* ]]; then
-    host="${host%%]*}"
-    host="${host#[}"
-  elif [[ "$host" == *:*:* ]]; then
-    continue
-  else
-    host="${host%%:*}"
-  fi
-  [ -n "$host" ] || continue
-  [ "$host" = "localhost" ] && continue
-  [[ "$host" =~ ^[0-9.]+$ ]] && continue
-  if ! grep -Eq "[[:space:]]${host}([[:space:]]|$)" /etc/hosts; then
-    if [ "$host" = "oidc.localhost" ]; then
-      echo "127.0.0.1 ${host}" >> /etc/hosts
-    else
-      echo "10.0.2.2 ${host}" >> /etc/hosts
-    fi
-  fi
-done
+if ! grep -Eq "[[:space:]]oidc\.localhost([[:space:]]|$)" /etc/hosts; then
+  echo "127.0.0.1 oidc.localhost" >> /etc/hosts
+fi
 
 if [ -f /etc/systemd/resolved.conf ] && ! grep -qF "DNS=1.1.1.1" /etc/systemd/resolved.conf; then
   echo "DNS=1.1.1.1" >> /etc/systemd/resolved.conf

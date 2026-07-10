@@ -31,7 +31,7 @@ type nstanceAgentUserData struct {
 // It writes tenant config, ensures stable kubernetes service-account keys exist,
 // prepares an instance nonce, and returns the env vars that user-data needs to
 // hand to nstance-agent.
-func configureLocalNstance(ctx context.Context, dataDir, clusterID, instanceID, instanceKind, registrationAddr, agentAddr, advertiseHost string) (nstanceAgentUserData, error) {
+func configureLocalNstance(ctx context.Context, dataDir, clusterID, instanceID, instanceKind, registrationAddr, agentAddr, advertiseHost, mutableEnv string) (nstanceAgentUserData, error) {
 	store, err := newLocalNstanceStore(filepath.Join(dataDir, "nstance-fake"))
 	if err != nil {
 		return nstanceAgentUserData{}, fmt.Errorf("initialize fake nstance store: %w", err)
@@ -65,6 +65,7 @@ func configureLocalNstance(ctx context.Context, dataDir, clusterID, instanceID, 
 	// first so ConfigureInstance can embed the tenant's runtime config hash in
 	// the registration nonce, matching real Nstance server behavior.
 	tenantConfig := podplaneRuntimeConfig(clusterID, map[string]string{
+		"mutable.env":          mutableEnv,
 		"ca.pub":               "",
 		"ca.crt":               string(nstanceCACertPEM),
 		"service-accounts.pub": serviceAccountPub,

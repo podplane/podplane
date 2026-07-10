@@ -83,6 +83,44 @@ type LocalData struct {
 // userdata template and rendered into mutable.env.
 type MutableVars map[string]string
 
+// mutableEnvKeys defines the vmconfig mutable.env contract. Keep this in sync
+// with vmconfig's default mutable.env file.
+var mutableEnvKeys = []string{
+	"SSH_AUTHORIZED_KEY",
+	"TELEMETRY_ENABLED",
+	"TELEMETRY_LOG_CLOUDINIT",
+	"TELEMETRY_LOG_SERVICES",
+	"TELEMETRY_OTLP_ENDPOINT",
+	"TELEMETRY_S3_ACCESS_KEY_ID",
+	"TELEMETRY_S3_ASSUME_ROLE",
+	"TELEMETRY_S3_BUCKET",
+	"TELEMETRY_S3_ENDPOINT",
+	"TELEMETRY_S3_REGION",
+	"TELEMETRY_S3_SECRET_ACCESS_KEY",
+	"OIDC_CA_CERT",
+	"OIDC_ISSUER",
+	"KUBE_API_ETCD_SERVERS",
+	"KUBE_API_INTERNAL_LB_HOSTNAME",
+	"KUBE_API_PORT",
+	"KUBE_API_PUBLIC_HOSTNAME",
+	"KUBE_LOG_LEVEL",
+	"AWS_S3_USE_PATH_STYLE",
+	"NETSY_REGION",
+	"NETSY_ENDPOINT",
+	"NETSY_BUCKET",
+	"NETSY_ACCESS_KEY_ID",
+	"NETSY_SECRET_ACCESS_KEY",
+	"NETSY_ASSUME_ROLE",
+	"REGISTRY_ENABLED",
+	"REGISTRY_REGION",
+	"REGISTRY_ENDPOINT",
+	"REGISTRY_BUCKET",
+	"REGISTRY_ACCESS_KEY_ID",
+	"REGISTRY_SECRET_ACCESS_KEY",
+	"REGISTRY_ASSUME_ROLE",
+	"REGISTRY_HOSTNAME",
+}
+
 // ManifestFilter selects dependencies that apply to this VM's provider.
 func (v *TemplateVars) ManifestFilter() deps.ItemFilter {
 	return deps.ItemFilter{Providers: []string{v.Provider.Kind}}
@@ -104,45 +142,11 @@ func (v MutableVars) SetObjectStorageRegion(region string) {
 	v["REGISTRY_REGION"] = region
 }
 
-// RenderMutableEnv renders the subset of user-data env that vmconfig's
-// update-mutable-env.sh accepts for post-boot updates.
+// RenderMutableEnv renders the mutable.env file delivered to vmconfig.
 func RenderMutableEnv(vars MutableVars) string {
-	lines := []string{
-		"SSH_AUTHORIZED_KEY=" + QuoteEnvValue(vars["SSH_AUTHORIZED_KEY"]),
-		"KUBE_API_PUBLIC_HOSTNAME=" + QuoteEnvValue(vars["KUBE_API_PUBLIC_HOSTNAME"]),
-		"KUBE_API_PORT=" + QuoteEnvValue(vars["KUBE_API_PORT"]),
-		"KUBE_API_INTERNAL_LB_HOSTNAME=" + QuoteEnvValue(vars["KUBE_API_INTERNAL_LB_HOSTNAME"]),
-		"NSTANCE_SERVER_REGISTRATION_ADDR=" + QuoteEnvValue(vars["NSTANCE_SERVER_REGISTRATION_ADDR"]),
-		"NSTANCE_SERVER_AGENT_ADDR=" + QuoteEnvValue(vars["NSTANCE_SERVER_AGENT_ADDR"]),
-		"KUBE_API_ETCD_SERVERS=" + QuoteEnvValue(vars["KUBE_API_ETCD_SERVERS"]),
-		"OIDC_ISSUER=" + QuoteEnvValue(vars["OIDC_ISSUER"]),
-		"OIDC_CA_CERT=" + QuoteEnvValue(vars["OIDC_CA_CERT"]),
-		"KUBE_LOG_LEVEL=" + QuoteEnvValue(vars["KUBE_LOG_LEVEL"]),
-		"NETSY_BUCKET=" + QuoteEnvValue(vars["NETSY_BUCKET"]),
-		"NETSY_ENDPOINT=" + QuoteEnvValue(vars["NETSY_ENDPOINT"]),
-		"NETSY_REGION=" + QuoteEnvValue(vars["NETSY_REGION"]),
-		"NETSY_ASSUME_ROLE=" + QuoteEnvValue(vars["NETSY_ASSUME_ROLE"]),
-		"NETSY_ACCESS_KEY_ID=" + QuoteEnvValue(vars["NETSY_ACCESS_KEY_ID"]),
-		"NETSY_SECRET_ACCESS_KEY=" + QuoteEnvValue(vars["NETSY_SECRET_ACCESS_KEY"]),
-		"TELEMETRY_ENABLED=" + QuoteEnvValue(vars["TELEMETRY_ENABLED"]),
-		"TELEMETRY_LOG_SERVICES=" + QuoteEnvValue(vars["TELEMETRY_LOG_SERVICES"]),
-		"TELEMETRY_LOG_CLOUDINIT=" + QuoteEnvValue(vars["TELEMETRY_LOG_CLOUDINIT"]),
-		"TELEMETRY_S3_BUCKET=" + QuoteEnvValue(vars["TELEMETRY_S3_BUCKET"]),
-		"TELEMETRY_S3_ENDPOINT=" + QuoteEnvValue(vars["TELEMETRY_S3_ENDPOINT"]),
-		"TELEMETRY_S3_REGION=" + QuoteEnvValue(vars["TELEMETRY_S3_REGION"]),
-		"TELEMETRY_S3_ASSUME_ROLE=" + QuoteEnvValue(vars["TELEMETRY_S3_ASSUME_ROLE"]),
-		"TELEMETRY_S3_ACCESS_KEY_ID=" + QuoteEnvValue(vars["TELEMETRY_S3_ACCESS_KEY_ID"]),
-		"TELEMETRY_S3_SECRET_ACCESS_KEY=" + QuoteEnvValue(vars["TELEMETRY_S3_SECRET_ACCESS_KEY"]),
-		"TELEMETRY_OTLP_ENDPOINT=" + QuoteEnvValue(vars["TELEMETRY_OTLP_ENDPOINT"]),
-		"REGISTRY_ENABLED=" + QuoteEnvValue(vars["REGISTRY_ENABLED"]),
-		"REGISTRY_BUCKET=" + QuoteEnvValue(vars["REGISTRY_BUCKET"]),
-		"REGISTRY_HOSTNAME=" + QuoteEnvValue(vars["REGISTRY_HOSTNAME"]),
-		"REGISTRY_ENDPOINT=" + QuoteEnvValue(vars["REGISTRY_ENDPOINT"]),
-		"REGISTRY_REGION=" + QuoteEnvValue(vars["REGISTRY_REGION"]),
-		"REGISTRY_ASSUME_ROLE=" + QuoteEnvValue(vars["REGISTRY_ASSUME_ROLE"]),
-		"REGISTRY_ACCESS_KEY_ID=" + QuoteEnvValue(vars["REGISTRY_ACCESS_KEY_ID"]),
-		"REGISTRY_SECRET_ACCESS_KEY=" + QuoteEnvValue(vars["REGISTRY_SECRET_ACCESS_KEY"]),
-		"AWS_S3_USE_PATH_STYLE=" + QuoteEnvValue(vars["AWS_S3_USE_PATH_STYLE"]),
+	lines := make([]string, 0, len(mutableEnvKeys))
+	for _, key := range mutableEnvKeys {
+		lines = append(lines, key+"="+QuoteEnvValue(vars[key]))
 	}
 	return strings.Join(lines, "\n") + "\n"
 }

@@ -22,11 +22,9 @@ func TestStageMutableEnvIfChangedStagesWhenBaselineDiffers(t *testing.T) {
 	}
 
 	desired := userdata.RenderMutableEnv(userdata.MutableVars{
-		"OIDC_ISSUER":                      "https://10.0.2.2:1234/oidc",
-		"NSTANCE_SERVER_REGISTRATION_ADDR": "10.0.2.2:2345",
-		"NSTANCE_SERVER_AGENT_ADDR":        "10.0.2.2:3456",
-		"NETSY_ENDPOINT":                   "http://10.0.2.2:4567/s3/data",
-		"REGISTRY_ENDPOINT":                "http://10.0.2.2:4567/s3/cache",
+		"OIDC_ISSUER":       "https://10.0.2.2:1234/oidc",
+		"NETSY_ENDPOINT":    "http://10.0.2.2:4567/s3/data",
+		"REGISTRY_ENDPOINT": "http://10.0.2.2:4567/s3/cache",
 	})
 
 	staged, err := manager.stageMutableEnvIfChanged(ctx, store, "cluster-a", "knc123", desired)

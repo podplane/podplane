@@ -96,16 +96,6 @@ func TestRender_Local_HasDebianPasswordLine(t *testing.T) {
 	if !strings.Contains(out, "hostnamectl set-hostname ins06djbn8xgdtz92astpmdv1jfk4") {
 		t.Errorf("expected hostnamectl line with InstanceID; got:\n%s", out)
 	}
-	// cluster-prefixed bucket names
-	if !strings.Contains(out, "netsy=example-cluster-netsy") {
-		t.Errorf("expected cluster-prefixed netsy bucket; got:\n%s", out)
-	}
-	if !strings.Contains(out, "registry=example-cluster-registry") {
-		t.Errorf("expected cluster-prefixed registry bucket; got:\n%s", out)
-	}
-	if !strings.Contains(out, "telemetry=example-cluster-telemetry") {
-		t.Errorf("expected cluster-prefixed telemetry bucket; got:\n%s", out)
-	}
 	// manifest items rendered (os-image excluded — VM is already running on it)
 	if strings.Contains(out, "os-image") {
 		t.Errorf("os-image should not appear in install items; got:\n%s", out)
@@ -131,29 +121,11 @@ func TestRender_Local_HasDebianPasswordLine(t *testing.T) {
 	if !strings.Contains(out, "PROVIDER_KIND='local'") {
 		t.Errorf("expected PROVIDER_KIND in user-data.env; got:\n%s", out)
 	}
-	if !strings.Contains(out, "KUBE_API_PUBLIC_HOSTNAME='localhost'") {
-		t.Errorf("expected KUBE_API_PUBLIC_HOSTNAME in user-data.env; got:\n%s", out)
+	if strings.Contains(out, "TELEMETRY_S3_ACCESS_KEY_ID=") || strings.Contains(out, "TELEMETRY_LOG_SERVICES=") || strings.Contains(out, "TELEMETRY_LOG_CLOUDINIT=") {
+		t.Errorf("did not expect telemetry vars in user-data.env; got:\n%s", out)
 	}
-	if !strings.Contains(out, "KUBE_API_PORT='6443'") {
-		t.Errorf("expected KUBE_API_PORT in user-data.env; got:\n%s", out)
-	}
-	if !strings.Contains(out, "NETSY_ENDPOINT='http://10.0.2.2:1234/s3'") {
-		t.Errorf("expected NETSY_ENDPOINT in user-data.env; got:\n%s", out)
-	}
-	if !strings.Contains(out, "TELEMETRY_S3_ACCESS_KEY_ID='test'") {
-		t.Errorf("expected TELEMETRY_S3_ACCESS_KEY_ID in user-data.env; got:\n%s", out)
-	}
-	if !strings.Contains(out, "TELEMETRY_LOG_SERVICES='first-boot-env,cron,ssh,netsy,nstance-agent,nstance-recv-watch,containerd,kube-apiserver,kube-controller-manager,kube-scheduler,kubelet,zot'") {
-		t.Errorf("expected TELEMETRY_LOG_SERVICES in user-data.env; got:\n%s", out)
-	}
-	if !strings.Contains(out, "TELEMETRY_LOG_CLOUDINIT='true'") {
-		t.Errorf("expected TELEMETRY_LOG_CLOUDINIT in user-data.env; got:\n%s", out)
-	}
-	if !strings.Contains(out, "REGISTRY_SECRET_ACCESS_KEY='test'") {
-		t.Errorf("expected REGISTRY_SECRET_ACCESS_KEY in user-data.env; got:\n%s", out)
-	}
-	if !strings.Contains(out, "REGISTRY_ENABLED='true'") {
-		t.Errorf("expected REGISTRY_ENABLED default in user-data.env; got:\n%s", out)
+	if strings.Contains(out, "OIDC_ISSUER='") || strings.Contains(out, "KUBE_API_PUBLIC_HOSTNAME='") || strings.Contains(out, "KUBE_API_PORT='") || strings.Contains(out, "NETSY_ENDPOINT='") || strings.Contains(out, "REGISTRY_SECRET_ACCESS_KEY='") || strings.Contains(out, "REGISTRY_ENABLED='") {
+		t.Errorf("did not expect oidc/kube/netsy/registry config in user-data.env; got:\n%s", out)
 	}
 	if strings.Contains(out, "NSTANCE_REGISTRATION_NONCE_JWT=") {
 		t.Errorf("did not expect nstance registration nonce to be written to user-data.env; got:\n%s", out)
@@ -180,8 +152,11 @@ func TestRender_Local_HasDebianPasswordLine(t *testing.T) {
 	if !strings.Contains(out, "# --- Local provider VM preparation") {
 		t.Errorf("expected local provider preparation section; got:\n%s", out)
 	}
-	if !strings.Contains(out, "10.0.2.2 ${host}") {
-		t.Errorf("expected local provider host mapping; got:\n%s", out)
+	if !strings.Contains(out, "127.0.0.1 oidc.localhost") {
+		t.Errorf("expected local provider OIDC host mapping; got:\n%s", out)
+	}
+	if strings.Contains(out, "10.0.2.2 ${host}") {
+		t.Errorf("did not expect generic local provider host mapping; got:\n%s", out)
 	}
 	if !strings.Contains(out, "/opt/podplane/bin/restart.sh") {
 		t.Errorf("expected local user-data to restart services explicitly; got:\n%s", out)
@@ -284,28 +259,11 @@ func TestValidate_MissingClusterID(t *testing.T) {
 	}
 }
 
-func TestValidate_InvalidKubeAPIPort(t *testing.T) {
-	v := baseVars("local")
-	v.Vars["KUBE_API_PORT"] = "not-a-port"
-	if _, err := v.Render(); err == nil {
-		t.Fatalf("expected validation error for invalid KubeAPIPort")
-	}
-}
-
 func TestValidate_InvalidTelemetryLogCloudinit(t *testing.T) {
 	v := baseVars("local")
 	v.Vars["TELEMETRY_LOG_CLOUDINIT"] = "maybe"
 	if _, err := v.Render(); err == nil {
 		t.Fatalf("expected validation error for invalid TelemetryLogCloudinit")
-	}
-}
-
-func TestValidate_RegistryEnabledRequiresHostname(t *testing.T) {
-	v := baseVars("local")
-	v.Vars["REGISTRY_ENABLED"] = "true"
-	v.Vars["REGISTRY_HOSTNAME"] = ""
-	if _, err := v.Render(); err == nil {
-		t.Fatalf("expected validation error when registry is enabled without a hostname")
 	}
 }
 
@@ -322,18 +280,6 @@ func TestValidate_RejectsUnsafeEnvValue(t *testing.T) {
 	v.Vars["OIDC_CA_CERT"] = "line1\nline2"
 	if _, err := v.Render(); err == nil {
 		t.Fatalf("expected validation error for env value containing newline")
-	}
-}
-
-func TestApplyDefaults_RespectsExplicitNames(t *testing.T) {
-	v := baseVars("local")
-	v.Vars["NETSY_BUCKET"] = "explicit-netsy"
-	out, err := v.Render()
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	if !strings.Contains(out, "netsy=explicit-netsy") {
-		t.Errorf("expected explicit netsy bucket to be preserved; got:\n%s", out)
 	}
 }
 

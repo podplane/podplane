@@ -299,35 +299,11 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	}
 	encodedCACert := base64.StdEncoding.EncodeToString(certBytes)
 
-	// Configure the local fake Nstance deployment before rendering user-data. The
-	// background `podplane local server` process owns the listening gRPC services;
-	// this call opens the same durable store to write tenant config and bootstrap
-	// state idempotently.
-	nstanceBootstrap, err := configureLocalNstance(
-		context.Background(),
-		m.dataDir,
-		clusterID,
-		instanceID,
-		kind,
-		nstanceRegistrationAddr,
-		nstanceAgentAddr,
-		hostMachineAddr,
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to configure local fake nstance: %w", err)
-	}
-	nstanceStore, err := newLocalNstanceStore(filepath.Join(m.dataDir, "nstance-fake"))
-	if err != nil {
-		return "", fmt.Errorf("failed to initialize local fake nstance store: %w", err)
-	}
-
-	// Render the user-data script.
 	vars := userdata.TemplateVars{
 		Manifest:      manifest,
 		DepsMirrorURL: depsServerURL,
 		Cluster: userdata.ClusterData{
-			ID:     clusterID,
-			CACert: nstanceBootstrap.CACert,
+			ID: clusterID,
 		},
 		Provider: userdata.ProviderData{
 			Kind:   "local",
@@ -339,8 +315,8 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 			Type: "local",
 		},
 		Server: userdata.ServerData{
-			RegistrationAddr: nstanceBootstrap.ServerRegistrationAddr,
-			AgentAddr:        nstanceBootstrap.ServerAgentAddr,
+			RegistrationAddr: nstanceRegistrationAddr,
+			AgentAddr:        nstanceAgentAddr,
 		},
 		Local: userdata.LocalData{
 			VMForwardPortToLocalServerHTTPS: localVMForwardPortToLocalServerHTTPS,
@@ -359,7 +335,6 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 			"REGISTRY_HOSTNAME":        LocalRegistryHostname(clusterID),
 			"REGISTRY_BUCKET":          "registry",
 		},
-		Nonce: nstanceBootstrap.RegistrationNonceJWT,
 	}
 	vars.Vars.SetObjectStorageEndpoint(s3DataEndpointURL)
 	vars.Vars["REGISTRY_ENDPOINT"] = s3CacheEndpointURL
@@ -371,17 +346,46 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	vars.Vars["REGISTRY_ACCESS_KEY_ID"] = "test"
 	vars.Vars["REGISTRY_SECRET_ACCESS_KEY"] = "test"
 	vars.Vars["AWS_S3_USE_PATH_STYLE"] = "true"
-	vars.Vars["NSTANCE_SERVER_REGISTRATION_ADDR"] = nstanceBootstrap.ServerRegistrationAddr
-	vars.Vars["NSTANCE_SERVER_AGENT_ADDR"] = nstanceBootstrap.ServerAgentAddr
 	vars.ApplyDefaults()
 	mutableEnv := userdata.RenderMutableEnv(vars.Vars)
-	mutableEnvChanged := false
+
+	// Configure the local fake Nstance deployment before rendering user-data. The
+	// background `podplane local server` process owns the listening gRPC services;
+	// this call opens the same durable store to write tenant config and bootstrap
+	// state idempotently.
+	nstanceBootstrap, err := configureLocalNstance(
+		context.Background(),
+		m.dataDir,
+		clusterID,
+		instanceID,
+		kind,
+		nstanceRegistrationAddr,
+		nstanceAgentAddr,
+		hostMachineAddr,
+		mutableEnv,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to configure local fake nstance: %w", err)
+	}
+	vars.Cluster.CACert = nstanceBootstrap.CACert
+	vars.Server.RegistrationAddr = nstanceBootstrap.ServerRegistrationAddr
+	vars.Server.AgentAddr = nstanceBootstrap.ServerAgentAddr
+	vars.Nonce = nstanceBootstrap.RegistrationNonceJWT
+	nstanceStore, err := newLocalNstanceStore(filepath.Join(m.dataDir, "nstance-fake"))
+	if err != nil {
+		return "", fmt.Errorf("failed to initialize local fake nstance store: %w", err)
+	}
+
 	if vmExisted {
-		mutableEnvChanged, err = m.stageMutableEnvIfChanged(context.Background(), nstanceStore, clusterID, instanceID, mutableEnv)
+		_, err = m.stageMutableEnvIfChanged(context.Background(), nstanceStore, clusterID, instanceID, mutableEnv)
 		if err != nil {
 			return "", fmt.Errorf("failed to stage local mutable env update: %w", err)
 		}
+	} else if err := m.stageMutableEnv(context.Background(), nstanceStore, clusterID, instanceID, mutableEnv); err != nil {
+		return "", fmt.Errorf("failed to stage initial local mutable env: %w", err)
 	}
+
+	// Render the user-data script.
 	rendered, err := vars.Render()
 	if err != nil {
 		return "", fmt.Errorf("failed to render userdata: %w", err)
@@ -412,11 +416,6 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 		return "", fmt.Errorf("failed to start VM: %w", err)
 	}
 	progress.Done("vm", "VM", "")
-	if !vmExisted {
-		if err := m.writeMutableEnvBaseline(clusterID, mutableEnv); err != nil {
-			return "", fmt.Errorf("failed to record local mutable env baseline: %w", err)
-		}
-	}
 	if err := writeState(m.runtimeDir, clusterState{
 		ClusterID: clusterID,
 		Backend:   "qemu",
@@ -451,7 +450,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 		return "", fmt.Errorf("failed to configure local HTTPS server forwarder: %w", err)
 	}
 	progress.Done("https-forward", "local HTTPS server forwarder", fmt.Sprintf("https://%s:%d", m.vm.NodeIP(), localVMForwardPortToLocalServerHTTPS))
-	if vmExisted && mutableEnvChanged {
+	if vmExisted {
 		if err := m.repairExistingNstanceAgentEnv(context.Background(), vmPorts.SSH, nstanceBootstrap.ServerRegistrationAddr, nstanceBootstrap.ServerAgentAddr, progressOutput); err != nil {
 			return "", fmt.Errorf("failed to repair local nstance agent endpoint config: %w", err)
 		}
@@ -480,6 +479,9 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 		return "", fmt.Errorf("local VM Kubernetes API readiness check failed: %w", err)
 	}
 	progress.Done("api-ready", "Kubernetes API ready", "")
+	if err := m.writeMutableEnvBaseline(clusterID, mutableEnv); err != nil {
+		return "", fmt.Errorf("failed to record local mutable env baseline: %w", err)
+	}
 
 	// Print any pending update nudge. Non-blocking: if the goroutine hasn't
 	// produced a result yet (e.g. fast-fail before its 2s timeout), we drop
@@ -495,9 +497,9 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	return stashPath, nil
 }
 
-// repairExistingNstanceAgentEnv updates only nstance-agent env for existing VMs
-// if the fake nstance-server ports have changed, enabling the agent to reconnect
-// and receive a mutable.env update to fix ports for all other services.
+// repairExistingNstanceAgentEnv updates nstance endpoint config for existing
+// local VMs if the fake nstance-server ports have changed, enabling the agent
+// to reconnect and receive mutable.env updates for all other services.
 func (m *Local) repairExistingNstanceAgentEnv(ctx context.Context, sshPort int, registrationAddr, agentAddr string, quiet bool) error {
 	if err := m.WaitForReadiness(ctx, ReadinessOptions{Quiet: quiet}); err != nil {
 		return err
@@ -505,7 +507,7 @@ func (m *Local) repairExistingNstanceAgentEnv(ctx context.Context, sshPort int, 
 	registrationExpr := "s|^NSTANCE_SERVER_REGISTRATION_ADDR=.*|NSTANCE_SERVER_REGISTRATION_ADDR=" + userdata.QuoteEnvValue(registrationAddr) + "|"
 	agentExpr := "s|^NSTANCE_SERVER_AGENT_ADDR=.*|NSTANCE_SERVER_AGENT_ADDR=" + userdata.QuoteEnvValue(agentAddr) + "|"
 	command := fmt.Sprintf(
-		"sudo sed -i -e %s -e %s /opt/env/nstance-agent.env && sudo systemctl restart nstance-agent",
+		"sudo sed -i -e %s -e %s /opt/podplane/etc/user-data.env /opt/env/nstance-agent.env && sudo systemctl restart nstance-agent",
 		userdata.QuoteEnvValue(registrationExpr),
 		userdata.QuoteEnvValue(agentExpr),
 	)
