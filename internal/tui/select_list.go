@@ -35,6 +35,16 @@ func SelectList(action string, title string, items []list.Item) (string, bool, e
 	return "", true, fmt.Errorf("error processing selection")
 }
 
+// SelectString asks the user to choose one string value from a terminal list.
+func SelectString(action string, title string, values []string) (string, bool, error) {
+	items := make([]list.Item, 0, len(values)+1)
+	for _, value := range values {
+		items = append(items, Item{Key: value, Label: value})
+	}
+	items = append(items, Item{Key: "", Label: "Cancel", Cancel: true})
+	return SelectList(action, title, items)
+}
+
 const listWidth = 20
 const listHeight = 14
 
