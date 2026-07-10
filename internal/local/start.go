@@ -350,8 +350,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 		Vars: userdata.MutableVars{
 			"SSH_AUTHORIZED_KEY":       sshAuthorizedKey,
 			"OIDC_ISSUER":              oidcIssuerURL,
-			"OIDC_CUSTOM_CA":           encodedCACert,
-			"OIDC_CA_FILE":             "/opt/crt/oidc-ca.pem",
+			"OIDC_CA_CERT":             encodedCACert,
 			"KUBE_LOG_LEVEL":           "5",
 			"KUBE_API_PUBLIC_HOSTNAME": "localhost",
 			"KUBE_API_ETCD_SERVERS":    "https://127.0.0.1:2378",

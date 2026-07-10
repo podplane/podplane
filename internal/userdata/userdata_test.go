@@ -64,7 +64,6 @@ func baseVars(provider string) *TemplateVars {
 		Vars: MutableVars{
 			"SSH_AUTHORIZED_KEY":       "ssh-ed25519 AAAAexample",
 			"OIDC_ISSUER":              "http://10.0.2.2:1234/oidc",
-			"OIDC_CA_FILE":             "/opt/crt/oidc-ca.pem",
 			"KUBE_LOG_LEVEL":           "5",
 			"KUBE_API_PUBLIC_HOSTNAME": "localhost",
 			"KUBE_API_ETCD_SERVERS":    "https://127.0.0.1:2378",
@@ -320,7 +319,7 @@ func TestValidate_InvalidTelemetryLogServices(t *testing.T) {
 
 func TestValidate_RejectsUnsafeEnvValue(t *testing.T) {
 	v := baseVars("local")
-	v.Vars["OIDC_CUSTOM_CA"] = "line1\nline2"
+	v.Vars["OIDC_CA_CERT"] = "line1\nline2"
 	if _, err := v.Render(); err == nil {
 		t.Fatalf("expected validation error for env value containing newline")
 	}

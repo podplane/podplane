@@ -97,8 +97,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	}{
 		{"ssh_authorized_key", "SSH public key allowed for VM login.", "string", str("")},
 		{"kube_api_etcd_servers", "etcd-compatible endpoint list used by kube-apiserver.", "string", str("")},
-		{"oidc_custom_ca", "Base64-encoded custom OIDC issuer CA certificate.", "string", str("")},
-		{"oidc_ca_file", "OIDC issuer CA file path on the VM.", "string", str("")},
+		{"oidc_ca_cert", "Base64-encoded OIDC issuer CA certificate.", "string", str("")},
 		{"kube_log_level", "Kubernetes component log verbosity.", "number", num(2)},
 		{"netsy_endpoint", "Custom Netsy object-storage endpoint URL.", "string", str("")},
 		{"netsy_access_key_id", "Netsy object-storage access key ID for non-IAM providers.", "string", str("")},
@@ -407,8 +406,7 @@ func mutableEnvValue() hclExpression {
   NSTANCE_SERVER_AGENT_ADDR = "{{ .Server.AgentAddr }}"
   KUBE_API_ETCD_SERVERS = var.kube_api_etcd_servers
   OIDC_ISSUER = local.oidc_issuer_url
-  OIDC_CUSTOM_CA = var.oidc_custom_ca
-  OIDC_CA_FILE = var.oidc_ca_file
+  OIDC_CA_CERT = var.oidc_ca_cert
   KUBE_LOG_LEVEL = tostring(var.kube_log_level)
 
   NETSY_BUCKET = aws_s3_bucket.netsy.bucket

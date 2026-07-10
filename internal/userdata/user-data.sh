@@ -123,8 +123,7 @@ AWS_ACCOUNT_ID='{{.AWSAccountID}}'
 GOOGLE_PROJECT_ID='{{.GoogleProjectID}}'
 
 OIDC_ISSUER='{{.Vars.OIDC_ISSUER}}'
-OIDC_CUSTOM_CA='{{.Vars.OIDC_CUSTOM_CA}}'
-OIDC_CA_FILE='{{.Vars.OIDC_CA_FILE}}'
+OIDC_CA_CERT='{{.Vars.OIDC_CA_CERT}}'
 
 KUBE_LOG_LEVEL='{{.Vars.KUBE_LOG_LEVEL}}'
 KUBE_API_PUBLIC_HOSTNAME='{{.Vars.KUBE_API_PUBLIC_HOSTNAME}}'
@@ -259,11 +258,6 @@ fi
 
 if [ -n "${INSTANCE_NETDEV:-}" ] && ! ip -6 addr show dev "$INSTANCE_NETDEV" | grep -q 'fd00::1/64'; then
   ip -6 addr add fd00::1/64 dev "$INSTANCE_NETDEV"
-fi
-
-if [ -n "${OIDC_CUSTOM_CA:-}" ] && [ -n "${OIDC_CA_FILE:-}" ]; then
-  echo "${OIDC_CUSTOM_CA}" | base64 -d > "$OIDC_CA_FILE"
-  chmod 0644 "$OIDC_CA_FILE"
 fi
 
 cat >/etc/systemd/system/podplane-local-https-forward.service <<'LOCAL_HTTPS_FORWARD_SERVICE'

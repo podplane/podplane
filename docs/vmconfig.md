@@ -133,8 +133,7 @@ These variables can be set/overriden alongside the Podplane-generated `.tf` conf
 | --- | --- |
 | `SSH_AUTHORIZED_KEY` | `var.ssh_authorized_key` |
 | `KUBE_API_ETCD_SERVERS` | `var.kube_api_etcd_servers` |
-| `OIDC_CUSTOM_CA` | `var.oidc_custom_ca` |
-| `OIDC_CA_FILE` | `var.oidc_ca_file` |
+| `OIDC_CA_CERT` | `var.oidc_ca_cert` |
 | `KUBE_LOG_LEVEL` | `tostring(var.kube_log_level)` |
 | `NETSY_ENDPOINT` | `var.netsy_endpoint` |
 | `NETSY_ACCESS_KEY_ID` | `var.netsy_access_key_id` |

@@ -10,14 +10,8 @@ variable "kube_api_etcd_servers" {
   default = ""
 }
 
-variable "oidc_custom_ca" {
-  description = "Base64-encoded custom OIDC issuer CA certificate."
-  type = string
-  default = ""
-}
-
-variable "oidc_ca_file" {
-  description = "OIDC issuer CA file path on the VM."
+variable "oidc_ca_cert" {
+  description = "Base64-encoded OIDC issuer CA certificate."
   type = string
   default = ""
 }
