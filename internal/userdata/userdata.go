@@ -12,7 +12,6 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/go-playground/validator/v10"
 	"github.com/podplane/podplane/internal/deps"
 )
 
@@ -35,10 +34,13 @@ type TemplateVars struct {
 	Provider ProviderData
 	Instance InstanceData
 	Server   ServerData
-	Vars     MutableVars
+
+	// ImmutableSSHAuthorizedKeys is written only by user-data and changing it
+	// changes the Nstance instance configuration hash.
+	ImmutableSSHAuthorizedKeys string
 
 	// AWSAccountID and GoogleProjectID are dedicated fields because they are
-	// tf provider inputs, not Nstance mutable env vars pushed through Vars.
+	// provider inputs, not Nstance mutable env vars.
 	AWSAccountID    string
 	GoogleProjectID string
 
@@ -79,42 +81,41 @@ type LocalData struct {
 	LocalServerHTTPSPort            string
 }
 
-// MutableVars are the variables exposed to the canonical Nstance-style
-// userdata template and rendered into mutable.env.
+// MutableVars are the variables delivered by nstance-agent through mutable.env.
 type MutableVars map[string]string
 
 // mutableEnvKeys defines the vmconfig mutable.env contract. Keep this in sync
 // with vmconfig's default mutable.env file.
 var mutableEnvKeys = []string{
-	"SSH_AUTHORIZED_KEY",
+	"SSH_AUTHORIZED_KEYS",
 	"TELEMETRY_ENABLED",
 	"TELEMETRY_LOG_CLOUDINIT",
 	"TELEMETRY_LOG_SERVICES",
 	"TELEMETRY_OTLP_ENDPOINT",
-	"TELEMETRY_S3_ACCESS_KEY_ID",
-	"TELEMETRY_S3_ASSUME_ROLE",
 	"TELEMETRY_S3_BUCKET",
-	"TELEMETRY_S3_ENDPOINT",
 	"TELEMETRY_S3_REGION",
+	"TELEMETRY_S3_ENDPOINT",
+	"TELEMETRY_S3_ACCESS_KEY_ID",
 	"TELEMETRY_S3_SECRET_ACCESS_KEY",
-	"OIDC_CA_CERT",
+	"TELEMETRY_S3_ASSUME_ROLE",
 	"OIDC_ISSUER",
+	"OIDC_CA_CERT",
 	"KUBE_API_ETCD_SERVERS",
+	"KUBE_API_PUBLIC_HOSTNAME",
 	"KUBE_API_INTERNAL_LB_HOSTNAME",
 	"KUBE_API_PORT",
-	"KUBE_API_PUBLIC_HOSTNAME",
 	"KUBE_LOG_LEVEL",
 	"AWS_S3_USE_PATH_STYLE",
+	"NETSY_BUCKET",
 	"NETSY_REGION",
 	"NETSY_ENDPOINT",
-	"NETSY_BUCKET",
 	"NETSY_ACCESS_KEY_ID",
 	"NETSY_SECRET_ACCESS_KEY",
 	"NETSY_ASSUME_ROLE",
 	"REGISTRY_ENABLED",
+	"REGISTRY_BUCKET",
 	"REGISTRY_REGION",
 	"REGISTRY_ENDPOINT",
-	"REGISTRY_BUCKET",
 	"REGISTRY_ACCESS_KEY_ID",
 	"REGISTRY_SECRET_ACCESS_KEY",
 	"REGISTRY_ASSUME_ROLE",
@@ -142,13 +143,16 @@ func (v MutableVars) SetObjectStorageRegion(region string) {
 	v["REGISTRY_REGION"] = region
 }
 
-// RenderMutableEnv renders the mutable.env file delivered to vmconfig.
-func RenderMutableEnv(vars MutableVars) string {
+// RenderMutableEnv validates and renders the mutable.env file delivered to vmconfig.
+func RenderMutableEnv(vars MutableVars) (string, error) {
+	if err := vars.Validate(); err != nil {
+		return "", err
+	}
 	lines := make([]string, 0, len(mutableEnvKeys))
 	for _, key := range mutableEnvKeys {
 		lines = append(lines, key+"="+QuoteEnvValue(vars[key]))
 	}
-	return strings.Join(lines, "\n") + "\n"
+	return strings.Join(lines, "\n") + "\n", nil
 }
 
 // QuoteEnvValue quotes a value using the same single-quote format as vmconfig's
@@ -157,81 +161,62 @@ func QuoteEnvValue(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
-// ApplyDefaults populates derived values (e.g. cluster-prefixed bucket names)
-// when the caller has not set them explicitly.
-func (v *TemplateVars) ApplyDefaults() {
-	if v.Vars == nil {
-		v.Vars = MutableVars{}
+// ApplyDefaults populates mutable var defaults and values derived from clusterID.
+func (v MutableVars) ApplyDefaults(clusterID string) {
+	defaults := map[string]string{
+		"KUBE_LOG_LEVEL":          "2",
+		"KUBE_API_PORT":           "6443",
+		"TELEMETRY_ENABLED":       "false",
+		"TELEMETRY_LOG_CLOUDINIT": "true",
+		"REGISTRY_ENABLED":        "true",
 	}
-	if v.Vars["KUBE_LOG_LEVEL"] == "" {
-		v.Vars["KUBE_LOG_LEVEL"] = "2"
-	}
-	if v.Vars["KUBE_API_PORT"] == "" {
-		v.Vars["KUBE_API_PORT"] = "6443"
-	}
-	if v.Vars["TELEMETRY_ENABLED"] == "" {
-		v.Vars["TELEMETRY_ENABLED"] = "false"
-	}
-	if v.Vars["TELEMETRY_LOG_CLOUDINIT"] == "" {
-		v.Vars["TELEMETRY_LOG_CLOUDINIT"] = "true"
-	}
-	if v.Vars["REGISTRY_ENABLED"] == "" {
-		v.Vars["REGISTRY_ENABLED"] = "true"
-	}
-	if v.Cluster.ID != "" {
-		if v.Vars["NETSY_BUCKET"] == "" {
-			v.Vars["NETSY_BUCKET"] = fmt.Sprintf("%s-netsy", v.Cluster.ID)
+	for key, value := range defaults {
+		if v[key] == "" {
+			v[key] = value
 		}
-		if v.Vars["REGISTRY_BUCKET"] == "" {
-			v.Vars["REGISTRY_BUCKET"] = fmt.Sprintf("%s-registry", v.Cluster.ID)
-		}
-		if v.Vars["TELEMETRY_S3_BUCKET"] == "" {
-			v.Vars["TELEMETRY_S3_BUCKET"] = fmt.Sprintf("%s-telemetry", v.Cluster.ID)
+	}
+	if clusterID == "" {
+		return
+	}
+	for key, suffix := range map[string]string{
+		"NETSY_BUCKET":        "netsy",
+		"REGISTRY_BUCKET":     "registry",
+		"TELEMETRY_S3_BUCKET": "telemetry",
+	} {
+		if v[key] == "" {
+			v[key] = fmt.Sprintf("%s-%s", clusterID, suffix)
 		}
 	}
 }
-
-// validate is package-scoped so struct tags are cached across calls.
-var validate = validator.New(validator.WithRequiredStructEnabled())
 
 var serviceListRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*(,[a-z0-9][a-z0-9-]*)*$`)
 
-func init() {
-	if err := validate.RegisterValidation("uintstr", validateUintString); err != nil {
-		panic(err)
+// Validate checks values delivered through mutable.env.
+func (v MutableVars) Validate() error {
+	for key, value := range v {
+		if strings.ContainsAny(value, "'\n\r") {
+			return fmt.Errorf("mutable environment variable %s contains a quote or newline", key)
+		}
 	}
-	if err := validate.RegisterValidation("portstr", validatePortString); err != nil {
-		panic(err)
+	if _, err := strconv.ParseUint(v["KUBE_LOG_LEVEL"], 10, 64); err != nil {
+		return fmt.Errorf("KUBE_LOG_LEVEL must be a non-negative integer")
 	}
-	if err := validate.RegisterValidation("boolstr", validateBoolString); err != nil {
-		panic(err)
+	port, err := strconv.ParseUint(v["KUBE_API_PORT"], 10, 16)
+	if err != nil || port == 0 {
+		return fmt.Errorf("KUBE_API_PORT must be an integer between 1 and 65535")
 	}
-	if err := validate.RegisterValidation("service_list", validateServiceList); err != nil {
-		panic(err)
+	for _, key := range []string{"TELEMETRY_LOG_CLOUDINIT", "TELEMETRY_ENABLED", "REGISTRY_ENABLED"} {
+		if v[key] != "true" && v[key] != "false" {
+			return fmt.Errorf("%s must be either true or false", key)
+		}
 	}
-}
-
-func validateUintString(fl validator.FieldLevel) bool {
-	_, err := strconv.ParseUint(fl.Field().String(), 10, 64)
-	return err == nil
-}
-
-func validatePortString(fl validator.FieldLevel) bool {
-	port, err := strconv.ParseUint(fl.Field().String(), 10, 16)
-	return err == nil && port > 0
-}
-
-func validateBoolString(fl validator.FieldLevel) bool {
-	switch fl.Field().String() {
-	case "true", "false":
-		return true
-	default:
-		return false
+	if services := v["TELEMETRY_LOG_SERVICES"]; services != "" && !serviceListRE.MatchString(services) {
+		return fmt.Errorf("TELEMETRY_LOG_SERVICES must be a comma-separated list of lowercase service names")
 	}
-}
-
-func validateServiceList(fl validator.FieldLevel) bool {
-	return serviceListRE.MatchString(fl.Field().String())
+	if v["REGISTRY_ENABLED"] == "true" && v["REGISTRY_HOSTNAME"] == "" {
+		return fmt.Errorf("REGISTRY_HOSTNAME is required when REGISTRY_ENABLED is true")
+	}
+	return nil
 }
 
 // Validate checks the TemplateVars are populated correctly enough to render.
@@ -239,14 +224,14 @@ func (v *TemplateVars) Validate() error {
 	if v.Manifest == nil {
 		return fmt.Errorf("manifest failed validation on 'required' validator")
 	}
-	if err := validateCanonicalValues(v); err != nil {
+	if err := validateTemplateValues(v); err != nil {
 		return err
 	}
 	return nil
 }
 
-// validateCanonicalValues checks the canonical Nstance-shaped userdata inputs.
-func validateCanonicalValues(v *TemplateVars) error {
+// validateTemplateValues checks values interpolated into user-data.
+func validateTemplateValues(v *TemplateVars) error {
 	check := func(name string, value string) error {
 		if strings.ContainsAny(value, "'\n\r") {
 			return fmt.Errorf("%s failed validation on 'envstr' validator", name)
@@ -256,41 +241,21 @@ func validateCanonicalValues(v *TemplateVars) error {
 	isTemplateValue := func(value string) bool {
 		return strings.Contains(value, "{{")
 	}
-	validUintString := func(value string) bool {
-		_, err := strconv.ParseUint(value, 10, 64)
-		return err == nil
-	}
-	validPortString := func(value string) bool {
-		port, err := strconv.ParseUint(value, 10, 16)
-		return err == nil && port > 0
-	}
-	validBoolString := func(value string) bool {
-		switch value {
-		case "true", "false":
-			return true
-		default:
-			return false
-		}
-	}
 	values := map[string]string{
-		"Cluster.ID":              v.Cluster.ID,
-		"Provider.Kind":           v.Provider.Kind,
-		"Provider.Region":         v.Provider.Region,
-		"Provider.Zone":           v.Provider.Zone,
-		"Instance.ID":             v.Instance.ID,
-		"Instance.Type":           v.Instance.Type,
-		"Server.RegistrationAddr": v.Server.RegistrationAddr,
-		"Server.AgentAddr":        v.Server.AgentAddr,
-		"AWSAccountID":            v.AWSAccountID,
-		"GoogleProjectID":         v.GoogleProjectID,
+		"Cluster.ID":                 v.Cluster.ID,
+		"Provider.Kind":              v.Provider.Kind,
+		"Provider.Region":            v.Provider.Region,
+		"Provider.Zone":              v.Provider.Zone,
+		"Instance.ID":                v.Instance.ID,
+		"Instance.Type":              v.Instance.Type,
+		"Server.RegistrationAddr":    v.Server.RegistrationAddr,
+		"Server.AgentAddr":           v.Server.AgentAddr,
+		"AWSAccountID":               v.AWSAccountID,
+		"GoogleProjectID":            v.GoogleProjectID,
+		"ImmutableSSHAuthorizedKeys": v.ImmutableSSHAuthorizedKeys,
 	}
 	for name, value := range values {
 		if err := check(name, value); err != nil {
-			return err
-		}
-	}
-	for key, value := range v.Vars {
-		if err := check("Vars."+key, value); err != nil {
 			return err
 		}
 	}
@@ -306,33 +271,11 @@ func validateCanonicalValues(v *TemplateVars) error {
 	if v.Cluster.ID == "" {
 		return fmt.Errorf("Cluster.ID failed validation on 'required' validator")
 	}
-	if !isTemplateValue(v.Vars["KUBE_LOG_LEVEL"]) && !validUintString(v.Vars["KUBE_LOG_LEVEL"]) {
-		return fmt.Errorf("Vars.KUBE_LOG_LEVEL failed validation on 'uintstr' validator")
-	}
-	if !isTemplateValue(v.Vars["KUBE_API_PORT"]) && !validPortString(v.Vars["KUBE_API_PORT"]) {
-		return fmt.Errorf("Vars.KUBE_API_PORT failed validation on 'portstr' validator")
-	}
-	if !isTemplateValue(v.Vars["TELEMETRY_LOG_CLOUDINIT"]) && !validBoolString(v.Vars["TELEMETRY_LOG_CLOUDINIT"]) {
-		return fmt.Errorf("Vars.TELEMETRY_LOG_CLOUDINIT failed validation on 'boolstr' validator")
-	}
-	if !isTemplateValue(v.Vars["TELEMETRY_ENABLED"]) && !validBoolString(v.Vars["TELEMETRY_ENABLED"]) {
-		return fmt.Errorf("Vars.TELEMETRY_ENABLED failed validation on 'boolstr' validator")
-	}
-	if !isTemplateValue(v.Vars["REGISTRY_ENABLED"]) && !validBoolString(v.Vars["REGISTRY_ENABLED"]) {
-		return fmt.Errorf("Vars.REGISTRY_ENABLED failed validation on 'boolstr' validator")
-	}
-	if v.Vars["TELEMETRY_LOG_SERVICES"] != "" && !isTemplateValue(v.Vars["TELEMETRY_LOG_SERVICES"]) && !serviceListRE.MatchString(v.Vars["TELEMETRY_LOG_SERVICES"]) {
-		return fmt.Errorf("Vars.TELEMETRY_LOG_SERVICES failed validation on 'service_list' validator")
-	}
-	if v.Vars["REGISTRY_ENABLED"] == "true" && v.Vars["REGISTRY_HOSTNAME"] == "" {
-		return fmt.Errorf("Vars.REGISTRY_HOSTNAME failed validation on 'required_if_registry_enabled' validator")
-	}
 	return nil
 }
 
 // Render produces the rendered user-data script.
 func (v *TemplateVars) Render() (string, error) {
-	v.ApplyDefaults()
 	if err := v.Validate(); err != nil {
 		return "", err
 	}
@@ -349,7 +292,7 @@ func (v *TemplateVars) Render() (string, error) {
 
 // SourceForNstance renders the canonical userdata template into the template
 // source nstance-server renders later for each VM.
-func SourceForNstance(manifest *deps.Manifest, depsMirrorURL string, providerKind string, awsAccountID string, googleProjectID string) (string, error) {
+func SourceForNstance(manifest *deps.Manifest, depsMirrorURL string, providerKind string, awsAccountID string, googleProjectID string, immutableSSHAuthorizedKeys string) (string, error) {
 	vars := TemplateVars{
 		Manifest:      manifest,
 		DepsMirrorURL: depsMirrorURL,
@@ -370,44 +313,10 @@ func SourceForNstance(manifest *deps.Manifest, depsMirrorURL string, providerKin
 			RegistrationAddr: "{{ .Server.RegistrationAddr }}",
 			AgentAddr:        "{{ .Server.AgentAddr }}",
 		},
-		AWSAccountID:    awsAccountID,
-		GoogleProjectID: googleProjectID,
-		Vars: map[string]string{
-			"SSH_AUTHORIZED_KEY":             "{{ .Vars.SSH_AUTHORIZED_KEY }}",
-			"OIDC_ISSUER":                    "{{ .Vars.OIDC_ISSUER }}",
-			"OIDC_CA_CERT":                   "{{ .Vars.OIDC_CA_CERT }}",
-			"KUBE_LOG_LEVEL":                 "{{ .Vars.KUBE_LOG_LEVEL }}",
-			"KUBE_API_PUBLIC_HOSTNAME":       "{{ .Vars.KUBE_API_PUBLIC_HOSTNAME }}",
-			"KUBE_API_PORT":                  "{{ .Vars.KUBE_API_PORT }}",
-			"KUBE_API_INTERNAL_LB_HOSTNAME":  "{{ .Vars.KUBE_API_INTERNAL_LB_HOSTNAME }}",
-			"KUBE_API_ETCD_SERVERS":          "{{ .Vars.KUBE_API_ETCD_SERVERS }}",
-			"NETSY_BUCKET":                   "{{ .Vars.NETSY_BUCKET }}",
-			"NETSY_ENDPOINT":                 "{{ .Vars.NETSY_ENDPOINT }}",
-			"NETSY_ASSUME_ROLE":              "{{ .Vars.NETSY_ASSUME_ROLE }}",
-			"NETSY_REGION":                   "{{ .Vars.NETSY_REGION }}",
-			"NETSY_ACCESS_KEY_ID":            "{{ .Vars.NETSY_ACCESS_KEY_ID }}",
-			"NETSY_SECRET_ACCESS_KEY":        "{{ .Vars.NETSY_SECRET_ACCESS_KEY }}",
-			"TELEMETRY_ENABLED":              "{{ .Vars.TELEMETRY_ENABLED }}",
-			"TELEMETRY_S3_BUCKET":            "{{ .Vars.TELEMETRY_S3_BUCKET }}",
-			"TELEMETRY_S3_ENDPOINT":          "{{ .Vars.TELEMETRY_S3_ENDPOINT }}",
-			"TELEMETRY_S3_REGION":            "{{ .Vars.TELEMETRY_S3_REGION }}",
-			"TELEMETRY_S3_ASSUME_ROLE":       "{{ .Vars.TELEMETRY_S3_ASSUME_ROLE }}",
-			"TELEMETRY_LOG_SERVICES":         "{{ .Vars.TELEMETRY_LOG_SERVICES }}",
-			"TELEMETRY_LOG_CLOUDINIT":        "{{ .Vars.TELEMETRY_LOG_CLOUDINIT }}",
-			"TELEMETRY_S3_ACCESS_KEY_ID":     "{{ .Vars.TELEMETRY_S3_ACCESS_KEY_ID }}",
-			"TELEMETRY_S3_SECRET_ACCESS_KEY": "{{ .Vars.TELEMETRY_S3_SECRET_ACCESS_KEY }}",
-			"TELEMETRY_OTLP_ENDPOINT":        "{{ .Vars.TELEMETRY_OTLP_ENDPOINT }}",
-			"REGISTRY_ENABLED":               "{{ .Vars.REGISTRY_ENABLED }}",
-			"REGISTRY_BUCKET":                "{{ .Vars.REGISTRY_BUCKET }}",
-			"REGISTRY_HOSTNAME":              "{{ .Vars.REGISTRY_HOSTNAME }}",
-			"REGISTRY_ENDPOINT":              "{{ .Vars.REGISTRY_ENDPOINT }}",
-			"REGISTRY_REGION":                "{{ .Vars.REGISTRY_REGION }}",
-			"REGISTRY_ASSUME_ROLE":           "{{ .Vars.REGISTRY_ASSUME_ROLE }}",
-			"REGISTRY_ACCESS_KEY_ID":         "{{ .Vars.REGISTRY_ACCESS_KEY_ID }}",
-			"REGISTRY_SECRET_ACCESS_KEY":     "{{ .Vars.REGISTRY_SECRET_ACCESS_KEY }}",
-			"AWS_S3_USE_PATH_STYLE":          "{{ .Vars.AWS_S3_USE_PATH_STYLE }}",
-		},
-		Nonce: "{{ .Nonce }}",
+		AWSAccountID:               awsAccountID,
+		GoogleProjectID:            googleProjectID,
+		ImmutableSSHAuthorizedKeys: immutableSSHAuthorizedKeys,
+		Nonce:                      "{{ .Nonce }}",
 	}
 	return vars.Render()
 }

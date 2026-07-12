@@ -21,11 +21,17 @@ func TestStageMutableEnvIfChangedStagesWhenBaselineDiffers(t *testing.T) {
 		t.Fatalf("newLocalNstanceStore: %v", err)
 	}
 
-	desired := userdata.RenderMutableEnv(userdata.MutableVars{
+	vars := userdata.MutableVars{
 		"OIDC_ISSUER":       "https://10.0.2.2:1234/oidc",
 		"NETSY_ENDPOINT":    "http://10.0.2.2:4567/s3/data",
 		"REGISTRY_ENDPOINT": "http://10.0.2.2:4567/s3/cache",
-	})
+		"REGISTRY_HOSTNAME": "registry.example.com",
+	}
+	vars.ApplyDefaults("cluster-a")
+	desired, err := userdata.RenderMutableEnv(vars)
+	if err != nil {
+		t.Fatalf("RenderMutableEnv: %v", err)
+	}
 
 	staged, err := manager.stageMutableEnvIfChanged(ctx, store, "cluster-a", "knc123", desired)
 	if err != nil {

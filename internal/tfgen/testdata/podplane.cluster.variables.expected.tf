@@ -1,5 +1,11 @@
-variable "ssh_authorized_key" {
-  description = "SSH public key allowed for VM login."
+variable "ssh_authorized_keys" {
+  description = "SSH public keys allowed for VM login."
+  type = string
+  default = ""
+}
+
+variable "immutable_ssh_authorized_keys" {
+  description = "Immutable SSH public keys for debugging early VM boot failures. Changing this value rotates affected VMs."
   type = string
   default = ""
 }

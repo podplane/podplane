@@ -70,7 +70,7 @@ __Control Plane VMs__:
 
 While most of the configuration for each VM kind is the same, there are a set of variable inputs to the `vmconfig` package, propagated to each service via environment variable `.env` files:
 
-1. `/opt/podplane/etc/user-data.env`: immutable, created on first-boot by the cloud-init `user-data.sh` script, read only by the `/opt/podplane/bin/configure.sh` script. Contains for example the instance ID and Nstance server addresses. The Nstance registration nonce and CA certificate are written to separate identity files.
+1. `/opt/podplane/etc/user-data.env`: immutable, created on first-boot by the cloud-init `user-data.sh` script, read only by the `/opt/podplane/bin/configure.sh` script. Contains the instance identity and minimum configuration needed to register nstance-agent. The Nstance registration nonce and CA certificate are written to separate identity files. It can also contain `IMMUTABLE_SSH_AUTHORIZED_KEYS` for debugging failures before nstance-agent becomes healthy; note that changing or removing those keys requires rotating affected VMs, so the `SSH_AUTHORIZED_KEYS` mutable alternative is recommended for general SSH access.
 
 2. `/opt/podplane/etc/detected.env`: immutable, created during the first run of the `/opt/podplane/bin/bootstrap.sh` script, and read only by the `/opt/podplane/bin/configure.sh` script. Contains for example the detected instance hostname and IPv4 / IPv6 addresses.
 
@@ -131,41 +131,41 @@ These variables can be set/overriden alongside the Podplane-generated `.tf` conf
 
 | Environment variable | Generated OpenTofu/Terraform variable |
 | --- | --- |
-| `SSH_AUTHORIZED_KEY` | `var.ssh_authorized_key` |
-| `KUBE_API_ETCD_SERVERS` | `var.kube_api_etcd_servers` |
+| `SSH_AUTHORIZED_KEYS` | `var.ssh_authorized_keys` |
+| `TELEMETRY_ENABLED` | `tostring(var.telemetry_enabled)` |
+| `TELEMETRY_LOG_CLOUDINIT` | `tostring(var.telemetry_log_cloudinit)` |
+| `TELEMETRY_LOG_SERVICES` | `var.telemetry_log_services` |
+| `TELEMETRY_OTLP_ENDPOINT` | `var.telemetry_otlp_endpoint` |
+| `TELEMETRY_S3_BUCKET` | `var.telemetry_s3_bucket` |
+| `TELEMETRY_S3_ENDPOINT` | `var.telemetry_s3_endpoint` |
+| `TELEMETRY_S3_ACCESS_KEY_ID` | `var.telemetry_s3_access_key_id` |
+| `TELEMETRY_S3_SECRET_ACCESS_KEY` | `var.telemetry_s3_secret_access_key` |
+| `TELEMETRY_S3_ASSUME_ROLE` | `var.telemetry_s3_assume_role` |
 | `OIDC_CA_CERT` | `var.oidc_ca_cert` |
+| `KUBE_API_ETCD_SERVERS` | `var.kube_api_etcd_servers` |
 | `KUBE_LOG_LEVEL` | `tostring(var.kube_log_level)` |
+| `AWS_S3_USE_PATH_STYLE` | `var.aws_s3_use_path_style` |
 | `NETSY_ENDPOINT` | `var.netsy_endpoint` |
 | `NETSY_ACCESS_KEY_ID` | `var.netsy_access_key_id` |
 | `NETSY_SECRET_ACCESS_KEY` | `var.netsy_secret_access_key` |
-| `TELEMETRY_ENABLED` | `tostring(var.telemetry_enabled)` |
-| `TELEMETRY_LOG_SERVICES` | `var.telemetry_log_services` |
-| `TELEMETRY_LOG_CLOUDINIT` | `tostring(var.telemetry_log_cloudinit)` |
-| `TELEMETRY_S3_BUCKET` | `var.telemetry_s3_bucket` |
-| `TELEMETRY_S3_ENDPOINT` | `var.telemetry_s3_endpoint` |
-| `TELEMETRY_S3_ASSUME_ROLE` | `var.telemetry_s3_assume_role` |
-| `TELEMETRY_S3_ACCESS_KEY_ID` | `var.telemetry_s3_access_key_id` |
-| `TELEMETRY_S3_SECRET_ACCESS_KEY` | `var.telemetry_s3_secret_access_key` |
-| `TELEMETRY_OTLP_ENDPOINT` | `var.telemetry_otlp_endpoint` |
 | `REGISTRY_ENABLED` | `tostring(var.registry_enabled)` |
-| `REGISTRY_HOSTNAME` | `var.registry_hostname` |
 | `REGISTRY_ENDPOINT` | `var.registry_endpoint` |
 | `REGISTRY_ACCESS_KEY_ID` | `var.registry_access_key_id` |
 | `REGISTRY_SECRET_ACCESS_KEY` | `var.registry_secret_access_key` |
-| `AWS_S3_USE_PATH_STYLE` | `var.aws_s3_use_path_style` |
+| `REGISTRY_HOSTNAME` | `var.registry_hostname` |
 
 The Podplane `.tf` configuration derives the following variables which can also be propagated via the `mutable.env` file:
 
 | Environment variable | Generated OpenTofu/Terraform source |
 | --- | --- |
-| `KUBE_API_PUBLIC_HOSTNAME` | `local.kubernetes_api_hostname` |
-| `KUBE_API_PORT` | `tostring(local.kubernetes_api_port)` |
-| `KUBE_API_INTERNAL_LB_HOSTNAME` | Internal Kubernetes API load balancer hostname, when generated for worker nodes |
-| `OIDC_ISSUER` | `local.oidc_issuer_url` |
-| `NETSY_BUCKET` | `aws_s3_bucket.netsy.bucket` |
-| `NETSY_ASSUME_ROLE` | `aws_iam_role.netsy.arn` |
-| `NETSY_REGION` | `local.aws_region` |
 | `TELEMETRY_S3_REGION` | `local.aws_region` |
+| `OIDC_ISSUER` | `local.oidc_issuer_url` |
+| `KUBE_API_PUBLIC_HOSTNAME` | `local.kubernetes_api_hostname` |
+| `KUBE_API_INTERNAL_LB_HOSTNAME` | Internal Kubernetes API load balancer hostname, when generated for worker nodes |
+| `KUBE_API_PORT` | `tostring(local.kubernetes_api_port)` |
+| `NETSY_BUCKET` | `aws_s3_bucket.netsy.bucket` |
+| `NETSY_REGION` | `local.aws_region` |
+| `NETSY_ASSUME_ROLE` | `aws_iam_role.netsy.arn` |
 | `REGISTRY_BUCKET` | `aws_s3_bucket.registry.bucket` |
 | `REGISTRY_REGION` | `local.aws_region` |
 | `REGISTRY_ASSUME_ROLE` | `aws_iam_role.registry_read_only.arn` |

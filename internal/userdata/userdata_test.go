@@ -61,24 +61,8 @@ func baseVars(provider string) *TemplateVars {
 			ID:   "ins06djbn8xgdtz92astpmdv1jfk4",
 			Type: "local",
 		},
-		Vars: MutableVars{
-			"SSH_AUTHORIZED_KEY":       "ssh-ed25519 AAAAexample",
-			"OIDC_ISSUER":              "http://10.0.2.2:1234/oidc",
-			"KUBE_LOG_LEVEL":           "5",
-			"KUBE_API_PUBLIC_HOSTNAME": "localhost",
-			"KUBE_API_ETCD_SERVERS":    "https://127.0.0.1:2378",
-			"TELEMETRY_LOG_SERVICES":   "first-boot-env,cron,ssh,netsy,nstance-agent,nstance-recv-watch,containerd,kube-apiserver,kube-controller-manager,kube-scheduler,kubelet,zot",
-			"REGISTRY_HOSTNAME":        "registry.example.com",
-		},
 	}
-	v.Vars.SetObjectStorageEndpoint("http://10.0.2.2:1234/s3")
-	v.Vars.SetObjectStorageRegion("local")
-	v.Vars["NETSY_ACCESS_KEY_ID"] = "test"
-	v.Vars["NETSY_SECRET_ACCESS_KEY"] = "test"
-	v.Vars["TELEMETRY_S3_ACCESS_KEY_ID"] = "test"
-	v.Vars["TELEMETRY_S3_SECRET_ACCESS_KEY"] = "test"
-	v.Vars["REGISTRY_ACCESS_KEY_ID"] = "test"
-	v.Vars["REGISTRY_SECRET_ACCESS_KEY"] = "test"
+	v.ImmutableSSHAuthorizedKeys = "ssh-ed25519 AAAAexample"
 	return v
 }
 
@@ -121,6 +105,12 @@ func TestRender_Local_HasDebianPasswordLine(t *testing.T) {
 	if !strings.Contains(out, "PROVIDER_KIND='local'") {
 		t.Errorf("expected PROVIDER_KIND in user-data.env; got:\n%s", out)
 	}
+	if !strings.Contains(out, "IMMUTABLE_SSH_AUTHORIZED_KEYS='ssh-ed25519 AAAAexample'") {
+		t.Errorf("expected immutable SSH key in user-data.env; got:\n%s", out)
+	}
+	if strings.Index(out, "IMMUTABLE_SSH_AUTHORIZED_KEYS='ssh-ed25519 AAAAexample'") > strings.Index(out, "Downloading 2 dependencies") {
+		t.Errorf("expected immutable SSH key installation before dependency downloads; got:\n%s", out)
+	}
 	if strings.Contains(out, "TELEMETRY_S3_ACCESS_KEY_ID=") || strings.Contains(out, "TELEMETRY_LOG_SERVICES=") || strings.Contains(out, "TELEMETRY_LOG_CLOUDINIT=") {
 		t.Errorf("did not expect telemetry vars in user-data.env; got:\n%s", out)
 	}
@@ -160,6 +150,25 @@ func TestRender_Local_HasDebianPasswordLine(t *testing.T) {
 	}
 	if !strings.Contains(out, "/opt/podplane/bin/restart.sh") {
 		t.Errorf("expected local user-data to restart services explicitly; got:\n%s", out)
+	}
+}
+
+func TestRenderMutableEnv_SeparatesMutableAndImmutableSSHKeys(t *testing.T) {
+	vars := MutableVars{
+		"SSH_AUTHORIZED_KEYS":           "ssh-ed25519 AAAAmutable",
+		"IMMUTABLE_SSH_AUTHORIZED_KEYS": "ssh-ed25519 AAAAimmutable",
+		"REGISTRY_HOSTNAME":             "registry.example.com",
+	}
+	vars.ApplyDefaults("example-cluster")
+	out, err := RenderMutableEnv(vars)
+	if err != nil {
+		t.Fatalf("RenderMutableEnv: %v", err)
+	}
+	if !strings.Contains(out, "SSH_AUTHORIZED_KEYS='ssh-ed25519 AAAAmutable'") {
+		t.Fatalf("expected mutable SSH keys; got:\n%s", out)
+	}
+	if strings.Contains(out, "IMMUTABLE_SSH_AUTHORIZED_KEYS") {
+		t.Fatalf("immutable SSH keys must not be rendered into mutable.env; got:\n%s", out)
 	}
 }
 
@@ -260,25 +269,25 @@ func TestValidate_MissingClusterID(t *testing.T) {
 }
 
 func TestValidate_InvalidTelemetryLogCloudinit(t *testing.T) {
-	v := baseVars("local")
-	v.Vars["TELEMETRY_LOG_CLOUDINIT"] = "maybe"
-	if _, err := v.Render(); err == nil {
+	v := MutableVars{"TELEMETRY_LOG_CLOUDINIT": "maybe", "REGISTRY_HOSTNAME": "registry.example.com"}
+	v.ApplyDefaults("example-cluster")
+	if _, err := RenderMutableEnv(v); err == nil {
 		t.Fatalf("expected validation error for invalid TelemetryLogCloudinit")
 	}
 }
 
 func TestValidate_InvalidTelemetryLogServices(t *testing.T) {
-	v := baseVars("local")
-	v.Vars["TELEMETRY_LOG_SERVICES"] = "kubelet,ssh.service"
-	if _, err := v.Render(); err == nil {
+	v := MutableVars{"TELEMETRY_LOG_SERVICES": "kubelet,ssh.service", "REGISTRY_HOSTNAME": "registry.example.com"}
+	v.ApplyDefaults("example-cluster")
+	if _, err := RenderMutableEnv(v); err == nil {
 		t.Fatalf("expected validation error for invalid TelemetryLogServices")
 	}
 }
 
 func TestValidate_RejectsUnsafeEnvValue(t *testing.T) {
-	v := baseVars("local")
-	v.Vars["OIDC_CA_CERT"] = "line1\nline2"
-	if _, err := v.Render(); err == nil {
+	v := MutableVars{"OIDC_CA_CERT": "line1\nline2", "REGISTRY_HOSTNAME": "registry.example.com"}
+	v.ApplyDefaults("example-cluster")
+	if _, err := RenderMutableEnv(v); err == nil {
 		t.Fatalf("expected validation error for env value containing newline")
 	}
 }

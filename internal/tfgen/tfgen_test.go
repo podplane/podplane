@@ -113,6 +113,8 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		`templates = local.templates`,
 		`content = base64encode(local.userdata["control-plane"])`,
 		`<<-USERDATA`,
+		`IMMUTABLE_SSH_AUTHORIZED_KEYS='${var.immutable_ssh_authorized_keys}'`,
+		`vars = local.mutable_env`,
 		`"public-control-plane" = { ports = [6443], subnets = "public", public = true }`,
 		`load_balancers = ["public-control-plane"]`,
 		`REGISTRY_ASSUME_ROLE = aws_iam_role.registry_read_only.arn`,
@@ -121,6 +123,9 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("generated cluster tf missing %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "local.instance_vars") {
+		t.Fatalf("generated cluster tf must not put immutable inputs in Nstance runtime vars:\n%s", got)
 	}
 }
 

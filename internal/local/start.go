@@ -299,9 +299,11 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	}
 	encodedCACert := base64.StdEncoding.EncodeToString(certBytes)
 
+	// Render immutable settings into user-data for the local VM's first boot.
 	vars := userdata.TemplateVars{
-		Manifest:      manifest,
-		DepsMirrorURL: depsServerURL,
+		Manifest:                   manifest,
+		DepsMirrorURL:              depsServerURL,
+		ImmutableSSHAuthorizedKeys: sshAuthorizedKey,
 		Cluster: userdata.ClusterData{
 			ID: clusterID,
 		},
@@ -323,31 +325,38 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 			LocalServerHostFromVM:           m.vm.Addr(),
 			LocalServerHTTPSPort:            m.webserverPIDFile.GetData("https_port"),
 		},
-		Vars: userdata.MutableVars{
-			"SSH_AUTHORIZED_KEY":       sshAuthorizedKey,
-			"OIDC_ISSUER":              oidcIssuerURL,
-			"OIDC_CA_CERT":             encodedCACert,
-			"KUBE_LOG_LEVEL":           "5",
-			"KUBE_API_PUBLIC_HOSTNAME": "localhost",
-			"KUBE_API_ETCD_SERVERS":    "https://127.0.0.1:2378",
-			"TELEMETRY_LOG_SERVICES":   "first-boot-env,cron,ssh,netsy,nstance-agent,nstance-recv-watch,containerd,kube-apiserver,kube-controller-manager,kube-scheduler,kubelet,zot",
-			"REGISTRY_ENABLED":         "true",
-			"REGISTRY_HOSTNAME":        LocalRegistryHostname(clusterID),
-			"REGISTRY_BUCKET":          "registry",
-		},
 	}
-	vars.Vars.SetObjectStorageEndpoint(s3DataEndpointURL)
-	vars.Vars["REGISTRY_ENDPOINT"] = s3CacheEndpointURL
-	vars.Vars.SetObjectStorageRegion("local")
-	vars.Vars["NETSY_ACCESS_KEY_ID"] = "test"
-	vars.Vars["NETSY_SECRET_ACCESS_KEY"] = "test"
-	vars.Vars["TELEMETRY_S3_ACCESS_KEY_ID"] = "test"
-	vars.Vars["TELEMETRY_S3_SECRET_ACCESS_KEY"] = "test"
-	vars.Vars["REGISTRY_ACCESS_KEY_ID"] = "test"
-	vars.Vars["REGISTRY_SECRET_ACCESS_KEY"] = "test"
-	vars.Vars["AWS_S3_USE_PATH_STYLE"] = "true"
-	vars.ApplyDefaults()
-	mutableEnv := userdata.RenderMutableEnv(vars.Vars)
+
+	// Render runtime settings separately so Nstance can update them in place.
+	mutableVars := userdata.MutableVars{
+		"OIDC_ISSUER":                    oidcIssuerURL,
+		"OIDC_CA_CERT":                   encodedCACert,
+		"KUBE_LOG_LEVEL":                 "5",
+		"KUBE_API_PUBLIC_HOSTNAME":       "localhost",
+		"KUBE_API_ETCD_SERVERS":          "https://127.0.0.1:2378",
+		"TELEMETRY_LOG_SERVICES":         "first-boot-env,cron,ssh,netsy,nstance-agent,nstance-recv-watch,containerd,kube-apiserver,kube-controller-manager,kube-scheduler,kubelet,zot",
+		"TELEMETRY_S3_ENDPOINT":          s3DataEndpointURL,
+		"TELEMETRY_S3_REGION":            "local",
+		"TELEMETRY_S3_ACCESS_KEY_ID":     "test",
+		"TELEMETRY_S3_SECRET_ACCESS_KEY": "test",
+		"NETSY_ENDPOINT":                 s3DataEndpointURL,
+		"NETSY_REGION":                   "local",
+		"NETSY_ACCESS_KEY_ID":            "test",
+		"NETSY_SECRET_ACCESS_KEY":        "test",
+		"REGISTRY_ENABLED":               "true",
+		"REGISTRY_HOSTNAME":              LocalRegistryHostname(clusterID),
+		"REGISTRY_BUCKET":                "registry",
+		"REGISTRY_ENDPOINT":              s3CacheEndpointURL,
+		"REGISTRY_REGION":                "local",
+		"REGISTRY_ACCESS_KEY_ID":         "test",
+		"REGISTRY_SECRET_ACCESS_KEY":     "test",
+		"AWS_S3_USE_PATH_STYLE":          "true",
+	}
+	mutableVars.ApplyDefaults(clusterID)
+	mutableEnv, err := userdata.RenderMutableEnv(mutableVars)
+	if err != nil {
+		return "", fmt.Errorf("failed to render mutable env: %w", err)
+	}
 
 	// Configure the local fake Nstance deployment before rendering user-data. The
 	// background `podplane local server` process owns the listening gRPC services;

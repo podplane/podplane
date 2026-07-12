@@ -41,42 +41,39 @@ locals {
   kubernetes_cluster_cidr = []
   kubernetes_service_cidr = []
   mutable_env = {
-    SSH_AUTHORIZED_KEY = var.ssh_authorized_key
-    KUBE_API_PUBLIC_HOSTNAME = local.kubernetes_api_hostname
-    KUBE_API_PORT = tostring(local.kubernetes_api_port)
-    KUBE_API_INTERNAL_LB_HOSTNAME = ""
-    KUBE_API_ETCD_SERVERS = var.kube_api_etcd_servers
-    OIDC_ISSUER = local.oidc_issuer_url
-    OIDC_CA_CERT = var.oidc_ca_cert
-    KUBE_LOG_LEVEL = tostring(var.kube_log_level)
-  
-    NETSY_BUCKET = aws_s3_bucket.netsy.bucket
-    NETSY_ENDPOINT = var.netsy_endpoint
-    NETSY_ASSUME_ROLE = aws_iam_role.netsy.arn
-    NETSY_REGION = local.aws_region
-    NETSY_ACCESS_KEY_ID = var.netsy_access_key_id
-    NETSY_SECRET_ACCESS_KEY = var.netsy_secret_access_key
-  
+    SSH_AUTHORIZED_KEYS = var.ssh_authorized_keys
     TELEMETRY_ENABLED = tostring(var.telemetry_enabled)
-    TELEMETRY_LOG_SERVICES = var.telemetry_log_services
     TELEMETRY_LOG_CLOUDINIT = tostring(var.telemetry_log_cloudinit)
+    TELEMETRY_LOG_SERVICES = var.telemetry_log_services
+    TELEMETRY_OTLP_ENDPOINT = var.telemetry_otlp_endpoint
     TELEMETRY_S3_BUCKET = var.telemetry_s3_bucket
-    TELEMETRY_S3_ENDPOINT = var.telemetry_s3_endpoint
     TELEMETRY_S3_REGION = local.aws_region
+    TELEMETRY_S3_ENDPOINT = var.telemetry_s3_endpoint
     TELEMETRY_S3_ASSUME_ROLE = var.telemetry_s3_assume_role
     TELEMETRY_S3_ACCESS_KEY_ID = var.telemetry_s3_access_key_id
     TELEMETRY_S3_SECRET_ACCESS_KEY = var.telemetry_s3_secret_access_key
-    TELEMETRY_OTLP_ENDPOINT = var.telemetry_otlp_endpoint
-  
+    OIDC_ISSUER = local.oidc_issuer_url
+    OIDC_CA_CERT = var.oidc_ca_cert
+    KUBE_API_ETCD_SERVERS = var.kube_api_etcd_servers
+    KUBE_API_PUBLIC_HOSTNAME = local.kubernetes_api_hostname
+    KUBE_API_INTERNAL_LB_HOSTNAME = ""
+    KUBE_API_PORT = tostring(local.kubernetes_api_port)
+    KUBE_LOG_LEVEL = tostring(var.kube_log_level)
+    AWS_S3_USE_PATH_STYLE = var.aws_s3_use_path_style
+    NETSY_BUCKET = aws_s3_bucket.netsy.bucket
+    NETSY_REGION = local.aws_region
+    NETSY_ENDPOINT = var.netsy_endpoint
+    NETSY_ASSUME_ROLE = aws_iam_role.netsy.arn
+    NETSY_ACCESS_KEY_ID = var.netsy_access_key_id
+    NETSY_SECRET_ACCESS_KEY = var.netsy_secret_access_key
     REGISTRY_ENABLED = tostring(var.registry_enabled)
     REGISTRY_BUCKET = aws_s3_bucket.registry.bucket
-    REGISTRY_HOSTNAME = var.registry_hostname
-    REGISTRY_ENDPOINT = var.registry_endpoint
     REGISTRY_REGION = local.aws_region
+    REGISTRY_ENDPOINT = var.registry_endpoint
     REGISTRY_ASSUME_ROLE = aws_iam_role.registry_read_only.arn
     REGISTRY_ACCESS_KEY_ID = var.registry_access_key_id
     REGISTRY_SECRET_ACCESS_KEY = var.registry_secret_access_key
-    AWS_S3_USE_PATH_STYLE = var.aws_s3_use_path_style
+    REGISTRY_HOSTNAME = var.registry_hostname
   }
   userdata = {
     "control-plane" = <<-USERDATA
@@ -105,7 +102,26 @@ locals {
     hostnamectl set-hostname {{ .Instance.ID }}
 
 
-    # --- 2. Bootstrap provider-specific tools -----------------------------------
+    # --- 2. Install immutable SSH keys for early-boot debugging (if provided) ---
+
+    IMMUTABLE_SSH_AUTHORIZED_KEYS='${var.immutable_ssh_authorized_keys}'
+    if [ -n "$IMMUTABLE_SSH_AUTHORIZED_KEYS" ]; then
+      if ! getent group admin >/dev/null; then
+        groupadd admin
+      fi
+      if ! id admin >/dev/null 2>&1; then
+        useradd -g admin -m -s /bin/bash admin
+      fi
+      install -d -m 0700 -o admin -g admin /home/admin/.ssh
+      printf '%s\n' "$IMMUTABLE_SSH_AUTHORIZED_KEYS" > /home/admin/.ssh/authorized_keys
+      chmod 0600 /home/admin/.ssh/authorized_keys
+      chown admin:admin /home/admin/.ssh/authorized_keys
+      mkdir -p /etc/sudoers.d
+      printf '%s\n' 'admin ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/admin
+      chmod 0440 /etc/sudoers.d/admin
+    fi
+
+    # --- 3. Bootstrap provider-specific tools -----------------------------------
 
 
     %{ if var.enable_ssm ~}
@@ -124,7 +140,7 @@ locals {
     %{ endif ~}
 
 
-    # --- 3. Check connectivity to Nstance Server --------------------------------
+    # --- 4. Check connectivity to Nstance Server --------------------------------
 
     REGISTRATION_ADDR="{{ .Server.RegistrationAddr }}"
     log "Checking connectivity to nstance-server at $REGISTRATION_ADDR..."
@@ -146,7 +162,7 @@ locals {
       sleep $retry_in
     done
 
-    # --- 4. Download and verify dependencies ------------------------------------
+    # --- 5. Download and verify dependencies ------------------------------------
 
     ARTIFACTS_DIR="/opt/podplane/artifacts"
     mkdir -p "$ARTIFACTS_DIR"
@@ -169,18 +185,18 @@ locals {
     sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  $${ARTIFACTS_DIR}/vmconfig.tar.gz
     CHECKSUMS
 
-    # --- 5. Extract vmconfig tarball --------------------------------------------
+    # --- 6. Extract vmconfig tarball --------------------------------------------
 
     log "Extracting vmconfig.tar.gz..."
     tar -xzf "$${ARTIFACTS_DIR}/vmconfig.tar.gz" -C /
 
 
-    # --- 6. Write user-data environment file ------------------------------------
+    # --- 7. Write user-data environment file ------------------------------------
 
     log "Writing user-data.env file..."
     mkdir -p /opt/podplane/etc
     cat > /opt/podplane/etc/user-data.env <<'USERDATA_ENV'
-    SSH_AUTHORIZED_KEY='{{ .Vars.SSH_AUTHORIZED_KEY }}'
+    IMMUTABLE_SSH_AUTHORIZED_KEYS='${var.immutable_ssh_authorized_keys}'
 
     INSTANCE_ID='{{ .Instance.ID }}'
     CLUSTER_ID='{{ .Cluster.ID }}'
@@ -198,7 +214,7 @@ locals {
     USERDATA_ENV
     chmod 0600 /opt/podplane/etc/user-data.env
 
-    # --- 7. Write sensitive nstance bootstrap files -----------------------------
+    # --- 8. Write sensitive nstance bootstrap files -----------------------------
     log "Writing nstance registration nonce file..."
     mkdir -p /opt/nstance-agent/identity
     cat > /opt/nstance-agent/identity/nonce.jwt <<'NSTANCE_NONCE_JWT'
@@ -210,7 +226,7 @@ locals {
     chmod 0600 /opt/nstance-agent/identity/nonce.jwt /opt/nstance-agent/identity/ca.crt
 
 
-    # -- 8. Run install.sh -------------------------------------------------------
+    # --- 9. Run install.sh -------------------------------------------------------
 
 
 
@@ -218,12 +234,12 @@ locals {
     chmod +x /opt/podplane/bin/install.sh
     /opt/podplane/bin/install.sh
 
-    # --- 9. Run configure.sh ----------------------------------------------------
+    # --- 10. Run configure.sh ---------------------------------------------------
     log "Running configure.sh..."
     chmod +x /opt/podplane/bin/configure.sh
     /opt/podplane/bin/configure.sh
 
-    # --- 10. Restart services ---------------------------------------------------
+    # --- 11. Restart services ---------------------------------------------------
     log "Running restart.sh..."
     chmod +x /opt/podplane/bin/restart.sh
     /opt/podplane/bin/restart.sh

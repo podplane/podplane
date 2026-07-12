@@ -95,7 +95,8 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		typeExpr    string
 		defaultVal  hclValue
 	}{
-		{"ssh_authorized_key", "SSH public key allowed for VM login.", "string", str("")},
+		{"ssh_authorized_keys", "SSH public keys allowed for VM login.", "string", str("")},
+		{"immutable_ssh_authorized_keys", "Immutable SSH public keys for debugging early VM boot failures. Changing this value rotates affected VMs.", "string", str("")},
 		{"kube_api_etcd_servers", "etcd-compatible endpoint list used by kube-apiserver.", "string", str("")},
 		{"oidc_ca_cert", "Base64-encoded OIDC issuer CA certificate.", "string", str("")},
 		{"kube_log_level", "Kubernetes component log verbosity.", "number", num(2)},
@@ -401,42 +402,39 @@ func addRegistryPolicyDocument(doc *hclDocument, name string, write bool) {
 // values generated from Terraform-managed resources and generated variables.
 func mutableEnvValue() hclExpression {
 	return expr(`{
-  SSH_AUTHORIZED_KEY = var.ssh_authorized_key
-  KUBE_API_PUBLIC_HOSTNAME = local.kubernetes_api_hostname
-  KUBE_API_PORT = tostring(local.kubernetes_api_port)
-  KUBE_API_INTERNAL_LB_HOSTNAME = ""
-  KUBE_API_ETCD_SERVERS = var.kube_api_etcd_servers
-  OIDC_ISSUER = local.oidc_issuer_url
-  OIDC_CA_CERT = var.oidc_ca_cert
-  KUBE_LOG_LEVEL = tostring(var.kube_log_level)
-
-  NETSY_BUCKET = aws_s3_bucket.netsy.bucket
-  NETSY_ENDPOINT = var.netsy_endpoint
-  NETSY_ASSUME_ROLE = aws_iam_role.netsy.arn
-  NETSY_REGION = local.aws_region
-  NETSY_ACCESS_KEY_ID = var.netsy_access_key_id
-  NETSY_SECRET_ACCESS_KEY = var.netsy_secret_access_key
-
+  SSH_AUTHORIZED_KEYS = var.ssh_authorized_keys
   TELEMETRY_ENABLED = tostring(var.telemetry_enabled)
-  TELEMETRY_LOG_SERVICES = var.telemetry_log_services
   TELEMETRY_LOG_CLOUDINIT = tostring(var.telemetry_log_cloudinit)
+  TELEMETRY_LOG_SERVICES = var.telemetry_log_services
+  TELEMETRY_OTLP_ENDPOINT = var.telemetry_otlp_endpoint
   TELEMETRY_S3_BUCKET = var.telemetry_s3_bucket
-  TELEMETRY_S3_ENDPOINT = var.telemetry_s3_endpoint
   TELEMETRY_S3_REGION = local.aws_region
+  TELEMETRY_S3_ENDPOINT = var.telemetry_s3_endpoint
   TELEMETRY_S3_ASSUME_ROLE = var.telemetry_s3_assume_role
   TELEMETRY_S3_ACCESS_KEY_ID = var.telemetry_s3_access_key_id
   TELEMETRY_S3_SECRET_ACCESS_KEY = var.telemetry_s3_secret_access_key
-  TELEMETRY_OTLP_ENDPOINT = var.telemetry_otlp_endpoint
-
+  OIDC_ISSUER = local.oidc_issuer_url
+  OIDC_CA_CERT = var.oidc_ca_cert
+  KUBE_API_ETCD_SERVERS = var.kube_api_etcd_servers
+  KUBE_API_PUBLIC_HOSTNAME = local.kubernetes_api_hostname
+  KUBE_API_INTERNAL_LB_HOSTNAME = ""
+  KUBE_API_PORT = tostring(local.kubernetes_api_port)
+  KUBE_LOG_LEVEL = tostring(var.kube_log_level)
+  AWS_S3_USE_PATH_STYLE = var.aws_s3_use_path_style
+  NETSY_BUCKET = aws_s3_bucket.netsy.bucket
+  NETSY_REGION = local.aws_region
+  NETSY_ENDPOINT = var.netsy_endpoint
+  NETSY_ASSUME_ROLE = aws_iam_role.netsy.arn
+  NETSY_ACCESS_KEY_ID = var.netsy_access_key_id
+  NETSY_SECRET_ACCESS_KEY = var.netsy_secret_access_key
   REGISTRY_ENABLED = tostring(var.registry_enabled)
   REGISTRY_BUCKET = aws_s3_bucket.registry.bucket
-  REGISTRY_HOSTNAME = var.registry_hostname
-  REGISTRY_ENDPOINT = var.registry_endpoint
   REGISTRY_REGION = local.aws_region
+  REGISTRY_ENDPOINT = var.registry_endpoint
   REGISTRY_ASSUME_ROLE = aws_iam_role.registry_read_only.arn
   REGISTRY_ACCESS_KEY_ID = var.registry_access_key_id
   REGISTRY_SECRET_ACCESS_KEY = var.registry_secret_access_key
-  AWS_S3_USE_PATH_STYLE = var.aws_s3_use_path_style
+  REGISTRY_HOSTNAME = var.registry_hostname
 }`)
 }
 
@@ -596,13 +594,14 @@ func userdataValue(cfg *clusterconfig.ClusterConfig, opts ClusterOptions, provid
 		if manifest == nil {
 			panic(fmt.Errorf("missing vmconfig manifest %s/%s", kind, pool.Arch))
 		}
-		userdataTemplate, err := userdata.SourceForNstance(manifest, opts.DepsMirrorURL, providerKind, awsAccountID, googleProjectID)
+		userdataTemplate, err := userdata.SourceForNstance(manifest, opts.DepsMirrorURL, providerKind, awsAccountID, googleProjectID, "${var.immutable_ssh_authorized_keys}")
 		if err != nil {
 			panic(err)
 		}
 		userdataTemplate = strings.ReplaceAll(userdataTemplate, "${", "$${")
 		userdataTemplate = strings.ReplaceAll(userdataTemplate, "$${local.aws_account_id}", "${local.aws_account_id}")
 		userdataTemplate = strings.ReplaceAll(userdataTemplate, "$${local.google_project_id}", "${local.google_project_id}")
+		userdataTemplate = strings.ReplaceAll(userdataTemplate, "$${var.immutable_ssh_authorized_keys}", "${var.immutable_ssh_authorized_keys}")
 		fields = append(fields, field(poolName, heredoc(userdataTemplate)))
 	}
 	return object(fields...)
