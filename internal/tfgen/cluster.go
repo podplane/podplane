@@ -148,6 +148,9 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	locals.Body.Attr("kubernetes_cluster_cidr", stringValueList(cfg.Cluster.Kubernetes.ClusterCIDR))
 	locals.Body.Attr("kubernetes_service_cidr", stringValueList(cfg.Cluster.Kubernetes.ServiceCIDR))
 	locals.Body.Attr("mutable_env", mutableEnvValue())
+	locals.Body.Attr("userdata", userdataValue(cfg, opts, provider.Kind))
+	locals.Body.Attr("certificates", nstanceCertificatesValue())
+	locals.Body.Attr("templates", templatesValue(cfg))
 	mainDoc.AddBlock(locals)
 
 	cluster := block("module", "cluster")
@@ -208,8 +211,8 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		shard.Body.Attr("shard", str(zone))
 		shard.Body.Attr("zone", str(zone))
 		shard.Body.Attr("enable_ssm", expr("var.enable_ssm"))
-		shard.Body.Attr("certificates", nstanceCertificatesValue())
-		shard.Body.Attr("templates", templatesValue(cfg, opts, provider.Kind))
+		shard.Body.Attr("certificates", expr("local.certificates"))
+		shard.Body.Attr("templates", expr("local.templates"))
 		shard.Body.Attr("groups", groupsValue(cfg, provider))
 		mainDoc.AddBlock(shard)
 	}
@@ -218,7 +221,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		seed := block("resource", "podplane_netsy_seed_s3", "cluster")
 		seed.Body.Attr("cluster_config_path", str("${path.module}/"+filepath.Base(configPath)))
 		seed.Body.Attr("bucket", expr("aws_s3_bucket.netsy.bucket"))
-		seed.Body.Attr("region", str(provider.Region))
+		seed.Body.Attr("region", expr("local.aws_region"))
 		if provider.Profile != "" {
 			seed.Body.Attr("profile", str(provider.Profile))
 		}
@@ -572,8 +575,8 @@ func groupsValue(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provid
 	return object(field("default", object(poolFields...)))
 }
 
-// templatesValue converts cluster pools into Nstance instance templates.
-func templatesValue(cfg *clusterconfig.ClusterConfig, opts ClusterOptions, providerKind string) hclObject {
+// userdataValue renders the userdata templates shared by every Nstance shard.
+func userdataValue(cfg *clusterconfig.ClusterConfig, opts ClusterOptions, providerKind string) hclObject {
 	awsAccountID := ""
 	googleProjectID := ""
 	switch providerKind {
@@ -585,7 +588,7 @@ func templatesValue(cfg *clusterconfig.ClusterConfig, opts ClusterOptions, provi
 		panic(fmt.Errorf("cluster provider %q is not supported", providerKind))
 	}
 
-	fields := []hclObjectField{}
+	fields := make([]hclObjectField, 0, len(cfg.Cluster.Pools))
 	for _, poolName := range sortedKeys(cfg.Cluster.Pools) {
 		pool := cfg.Cluster.Pools[poolName]
 		kind := poolKind(poolName)
@@ -600,14 +603,25 @@ func templatesValue(cfg *clusterconfig.ClusterConfig, opts ClusterOptions, provi
 		userdataTemplate = strings.ReplaceAll(userdataTemplate, "${", "$${")
 		userdataTemplate = strings.ReplaceAll(userdataTemplate, "$${local.aws_account_id}", "${local.aws_account_id}")
 		userdataTemplate = strings.ReplaceAll(userdataTemplate, "$${local.google_project_id}", "${local.google_project_id}")
+		fields = append(fields, field(poolName, heredoc(userdataTemplate)))
+	}
+	return object(fields...)
+}
+
+// templatesValue converts cluster pools into Nstance instance templates.
+func templatesValue(cfg *clusterconfig.ClusterConfig) hclObject {
+	fields := make([]hclObjectField, 0, len(cfg.Cluster.Pools))
+	for _, poolName := range sortedKeys(cfg.Cluster.Pools) {
+		pool := cfg.Cluster.Pools[poolName]
+		kind := poolKind(poolName)
 		fields = append(fields, field(poolName, object(
-			identField("kind", str(poolKind(poolName))),
+			identField("kind", str(kind)),
 			identField("arch", str(pool.Arch)),
 			identField("vars", expr("local.mutable_env")),
 			identField("userdata", inlineObject(
 				identField("source", str("inline")),
 				identField("encoding", str("base64")),
-				identField("content", expr("base64encode("+quote(userdataTemplate)+")")),
+				identField("content", expr("base64encode(local.userdata["+quote(poolName)+"])")),
 			)),
 			identField("files", nstanceTemplateFilesValue(kind)),
 			identField("args", inlineObject(
