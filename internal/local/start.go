@@ -22,12 +22,13 @@ import (
 	"github.com/puidv7/puidv7-go"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
+	"github.com/podplane/podplane/internal/clusterspec"
 	"github.com/podplane/podplane/internal/deps"
 	"github.com/podplane/podplane/internal/osboot"
 	"github.com/podplane/podplane/internal/tui"
-	"github.com/podplane/podplane/internal/userdata"
 	"github.com/podplane/podplane/internal/vm"
 	"github.com/podplane/podplane/pkg/seeds"
+	"github.com/podplane/podplane/pkg/userdata"
 )
 
 // StartOptions controls local cluster startup.
@@ -328,7 +329,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	}
 
 	// Render runtime settings separately so Nstance can update them in place.
-	mutableVars := userdata.MutableVars{
+	mutableVars := clusterspec.MutableEnv{
 		"OIDC_ISSUER":                    oidcIssuerURL,
 		"OIDC_CA_CERT":                   encodedCACert,
 		"KUBE_LOG_LEVEL":                 "5",
@@ -353,7 +354,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 		"AWS_S3_USE_PATH_STYLE":          "true",
 	}
 	mutableVars.ApplyDefaults(clusterID)
-	mutableEnv, err := userdata.RenderMutableEnv(mutableVars)
+	mutableEnv, err := mutableVars.Render()
 	if err != nil {
 		return "", fmt.Errorf("failed to render mutable env: %w", err)
 	}
@@ -513,12 +514,12 @@ func (m *Local) repairExistingNstanceAgentEnv(ctx context.Context, sshPort int, 
 	if err := m.WaitForReadiness(ctx, ReadinessOptions{Quiet: quiet}); err != nil {
 		return err
 	}
-	registrationExpr := "s|^NSTANCE_SERVER_REGISTRATION_ADDR=.*|NSTANCE_SERVER_REGISTRATION_ADDR=" + userdata.QuoteEnvValue(registrationAddr) + "|"
-	agentExpr := "s|^NSTANCE_SERVER_AGENT_ADDR=.*|NSTANCE_SERVER_AGENT_ADDR=" + userdata.QuoteEnvValue(agentAddr) + "|"
+	registrationExpr := "s|^NSTANCE_SERVER_REGISTRATION_ADDR=.*|NSTANCE_SERVER_REGISTRATION_ADDR=" + quoteEnvValue(registrationAddr) + "|"
+	agentExpr := "s|^NSTANCE_SERVER_AGENT_ADDR=.*|NSTANCE_SERVER_AGENT_ADDR=" + quoteEnvValue(agentAddr) + "|"
 	command := fmt.Sprintf(
 		"sudo sed -i -e %s -e %s /opt/podplane/etc/user-data.env /opt/env/nstance-agent.env && sudo systemctl restart nstance-agent",
-		userdata.QuoteEnvValue(registrationExpr),
-		userdata.QuoteEnvValue(agentExpr),
+		quoteEnvValue(registrationExpr),
+		quoteEnvValue(agentExpr),
 	)
 	privateKeyPath, err := SSHPrivateKeyPath(m.dataDir)
 	if err != nil {
@@ -529,6 +530,11 @@ func (m *Local) repairExistingNstanceAgentEnv(ctx context.Context, sshPort int, 
 		return fmt.Errorf("restart nstance-agent with current endpoints: %w: %s", err, string(output))
 	}
 	return nil
+}
+
+// quoteEnvValue quotes a value using vmconfig's env-file shell format.
+func quoteEnvValue(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 // configureLocalHTTPSForwarder refreshes the VM-local HTTPS TCP forwarder.

@@ -5,6 +5,7 @@
 package tfgen
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,10 +44,14 @@ func sampleVMConfigManifest(kind string, arch string) *deps.Manifest {
 // testClusterOptions returns fixed dependency inputs so cluster tfgen tests do
 // not read the local deps cache or fetch remote manifests.
 func testClusterOptions() ClusterOptions {
+	manifest, err := json.MarshalIndent(sampleVMConfigManifest("knc", "arm64"), "", "  ")
+	if err != nil {
+		panic(err)
+	}
 	return ClusterOptions{
 		DepsMirrorURL: "https://deps.podplane.dev",
-		VMConfigManifests: map[string]*deps.Manifest{
-			"knc/arm64": sampleVMConfigManifest("knc", "arm64"),
+		VMConfigManifests: []VMConfigManifest{
+			{Kind: "knc", Arch: "arm64", Filename: "vmconfig_knc_debian-13_arm64.json", JSON: append(manifest, '\n')},
 		},
 	}
 }
@@ -84,14 +89,15 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCluster returned error: %v", err)
 	}
-	if len(files) != 3 {
-		t.Fatalf("len(files) = %d, want 3", len(files))
+	if len(files) != 4 {
+		t.Fatalf("len(files) = %d, want 4", len(files))
 	}
 	contents := fileContents(files)
 	for _, name := range []string{
 		"podplane.cluster.main.tf",
 		"podplane.cluster.variables.tf",
 		"podplane.cluster.outputs.tf",
+		"podplane.cluster.vmconfig_knc_debian-13_arm64.json",
 	} {
 		if _, ok := contents[name]; !ok {
 			t.Fatalf("generated files missing %s: %#v", name, files)
@@ -111,9 +117,11 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		`region = local.aws_region`,
 		`certificates = local.certificates`,
 		`templates = local.templates`,
-		`content = base64encode(local.userdata["control-plane"])`,
-		`<<-USERDATA`,
-		`IMMUTABLE_SSH_AUTHORIZED_KEYS='${var.immutable_ssh_authorized_keys}'`,
+		`data "podplane_userdata" "knc_arm64"`,
+		`manifest_json = file("${path.module}/podplane.cluster.vmconfig_knc_debian-13_arm64.json")`,
+		`immutable_ssh_authorized_keys = var.immutable_ssh_authorized_keys`,
+		`enable_ssm = var.enable_ssm`,
+		`content = base64encode(data.podplane_userdata.knc_arm64.content)`,
 		`vars = local.mutable_env`,
 		`"public-control-plane" = { ports = [6443], subnets = "public", public = true }`,
 		`load_balancers = ["public-control-plane"]`,
@@ -126,6 +134,12 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	}
 	if strings.Contains(got, "local.instance_vars") {
 		t.Fatalf("generated cluster tf must not put immutable inputs in Nstance runtime vars:\n%s", got)
+	}
+	if strings.Contains(got, "IMMUTABLE_SSH_AUTHORIZED_KEYS=") {
+		t.Fatalf("generated Terraform must not embed rendered userdata:\n%s", got)
+	}
+	if !strings.Contains(contents["podplane.cluster.vmconfig_knc_debian-13_arm64.json"], `"kind": "knc"`) {
+		t.Fatalf("generated manifest copy is invalid:\n%s", contents["podplane.cluster.vmconfig_knc_debian-13_arm64.json"])
 	}
 }
 
@@ -242,7 +256,10 @@ func TestWriteFilesPreservesCustomTF(t *testing.T) {
 	if err := os.WriteFile(customPath, []byte("custom"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteFiles(dir, []File{{Name: "podplane.cluster.main.tf", Content: "locals {}\n"}}); err != nil {
+	if err := WriteFiles(dir, []File{
+		{Name: "podplane.cluster.main.tf", Content: "locals {}\n", Type: FileTypeTerraform},
+		{Name: "podplane.cluster.vmconfig_knc_debian-13_arm64.json", Content: "{}\n", Type: FileTypeJSON},
+	}); err != nil {
 		t.Fatalf("WriteFiles returned error: %v", err)
 	}
 	custom, err := os.ReadFile(customPath)
@@ -251,5 +268,12 @@ func TestWriteFilesPreservesCustomTF(t *testing.T) {
 	}
 	if string(custom) != "custom" {
 		t.Fatalf("custom file changed: %q", custom)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "podplane.cluster.vmconfig_knc_debian-13_arm64.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "{}\n" {
+		t.Fatalf("raw manifest = %q, want unmodified JSON", raw)
 	}
 }

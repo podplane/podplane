@@ -1,5 +1,5 @@
 #!/bin/bash -e
-# Podplane VM userdata (rendered).
+# Podplane VM user-data (rendered).
 # Provider: {{.Provider.Kind}}
 # Cluster ID: {{.Cluster.ID}}
 # Instance ID: {{.Instance.ID}}
@@ -28,7 +28,7 @@ hostnamectl set-hostname {{.Instance.ID}}
 
 # --- 2. Install immutable SSH keys for early-boot debugging (if provided) ---
 
-IMMUTABLE_SSH_AUTHORIZED_KEYS='{{.ImmutableSSHAuthorizedKeys}}'
+IMMUTABLE_SSH_AUTHORIZED_KEYS={{quoteEnv .ImmutableSSHAuthorizedKeys}}
 if [ -n "$IMMUTABLE_SSH_AUTHORIZED_KEYS" ]; then
   if ! getent group admin >/dev/null; then
     groupadd admin
@@ -48,7 +48,7 @@ fi
 # --- 3. Bootstrap provider-specific tools -----------------------------------
 
 {{if eq .Provider.Kind "aws"}}
-%{ if var.enable_ssm ~}
+{{if .EnableSSM}}
 log "Ensuring AWS SSM Agent is installed and running..."
 if command -v snap >/dev/null 2>&1 && snap list amazon-ssm-agent >/dev/null 2>&1; then
   snap start amazon-ssm-agent
@@ -61,7 +61,7 @@ else
   rm -f /tmp/amazon-ssm-agent.deb
   systemctl enable --now amazon-ssm-agent
 fi
-%{ endif ~}
+{{end}}
 {{end}}
 
 # --- 4. Check connectivity to Nstance Server --------------------------------
@@ -124,7 +124,7 @@ tar -xzf "${ARTIFACTS_DIR}/vmconfig.tar.gz" -C /
 log "Writing user-data.env file..."
 mkdir -p /opt/podplane/etc
 cat > /opt/podplane/etc/user-data.env <<'USERDATA_ENV'
-IMMUTABLE_SSH_AUTHORIZED_KEYS='{{.ImmutableSSHAuthorizedKeys}}'
+IMMUTABLE_SSH_AUTHORIZED_KEYS={{quoteEnv .ImmutableSSHAuthorizedKeys}}
 
 INSTANCE_ID='{{.Instance.ID}}'
 CLUSTER_ID='{{.Cluster.ID}}'

@@ -5,6 +5,7 @@
 package userdata
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -63,6 +64,7 @@ func baseVars(provider string) *TemplateVars {
 		},
 	}
 	v.ImmutableSSHAuthorizedKeys = "ssh-ed25519 AAAAexample"
+	v.EnableSSM = provider == "aws"
 	return v
 }
 
@@ -153,25 +155,6 @@ func TestRender_Local_HasDebianPasswordLine(t *testing.T) {
 	}
 }
 
-func TestRenderMutableEnv_SeparatesMutableAndImmutableSSHKeys(t *testing.T) {
-	vars := MutableVars{
-		"SSH_AUTHORIZED_KEYS":           "ssh-ed25519 AAAAmutable",
-		"IMMUTABLE_SSH_AUTHORIZED_KEYS": "ssh-ed25519 AAAAimmutable",
-		"REGISTRY_HOSTNAME":             "registry.example.com",
-	}
-	vars.ApplyDefaults("example-cluster")
-	out, err := RenderMutableEnv(vars)
-	if err != nil {
-		t.Fatalf("RenderMutableEnv: %v", err)
-	}
-	if !strings.Contains(out, "SSH_AUTHORIZED_KEYS='ssh-ed25519 AAAAmutable'") {
-		t.Fatalf("expected mutable SSH keys; got:\n%s", out)
-	}
-	if strings.Contains(out, "IMMUTABLE_SSH_AUTHORIZED_KEYS") {
-		t.Fatalf("immutable SSH keys must not be rendered into mutable.env; got:\n%s", out)
-	}
-}
-
 func TestRender_AWS_NoDebianPasswordLine(t *testing.T) {
 	v := baseVars("aws")
 	out, err := v.Render()
@@ -201,6 +184,45 @@ func TestRender_AWS_NoDebianPasswordLine(t *testing.T) {
 	}
 	if !strings.Contains(out, "/opt/podplane/bin/restart.sh") {
 		t.Errorf("expected aws user-data to run restart.sh directly; got:\n%s", out)
+	}
+}
+
+// TestRenderManifest verifies rendering from a pinned manifest document.
+func TestRenderManifest(t *testing.T) {
+	raw, err := json.Marshal(sampleManifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Render(raw, Options{
+		DepsMirrorURL:              "https://deps.podplane.dev",
+		ProviderKind:               "aws",
+		AWSAccountID:               "${local.aws_account_id}",
+		ImmutableSSHAuthorizedKeys: "${var.immutable_ssh_authorized_keys}",
+		EnableSSM:                  true,
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, want := range []string{
+		"# Provider: aws",
+		"AWS_ACCOUNT_ID='${local.aws_account_id}'",
+		"IMMUTABLE_SSH_AUTHORIZED_KEYS='${var.immutable_ssh_authorized_keys}'",
+		"https://deps.podplane.dev/vmconfig/artifacts/runc/1.2.3/runc",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered userdata missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestRenderRejectsInvalidManifest verifies malformed and
+// incomplete manifests are rejected before rendering.
+func TestRenderRejectsInvalidManifest(t *testing.T) {
+	if _, err := Render([]byte("{"), Options{ProviderKind: "aws"}); err == nil {
+		t.Fatal("expected invalid manifest error")
+	}
+	if _, err := Render([]byte(`{"vmconfig":{}}`), Options{ProviderKind: "aws"}); err == nil {
+		t.Fatal("expected incomplete manifest error")
 	}
 }
 
@@ -265,43 +287,6 @@ func TestValidate_MissingClusterID(t *testing.T) {
 	v.Cluster.ID = ""
 	if _, err := v.Render(); err == nil {
 		t.Fatalf("expected validation error for missing ClusterID")
-	}
-}
-
-func TestValidate_InvalidTelemetryLogCloudinit(t *testing.T) {
-	v := MutableVars{"TELEMETRY_LOG_CLOUDINIT": "maybe", "REGISTRY_HOSTNAME": "registry.example.com"}
-	v.ApplyDefaults("example-cluster")
-	if _, err := RenderMutableEnv(v); err == nil {
-		t.Fatalf("expected validation error for invalid TelemetryLogCloudinit")
-	}
-}
-
-func TestValidate_InvalidTelemetryLogServices(t *testing.T) {
-	v := MutableVars{"TELEMETRY_LOG_SERVICES": "kubelet,ssh.service", "REGISTRY_HOSTNAME": "registry.example.com"}
-	v.ApplyDefaults("example-cluster")
-	if _, err := RenderMutableEnv(v); err == nil {
-		t.Fatalf("expected validation error for invalid TelemetryLogServices")
-	}
-}
-
-func TestValidate_RejectsUnsafeEnvValue(t *testing.T) {
-	v := MutableVars{"OIDC_CA_CERT": "line1\nline2", "REGISTRY_HOSTNAME": "registry.example.com"}
-	v.ApplyDefaults("example-cluster")
-	if _, err := RenderMutableEnv(v); err == nil {
-		t.Fatalf("expected validation error for env value containing newline")
-	}
-}
-
-func TestObjectStorageSetters_SetEndpointAndRegion(t *testing.T) {
-	v := MutableVars{}
-	v.SetObjectStorageEndpoint("https://object.example")
-	v.SetObjectStorageRegion("region-1")
-
-	if v["NETSY_ENDPOINT"] != "https://object.example" || v["TELEMETRY_S3_ENDPOINT"] != "https://object.example" || v["REGISTRY_ENDPOINT"] != "https://object.example" {
-		t.Fatalf("expected shared object storage endpoint to be set on all components: %#v", v)
-	}
-	if v["NETSY_REGION"] != "region-1" || v["TELEMETRY_S3_REGION"] != "region-1" || v["REGISTRY_REGION"] != "region-1" {
-		t.Fatalf("expected shared object storage region to be set on all components: %#v", v)
 	}
 }
 

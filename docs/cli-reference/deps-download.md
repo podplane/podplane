@@ -19,6 +19,7 @@ The components manifest also declares the Git source Flux uses for platform comp
 The local components images mirror only downloads images for the target architecture, such as `arm64` or `amd64`.
 
 - You can specify one or both architectures with the `--arch` flag e.g. `--arch arm64,amd64`.
+- `podplane cluster create` uses the architectures configured for its VM pools and automatically fetches a required vmconfig manifest if it is not already cached. Use this command with `--arch` when you want to refresh an existing cached manifest before regenerating cluster Terraform files.
 - For component images:
   - Some registry views may still show the full list of architectures from the original upstream image, but architectures you did not download are not actually available in the local mirror.
   - Use the mirror for the local VM architecture you downloaded, not as a complete copy of the upstream registry.

@@ -15,20 +15,36 @@ const header = `# Podplane managed OpenTofu/Terraform file.
 
 `
 
-// File is one managed Terraform file to write.
+// FileType identifies the syntax and header behavior of a generated file.
+type FileType int
+
+const (
+	FileTypeTerraform FileType = iota + 1
+	FileTypeJSON
+)
+
+// File is one generated infrastructure file to write.
 type File struct {
 	Name    string
 	Content string
+	Type    FileType
 }
 
-// WriteFiles writes managed Terraform files with the Podplane header.
+// WriteFiles writes generated files, adding the Podplane header to Terraform.
 func WriteFiles(dir string, files []File) error {
 	for _, file := range files {
 		if file.Name == "" {
 			return fmt.Errorf("generated tf file name is empty")
 		}
 		path := filepath.Join(dir, file.Name)
-		content := header + file.Content
+		content := file.Content
+		switch file.Type {
+		case FileTypeTerraform:
+			content = header + content
+		case FileTypeJSON:
+		default:
+			return fmt.Errorf("generated file %s has unsupported type %d", file.Name, file.Type)
+		}
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}

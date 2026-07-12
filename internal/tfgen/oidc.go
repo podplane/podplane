@@ -97,9 +97,9 @@ func renderAWSOIDC(cfg *oidcconfig.Config) []File {
 	output.Body.Attr("value", str("https://${module.oidc.oidc_addr}"))
 	outputsDoc.AddBlock(output)
 	return []File{
-		{Name: "podplane.oidc.main.tf", Content: mainDoc.String()},
-		{Name: "podplane.oidc.variables.tf", Content: variablesDoc.String()},
-		{Name: "podplane.oidc.outputs.tf", Content: outputsDoc.String()},
+		{Name: "podplane.oidc.main.tf", Content: mainDoc.String(), Type: FileTypeTerraform},
+		{Name: "podplane.oidc.variables.tf", Content: variablesDoc.String(), Type: FileTypeTerraform},
+		{Name: "podplane.oidc.outputs.tf", Content: outputsDoc.String(), Type: FileTypeTerraform},
 	}
 }
 

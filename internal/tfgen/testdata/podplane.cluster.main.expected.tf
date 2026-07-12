@@ -24,6 +24,15 @@ data "aws_caller_identity" "current" {
 data "aws_region" "current" {
 }
 
+data "podplane_userdata" "knc_arm64" {
+  manifest_json = file("${path.module}/podplane.cluster.vmconfig_knc_debian-13_arm64.json")
+  deps_mirror_url = "https://deps.podplane.dev"
+  provider_kind = "aws"
+  aws_account_id = local.aws_account_id
+  immutable_ssh_authorized_keys = var.immutable_ssh_authorized_keys
+  enable_ssm = var.enable_ssm
+}
+
 locals {
   cluster_name = "Test Cluster"
   cluster_id = "test-cluster"
@@ -75,179 +84,6 @@ locals {
     REGISTRY_SECRET_ACCESS_KEY = var.registry_secret_access_key
     REGISTRY_HOSTNAME = var.registry_hostname
   }
-  userdata = {
-    "control-plane" = <<-USERDATA
-    #!/bin/bash -e
-    # Podplane VM userdata (rendered).
-    # Provider: aws
-    # Cluster ID: {{ .Cluster.ID }}
-    # Instance ID: {{ .Instance.ID }}
-    # Manifest version: 2026.01.01
-    # OS: debian-13
-    # Arch: arm64
-    # Deps Mirror=https://deps.podplane.dev
-    set -euo pipefail
-    export DEBIAN_FRONTEND=noninteractive
-
-    log() {
-      printf '[userdata] %s\tts=%s\n' "$*" "$EPOCHREALTIME"
-    }
-
-    log "Podplane cloud-init user-data script has started."
-
-    # ----------------------------------------------------------------------------
-
-    # --- 1. Configure hostname --------------------------------------------------
-
-    hostnamectl set-hostname {{ .Instance.ID }}
-
-
-    # --- 2. Install immutable SSH keys for early-boot debugging (if provided) ---
-
-    IMMUTABLE_SSH_AUTHORIZED_KEYS='${var.immutable_ssh_authorized_keys}'
-    if [ -n "$IMMUTABLE_SSH_AUTHORIZED_KEYS" ]; then
-      if ! getent group admin >/dev/null; then
-        groupadd admin
-      fi
-      if ! id admin >/dev/null 2>&1; then
-        useradd -g admin -m -s /bin/bash admin
-      fi
-      install -d -m 0700 -o admin -g admin /home/admin/.ssh
-      printf '%s\n' "$IMMUTABLE_SSH_AUTHORIZED_KEYS" > /home/admin/.ssh/authorized_keys
-      chmod 0600 /home/admin/.ssh/authorized_keys
-      chown admin:admin /home/admin/.ssh/authorized_keys
-      mkdir -p /etc/sudoers.d
-      printf '%s\n' 'admin ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/admin
-      chmod 0440 /etc/sudoers.d/admin
-    fi
-
-    # --- 3. Bootstrap provider-specific tools -----------------------------------
-
-
-    %{ if var.enable_ssm ~}
-    log "Ensuring AWS SSM Agent is installed and running..."
-    if command -v snap >/dev/null 2>&1 && snap list amazon-ssm-agent >/dev/null 2>&1; then
-      snap start amazon-ssm-agent
-    elif dpkg -s amazon-ssm-agent >/dev/null 2>&1; then
-      systemctl enable --now amazon-ssm-agent
-    else
-      curl -fsSL -o /tmp/amazon-ssm-agent.deb \
-        "https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/debian_arm64/amazon-ssm-agent.deb"
-      dpkg -i /tmp/amazon-ssm-agent.deb
-      rm -f /tmp/amazon-ssm-agent.deb
-      systemctl enable --now amazon-ssm-agent
-    fi
-    %{ endif ~}
-
-
-    # --- 4. Check connectivity to Nstance Server --------------------------------
-
-    REGISTRATION_ADDR="{{ .Server.RegistrationAddr }}"
-    log "Checking connectivity to nstance-server at $REGISTRATION_ADDR..."
-    attempt=0
-    while true
-    do
-      attempt=$((attempt + 1))
-      if timeout 5 bash -c "echo > /dev/tcp/$${REGISTRATION_ADDR%:*}/$${REGISTRATION_ADDR##*:}" 2>/dev/null
-      then
-        log "Connection successful!"
-        break
-      fi
-      retry_in=15
-      if [ $attempt -lt 3 ]
-      then
-        retry_in=3
-      fi
-      log "Failed to connect to nstance-server at $REGISTRATION_ADDR (attempt $attempt), retrying in $retry_in seconds..."
-      sleep $retry_in
-    done
-
-    # --- 5. Download and verify dependencies ------------------------------------
-
-    ARTIFACTS_DIR="/opt/podplane/artifacts"
-    mkdir -p "$ARTIFACTS_DIR"
-
-    log "Downloading 2 dependencies..."
-    curl -sfL --parallel --parallel-max 10 --parallel-immediate \
-      -o "$${ARTIFACTS_DIR}/runc" "https://deps.podplane.dev/vmconfig/artifacts/runc/1.2.3/runc" \
-      -o "$${ARTIFACTS_DIR}/vmconfig.tar.gz" "https://deps.podplane.dev/vmconfig/artifacts/vmconfig/2026.01.01/vmconfig.tar.gz" \
-      >/dev/null
-
-    log "Verifying checksums..."
-    while read -r digest filename; do
-      case "$digest" in
-        sha256:*) echo "$${digest#sha256:}  $${filename}" | sha256sum -c --quiet ;;
-        sha512:*) echo "$${digest#sha512:}  $${filename}" | sha512sum -c --quiet ;;
-        *) echo "Unsupported digest algorithm for $${filename}: $${digest}" >&2; exit 1 ;;
-      esac
-    done <<CHECKSUMS
-    sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  $${ARTIFACTS_DIR}/runc
-    sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  $${ARTIFACTS_DIR}/vmconfig.tar.gz
-    CHECKSUMS
-
-    # --- 6. Extract vmconfig tarball --------------------------------------------
-
-    log "Extracting vmconfig.tar.gz..."
-    tar -xzf "$${ARTIFACTS_DIR}/vmconfig.tar.gz" -C /
-
-
-    # --- 7. Write user-data environment file ------------------------------------
-
-    log "Writing user-data.env file..."
-    mkdir -p /opt/podplane/etc
-    cat > /opt/podplane/etc/user-data.env <<'USERDATA_ENV'
-    IMMUTABLE_SSH_AUTHORIZED_KEYS='${var.immutable_ssh_authorized_keys}'
-
-    INSTANCE_ID='{{ .Instance.ID }}'
-    CLUSTER_ID='{{ .Cluster.ID }}'
-
-    PROVIDER_KIND='aws'
-    PROVIDER_REGION='{{ .Provider.Region }}'
-    PROVIDER_ZONE='{{ .Provider.Zone }}'
-    PROVIDER_INSTANCE_TYPE='{{ .Instance.Type }}'
-    AWS_ACCOUNT_ID='${local.aws_account_id}'
-    GOOGLE_PROJECT_ID=''
-
-    NSTANCE_CA_CERT='{{ .Cluster.CACert }}'
-    NSTANCE_SERVER_REGISTRATION_ADDR='{{ .Server.RegistrationAddr }}'
-    NSTANCE_SERVER_AGENT_ADDR='{{ .Server.AgentAddr }}'
-    USERDATA_ENV
-    chmod 0600 /opt/podplane/etc/user-data.env
-
-    # --- 8. Write sensitive nstance bootstrap files -----------------------------
-    log "Writing nstance registration nonce file..."
-    mkdir -p /opt/nstance-agent/identity
-    cat > /opt/nstance-agent/identity/nonce.jwt <<'NSTANCE_NONCE_JWT'
-    {{ .Nonce }}
-    NSTANCE_NONCE_JWT
-    cat > /opt/nstance-agent/identity/ca.crt <<'NSTANCE_CA_CERT'
-    {{ .Cluster.CACert }}
-    NSTANCE_CA_CERT
-    chmod 0600 /opt/nstance-agent/identity/nonce.jwt /opt/nstance-agent/identity/ca.crt
-
-
-    # --- 9. Run install.sh -------------------------------------------------------
-
-
-
-    log "Running install.sh..."
-    chmod +x /opt/podplane/bin/install.sh
-    /opt/podplane/bin/install.sh
-
-    # --- 10. Run configure.sh ---------------------------------------------------
-    log "Running configure.sh..."
-    chmod +x /opt/podplane/bin/configure.sh
-    /opt/podplane/bin/configure.sh
-
-    # --- 11. Restart services ---------------------------------------------------
-    log "Running restart.sh..."
-    chmod +x /opt/podplane/bin/restart.sh
-    /opt/podplane/bin/restart.sh
-
-    # ----------------------------------------------------------------------------
-    log "Podplane cloud-init user-data script has completed successfully."
-    USERDATA
-  }
   certificates = {
     "containerd.client" = { kind = "client", cn = "containerd.client", dns = ["{{ .Instance.Hostname }}", "localhost"], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1"], ttl = 8760 }
     "front-proxy.client" = { kind = "client", cn = "front-proxy-client", dns = ["{{ .Instance.Hostname }}", "localhost"], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1"], ttl = 8760 }
@@ -267,7 +103,7 @@ locals {
       kind = "knc"
       arch = "arm64"
       vars = local.mutable_env
-      userdata = { source = "inline", encoding = "base64", content = base64encode(local.userdata["control-plane"]) }
+      userdata = { source = "inline", encoding = "base64", content = base64encode(data.podplane_userdata.knc_arm64.content) }
       files = { "mutable.env" = { kind = "env", template = local.mutable_env }, "containerd.client.crt" = { kind = "certificate", template = "containerd.client", key = { source = "agent", name = "containerd.client" } }, "kube2iam.client.crt" = { kind = "certificate", template = "kube2iam.client", key = { source = "agent", name = "kube2iam.client" } }, "kubelet.client.crt" = { kind = "certificate", template = "kubelet.client", key = { source = "agent", name = "kubelet.client" } }, "kubelet.server.crt" = { kind = "certificate", template = "kubelet.server", key = { source = "agent", name = "kubelet.server" } }, "registry.server.crt" = { kind = "certificate", template = "registry.server", key = { source = "agent", name = "registry.server" } }, "front-proxy.client.crt" = { kind = "certificate", template = "front-proxy.client", key = { source = "agent", name = "front-proxy.client" } }, "kube-apiserver.client.crt" = { kind = "certificate", template = "kube-apiserver.client", key = { source = "agent", name = "kube-apiserver.client" } }, "kube-apiserver.server.crt" = { kind = "certificate", template = "kube-apiserver.server", key = { source = "agent", name = "kube-apiserver.server" } }, "kube-controller-manager.client.crt" = { kind = "certificate", template = "kube-controller-manager.client", key = { source = "agent", name = "kube-controller-manager.client" } }, "kube-scheduler.client.crt" = { kind = "certificate", template = "kube-scheduler.client", key = { source = "agent", name = "kube-scheduler.client" } }, "netsy.client.crt" = { kind = "certificate", template = "netsy.client", key = { source = "agent", name = "netsy.client" } }, "netsy.server.crt" = { kind = "certificate", template = "netsy.server", key = { source = "agent", name = "netsy.server" } } }
       args = { ImageId = "{{ .Image.debian_13_arm64 }}" }
     }

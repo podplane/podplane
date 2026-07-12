@@ -5,22 +5,38 @@
 package tfgen
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/clusterspec"
-	"github.com/podplane/podplane/internal/deps"
-	"github.com/podplane/podplane/internal/userdata"
 	"github.com/podplane/podplane/pkg/seeds"
 )
 
 // ClusterOptions provides dependency inputs needed to render cluster Terraform.
 type ClusterOptions struct {
 	DepsMirrorURL     string
-	VMConfigManifests map[string]*deps.Manifest
+	VMConfigManifests []VMConfigManifest
+}
+
+// VMConfigManifest is one pinned vmconfig manifest used by generated Terraform.
+type VMConfigManifest struct {
+	Kind     string
+	Arch     string
+	Filename string
+	JSON     []byte
+}
+
+type vmTarget struct {
+	kind string
+	arch string
+}
+
+// dataName returns this target's Terraform-safe data source name.
+func (t vmTarget) dataName() string {
+	return safeName(t.kind, t.arch)
 }
 
 // GenerateCluster renders managed Terraform files for a cluster config path.
@@ -89,6 +105,25 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	region := block("data", "aws_region", "current")
 	mainDoc.AddBlock(region)
 
+	manifests := make(map[vmTarget]VMConfigManifest, len(opts.VMConfigManifests))
+	for _, manifest := range opts.VMConfigManifests {
+		manifests[vmTarget{kind: manifest.Kind, arch: manifest.Arch}] = manifest
+	}
+	for _, target := range requiredVMTargets(cfg) {
+		manifest, ok := manifests[target]
+		if !ok || len(manifest.JSON) == 0 {
+			panic(fmt.Errorf("missing vmconfig manifest %s/%s", target.kind, target.arch))
+		}
+		userdata := block("data", "podplane_userdata", target.dataName())
+		userdata.Body.Attr("manifest_json", expr("file("+quote("${path.module}/podplane.cluster."+manifest.Filename)+")"))
+		userdata.Body.Attr("deps_mirror_url", str(opts.DepsMirrorURL))
+		userdata.Body.Attr("provider_kind", str(provider.Kind))
+		userdata.Body.Attr("aws_account_id", expr("local.aws_account_id"))
+		userdata.Body.Attr("immutable_ssh_authorized_keys", expr("var.immutable_ssh_authorized_keys"))
+		userdata.Body.Attr("enable_ssm", expr("var.enable_ssm"))
+		mainDoc.AddBlock(userdata)
+	}
+
 	mutableVars := []struct {
 		name        string
 		description string
@@ -149,7 +184,6 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	locals.Body.Attr("kubernetes_cluster_cidr", stringValueList(cfg.Cluster.Kubernetes.ClusterCIDR))
 	locals.Body.Attr("kubernetes_service_cidr", stringValueList(cfg.Cluster.Kubernetes.ServiceCIDR))
 	locals.Body.Attr("mutable_env", mutableEnvValue())
-	locals.Body.Attr("userdata", userdataValue(cfg, opts, provider.Kind))
 	locals.Body.Attr("certificates", nstanceCertificatesValue())
 	locals.Body.Attr("templates", templatesValue(cfg))
 	mainDoc.AddBlock(locals)
@@ -253,11 +287,20 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	netsyRole := block("output", "netsy_role_arn")
 	netsyRole.Body.Attr("value", expr("aws_iam_role.netsy.arn"))
 	outputsDoc.AddBlock(netsyRole)
-	return []File{
-		{Name: "podplane.cluster.main.tf", Content: mainDoc.String()},
-		{Name: "podplane.cluster.variables.tf", Content: variablesDoc.String()},
-		{Name: "podplane.cluster.outputs.tf", Content: outputsDoc.String()},
+	files := []File{
+		{Name: "podplane.cluster.main.tf", Content: mainDoc.String(), Type: FileTypeTerraform},
+		{Name: "podplane.cluster.variables.tf", Content: variablesDoc.String(), Type: FileTypeTerraform},
+		{Name: "podplane.cluster.outputs.tf", Content: outputsDoc.String(), Type: FileTypeTerraform},
 	}
+	for _, target := range requiredVMTargets(cfg) {
+		manifest := manifests[target]
+		files = append(files, File{
+			Name:    "podplane.cluster." + manifest.Filename,
+			Content: string(manifest.JSON),
+			Type:    FileTypeJSON,
+		})
+	}
+	return files
 }
 
 // addPodplaneAWSStorageAndRoles adds Podplane-owned S3 buckets and workload
@@ -573,46 +616,14 @@ func groupsValue(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provid
 	return object(field("default", object(poolFields...)))
 }
 
-// userdataValue renders the userdata templates shared by every Nstance shard.
-func userdataValue(cfg *clusterconfig.ClusterConfig, opts ClusterOptions, providerKind string) hclObject {
-	awsAccountID := ""
-	googleProjectID := ""
-	switch providerKind {
-	case "aws":
-		awsAccountID = "${local.aws_account_id}"
-	case "google":
-		googleProjectID = "${local.google_project_id}"
-	default:
-		panic(fmt.Errorf("cluster provider %q is not supported", providerKind))
-	}
-
-	fields := make([]hclObjectField, 0, len(cfg.Cluster.Pools))
-	for _, poolName := range sortedKeys(cfg.Cluster.Pools) {
-		pool := cfg.Cluster.Pools[poolName]
-		kind := poolKind(poolName)
-		manifest := opts.VMConfigManifests[kind+"/"+pool.Arch]
-		if manifest == nil {
-			panic(fmt.Errorf("missing vmconfig manifest %s/%s", kind, pool.Arch))
-		}
-		userdataTemplate, err := userdata.SourceForNstance(manifest, opts.DepsMirrorURL, providerKind, awsAccountID, googleProjectID, "${var.immutable_ssh_authorized_keys}")
-		if err != nil {
-			panic(err)
-		}
-		userdataTemplate = strings.ReplaceAll(userdataTemplate, "${", "$${")
-		userdataTemplate = strings.ReplaceAll(userdataTemplate, "$${local.aws_account_id}", "${local.aws_account_id}")
-		userdataTemplate = strings.ReplaceAll(userdataTemplate, "$${local.google_project_id}", "${local.google_project_id}")
-		userdataTemplate = strings.ReplaceAll(userdataTemplate, "$${var.immutable_ssh_authorized_keys}", "${var.immutable_ssh_authorized_keys}")
-		fields = append(fields, field(poolName, heredoc(userdataTemplate)))
-	}
-	return object(fields...)
-}
-
 // templatesValue converts cluster pools into Nstance instance templates.
 func templatesValue(cfg *clusterconfig.ClusterConfig) hclObject {
 	fields := make([]hclObjectField, 0, len(cfg.Cluster.Pools))
 	for _, poolName := range sortedKeys(cfg.Cluster.Pools) {
 		pool := cfg.Cluster.Pools[poolName]
 		kind := poolKind(poolName)
+		target := vmTarget{kind: kind, arch: pool.Arch}
+		userdataRef := "data.podplane_userdata." + target.dataName() + ".content"
 		fields = append(fields, field(poolName, object(
 			identField("kind", str(kind)),
 			identField("arch", str(pool.Arch)),
@@ -620,7 +631,7 @@ func templatesValue(cfg *clusterconfig.ClusterConfig) hclObject {
 			identField("userdata", inlineObject(
 				identField("source", str("inline")),
 				identField("encoding", str("base64")),
-				identField("content", expr("base64encode(local.userdata["+quote(poolName)+"])")),
+				identField("content", expr("base64encode("+userdataRef+")")),
 			)),
 			identField("files", nstanceTemplateFilesValue(kind)),
 			identField("args", inlineObject(
@@ -629,6 +640,25 @@ func templatesValue(cfg *clusterconfig.ClusterConfig) hclObject {
 		)))
 	}
 	return object(fields...)
+}
+
+// requiredVMTargets returns the unique, ordered VM targets used by cluster pools.
+func requiredVMTargets(cfg *clusterconfig.ClusterConfig) []vmTarget {
+	set := make(map[vmTarget]struct{}, len(cfg.Cluster.Pools))
+	for poolName, pool := range cfg.Cluster.Pools {
+		set[vmTarget{kind: poolKind(poolName), arch: pool.Arch}] = struct{}{}
+	}
+	targets := make([]vmTarget, 0, len(set))
+	for target := range set {
+		targets = append(targets, target)
+	}
+	slices.SortFunc(targets, func(a, b vmTarget) int {
+		if n := cmp.Compare(a.kind, b.kind); n != 0 {
+			return n
+		}
+		return cmp.Compare(a.arch, b.arch)
+	})
+	return targets
 }
 
 // nstanceCertificatesValue returns the certificate templates required by the

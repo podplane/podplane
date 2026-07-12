@@ -69,8 +69,6 @@ type hclExpression string
 
 type hclString string
 
-type hclHeredoc string
-
 type hclNumber int
 
 type hclBool bool
@@ -127,11 +125,6 @@ func expr(value string) hclExpression {
 // str creates a quoted HCL string value.
 func str(value string) hclString {
 	return hclString(value)
-}
-
-// heredoc creates an indented HCL heredoc value.
-func heredoc(value string) hclHeredoc {
-	return hclHeredoc(value)
 }
 
 // num creates a numeric HCL value.
@@ -229,20 +222,6 @@ func (e hclExpression) renderHCL(indent int) string {
 // renderHCL renders a quoted string.
 func (s hclString) renderHCL(int) string {
 	return quote(string(s))
-}
-
-// renderHCL renders an indented heredoc with stable whitespace.
-func (h hclHeredoc) renderHCL(indent int) string {
-	const delimiter = "USERDATA"
-	pad := strings.Repeat(" ", indent)
-	content := strings.TrimSuffix(string(h), "\n")
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		if line != "" {
-			lines[i] = pad + line
-		}
-	}
-	return "<<-" + delimiter + "\n" + strings.Join(lines, "\n") + "\n" + pad + delimiter
 }
 
 // renderHCL renders a number.

@@ -93,30 +93,42 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 				}
 			}
 
-			// Download vmconfig manifest and fail early if it cannot be fetched, since
-			// it's required to complete cluster creation (tf files embed the manifest).
-			manifests := map[string]*deps.Manifest{}
+			// Resolve vmconfig manifests from the local dependency cache. Terraform
+			// receives pinned copies so plans remain auditable and deterministic.
+			manifests := map[string]tfgen.VMConfigManifest{}
 			for poolName, pool := range cfg.Cluster.Pools {
 				kind := "knd"
 				if poolName == "control-plane" {
 					kind = "knc"
 				}
 				key := kind + "/" + pool.Arch
-				if manifests[key] != nil {
+				if _, ok := manifests[key]; ok {
 					continue
 				}
-				manifest, err := depsManager.EnsureVMConfigManifestCached(kind, pool.Arch)
-				if err != nil {
+				if _, err := depsManager.EnsureVMConfigManifestCached(kind, pool.Arch); err != nil {
 					return fmt.Errorf("failed to prepare vmconfig manifest %s: %w", key, err)
 				}
-				manifests[key] = manifest
+				_, raw, err := depsManager.ReadCachedManifest(kind, pool.Arch)
+				if err != nil {
+					return fmt.Errorf("failed to read vmconfig manifest %s: %w", key, err)
+				}
+				manifests[key] = tfgen.VMConfigManifest{
+					Kind:     kind,
+					Arch:     pool.Arch,
+					Filename: filepath.Base(depsManager.VMConfigManifestCachePath(kind, pool.Arch)),
+					JSON:     raw,
+				}
+			}
+			manifestList := make([]tfgen.VMConfigManifest, 0, len(manifests))
+			for _, manifest := range manifests {
+				manifestList = append(manifestList, manifest)
 			}
 
-			// Genereate tf files using cluster config + vmconfig manifest
+			// Generate Terraform files and pinned vmconfig manifest copies.
 			dir := filepath.Dir(path)
 			if err := tfgen.WriteCluster(path, cfg, tfgen.ClusterOptions{
 				DepsMirrorURL:     c.DepsBaseURL(),
-				VMConfigManifests: manifests,
+				VMConfigManifests: manifestList,
 			}); err != nil {
 				return err
 			}
