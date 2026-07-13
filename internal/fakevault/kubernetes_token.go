@@ -17,8 +17,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
-const kubernetesServiceAccountIssuer = "https://localhost"
-
 const (
 	operatorRole                    = "podplane-operator"
 	operatorServiceAccountNamespace = "platform-podplane-operator"
@@ -29,6 +27,7 @@ const (
 // the kube-apiserver JWKS endpoint for a cluster.
 type KubernetesTokenValidator struct {
 	KubernetesAPIURL func(clusterID string) (string, error)
+	KubernetesIssuer func(clusterID string) (string, error)
 	Client           *http.Client
 	Issuer           string
 }
@@ -42,6 +41,16 @@ func (v *KubernetesTokenValidator) ValidateToken(ctx context.Context, clusterID,
 	if err != nil {
 		return err
 	}
+	issuer := v.Issuer
+	if v.KubernetesIssuer != nil {
+		issuer, err = v.KubernetesIssuer(clusterID)
+		if err != nil {
+			return fmt.Errorf("resolve kubernetes service-account issuer: %w", err)
+		}
+	}
+	if issuer == "" {
+		return fmt.Errorf("kubernetes service-account issuer is required")
+	}
 	jwksURL := strings.TrimRight(apiURL, "/") + "/openid/v1/jwks"
 	keySet, err := v.fetchJWKSet(ctx, jwksURL, rawToken)
 	if err != nil {
@@ -51,7 +60,7 @@ func (v *KubernetesTokenValidator) ValidateToken(ctx context.Context, clusterID,
 		[]byte(rawToken),
 		jwt.WithKeySet(keySet, jws.WithInferAlgorithmFromKey(true)),
 		jwt.WithValidate(true),
-		jwt.WithIssuer(v.issuer()),
+		jwt.WithIssuer(issuer),
 		jwt.WithAcceptableSkew(30*time.Second),
 	)
 	if err != nil {
@@ -114,12 +123,4 @@ func (v *KubernetesTokenValidator) httpClient() *http.Client {
 		return v.Client
 	}
 	return http.DefaultClient
-}
-
-// issuer returns the accepted Kubernetes service-account token issuer.
-func (v *KubernetesTokenValidator) issuer() string {
-	if v.Issuer != "" {
-		return v.Issuer
-	}
-	return kubernetesServiceAccountIssuer
 }

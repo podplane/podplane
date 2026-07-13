@@ -389,6 +389,17 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vault
 	// /vault/ — fake Vault/OpenBao API for local Secrets Store CSI usage.
 	validator := &fakevault.KubernetesTokenValidator{
 		KubernetesAPIURL: hostForwardedKubernetesAPIURL(c.RuntimeDirectory()),
+		KubernetesIssuer: func(clusterID string) (string, error) {
+			cluster, err := clusterconfig.Load(ClusterConfigPath(c.DataDirectory(), clusterID))
+			if err != nil {
+				return "", err
+			}
+			issuer := cluster.ResolvedKubernetesAPIURL()
+			if issuer == "" {
+				return "", fmt.Errorf("local cluster config is missing kubernetes.api_hostname")
+			}
+			return issuer, nil
+		},
 		Client: &http.Client{
 			Timeout:   5 * time.Second,
 			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},

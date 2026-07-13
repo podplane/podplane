@@ -22,6 +22,8 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
+const testKubernetesServiceAccountIssuer = "https://cluster.example.com"
+
 // TestKubernetesTokenValidatorAcceptsServiceAccountJWT verifies JWKS-backed
 // Kubernetes service-account token validation.
 func TestKubernetesTokenValidatorAcceptsServiceAccountJWT(t *testing.T) {
@@ -52,6 +54,7 @@ func TestKubernetesTokenValidatorAcceptsServiceAccountJWT(t *testing.T) {
 	}
 	validator := &KubernetesTokenValidator{
 		KubernetesAPIURL: func(string) (string, error) { return server.URL, nil },
+		KubernetesIssuer: func(string) (string, error) { return testKubernetesServiceAccountIssuer, nil },
 		Client:           server.Client(),
 	}
 	if err := validator.ValidateToken(context.Background(), "dev", "default", rawToken); err != nil {
@@ -119,6 +122,7 @@ func testKubernetesTokenValidator(t *testing.T, key *rsa.PrivateKey) *Kubernetes
 	t.Cleanup(server.Close)
 	return &KubernetesTokenValidator{
 		KubernetesAPIURL: func(string) (string, error) { return server.URL, nil },
+		Issuer:           testKubernetesServiceAccountIssuer,
 		Client:           server.Client(),
 	}
 }
@@ -151,7 +155,7 @@ func testServiceAccountJWT(key *rsa.PrivateKey) (string, error) {
 func testServiceAccountJWTForSubject(key *rsa.PrivateKey, subject string) (string, error) {
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
-		Issuer(kubernetesServiceAccountIssuer).
+		Issuer(testKubernetesServiceAccountIssuer).
 		Subject(subject).
 		IssuedAt(now).
 		Expiration(now.Add(time.Hour)).
