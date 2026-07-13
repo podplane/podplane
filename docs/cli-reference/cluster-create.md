@@ -14,6 +14,10 @@ The generated `podplane.cluster.vmconfig.*.json` files pin the dependencies used
 podplane cluster create [flags]
 ```
 
+Podplane uses OpenTofu when both `tofu` and `terraform` are available. Set
+`PODPLANE_TF_CMD=terraform` to select Terraform explicitly. The value
+may be an executable name on `PATH` or an executable path.
+
 ## Options
 
 | Flag | Description |

@@ -52,3 +52,27 @@ func TestCLIInvokesTofuWithExpectedArguments(t *testing.T) {
 		}
 	}
 }
+
+// TestNewCLIHonorsExecutableEnv verifies explicit Terraform selection takes
+// precedence over the default tofu-first lookup.
+func TestNewCLIHonorsExecutableEnv(t *testing.T) {
+	dir := t.TempDir()
+	terraform := filepath.Join(dir, "terraform")
+	if err := os.WriteFile(terraform, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tofu := filepath.Join(dir, "tofu")
+	if err := os.WriteFile(tofu, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv(CommandEnvVar, "terraform")
+
+	cli, err := NewCLI()
+	if err != nil {
+		t.Fatalf("NewCLI returned error: %v", err)
+	}
+	if cli.binary != terraform {
+		t.Fatalf("NewCLI selected %q, want %q", cli.binary, terraform)
+	}
+}

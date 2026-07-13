@@ -11,6 +11,9 @@ import (
 	"os/exec"
 )
 
+// CommandEnvVar selects the OpenTofu or Terraform command used by Podplane.
+const CommandEnvVar = "PODPLANE_TF_CMD"
+
 // Executor runs OpenTofu/Terraform operations for a generated stack.
 type Executor interface {
 	Init(ctx context.Context, dir string) error
@@ -24,8 +27,15 @@ type CLI struct {
 	binary string
 }
 
-// NewCLI finds tofu or terraform on PATH and returns a CLI executor.
+// NewCLI selects the configured executable or finds tofu or terraform on PATH.
 func NewCLI() (*CLI, error) {
+	if executable := os.Getenv(CommandEnvVar); executable != "" {
+		path, err := exec.LookPath(executable)
+		if err != nil {
+			return nil, fmt.Errorf("%s command %q not found: %w", CommandEnvVar, executable, err)
+		}
+		return &CLI{binary: path}, nil
+	}
 	if path, err := exec.LookPath("tofu"); err == nil {
 		return &CLI{binary: path}, nil
 	}
