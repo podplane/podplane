@@ -82,13 +82,21 @@ New cluster configs include a relative `$schema` reference to `./podplane.cluste
             { "v4cidr": "172.18.4.0/24", "v6cidr": "auto", "pool": "ingress" }
           ]
         },
-        "load_balancer": {
-          "public": true,
-          "listeners": [
-            { "port": 6443, "pool": "control-plane" },
-            { "port": 80, "pool": "ingress" },
-            { "port": 443, "pool": "ingress" }
-          ]
+        "load_balancers": {
+          "main": {
+            "public": true,
+            "subnets": "public",
+            "listeners": [
+              { "port": 443, "pool": "ingress" }
+            ]
+          },
+          "kubernetes-api": {
+            "public": true,
+            "subnets": "public",
+            "listeners": [
+              { "port": 6443, "pool": "control-plane" }
+            ]
+          }
         },
         "buckets": ["uploads", "assets"],
         "roles": {
@@ -103,6 +111,8 @@ New cluster configs include a relative `$schema` reference to `./podplane.cluste
       }
     ],
     "kubernetes": {
+      "api_hostname": "k8s.example.com",
+      "api_load_balancer": "kubernetes-api",
       "cluster_cidr": ["100.64.0.0/10", "fd64::/48"],
       "service_cidr": ["198.18.0.0/15", "fdc6::/108"]
     },
@@ -148,8 +158,10 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.acme.server` | ACME directory URL used for production ingress certificates. When set with `cluster.acme.email`, Podplane configures cert-manager DNS-01 issuers. Omit `cluster.acme` for local/self-signed ingress certificates. |
 | `cluster.acme.email` | ACME account email address for expiry and account notices. |
 | `cluster.domains[]` | Array of domain configurations. The first domain is used as the default for ingress routing. |
-| `cluster.domains[].zone` | Domain zone (e.g. `internaltools.example.com`) |
-| `cluster.domains[].provider.kind` | Domain DNS provider - `aws`, `cloudflare`, `google`, or `local` for local clusters. |
+| `cluster.domains[].zone` | Exact ingress apex (e.g. `staging.example.com`); Podplane creates apex and wildcard DNS records. |
+| `cluster.domains[].load_balancer` | Named provider load balancer targeted by the apex and wildcard records. Defaults to `main`. |
+| `cluster.domains[].provider` | Optional DNS provider. Omit it for manual DNS management. |
+| `cluster.domains[].provider.kind` | Managed DNS provider. Cluster Terraform generation currently supports `aws`. |
 | `cluster.domains[].provider.region` | AWS Route53 region for DNS-01. If omitted, Podplane can infer it when exactly one matching AWS provider exists. |
 | `cluster.domains[].provider.hosted_zone_id` | AWS Route53 hosted zone ID for the domain (optional but recommended when using AWS DNS-01). |
 | `cluster.domains[].provider.role_arn` | AWS IAM role ARN cert-manager should assume for Route53 DNS-01 changes. |
@@ -179,14 +191,18 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.providers[].zones.<zone>[].id` | ID of an existing subnet to use (alternative to creating a new one with `v4cidr`) |
 | `cluster.providers[].zones.<zone>[].v4cidr` | IPv4 CIDR block for creating a new subnet (or specify an `id` to use existing) |
 | `cluster.providers[].zones.<zone>[].v6cidr` | IPv6 CIDR for the subnet - `"auto"` for provider-assigned or an explicit CIDR (optional, for dual-stack) |
-| `cluster.providers[].load_balancer.public` | Whether the load balancer is internet-facing (default: `false`) |
-| `cluster.providers[].load_balancer.listeners[]` | Array of listener configurations |
-| `cluster.providers[].load_balancer.listeners[].port` | Port to listen on |
-| `cluster.providers[].load_balancer.listeners[].pool` | Pool to route traffic to |
-| `cluster.providers[].load_balancer.listeners[].target_port` | Port on the target nodes (optional, defaults to `port`) |
+| `cluster.providers[].load_balancers.<name>.public` | Whether the named load balancer is internet-facing. |
+| `cluster.providers[].load_balancers.<name>.subnets` | Subnet role in which the load balancer is placed, such as `public` or a pool name. |
+| `cluster.providers[].load_balancers.<name>.listeners[]` | Explicit listeners exposed by the load balancer. Domains require `443 -> 443`; a managed Kubernetes API requires `api_port -> 6443` targeting the `control-plane` pool. |
+| `cluster.providers[].load_balancers.<name>.listeners[].port` | External listener port. |
+| `cluster.providers[].load_balancers.<name>.listeners[].target_port` | Port on target VMs. Defaults to the external port. |
+| `cluster.providers[].load_balancers.<name>.listeners[].pool` | Pool whose VMs are registered with this listener's target group. |
 | `cluster.providers[].buckets` | Array of app-accessible object storage bucket names. Cloud bucket names are derived as `{cluster.id}-{name}`. |
 | `cluster.providers[].roles.<name>.buckets` | Array of bucket names this role can access |
 | `cluster.providers[].roles.<name>.permissions` | Resource access level - `read-write` or `read-only` (default: `read-write`) |
+| `cluster.kubernetes.api_hostname` | Required Kubernetes API hostname used by kubeconfig and the API server certificate. |
+| `cluster.kubernetes.api_port` | External Kubernetes API port. Defaults to `6443`; the target port remains `6443`. |
+| `cluster.kubernetes.api_load_balancer` | Optional named provider load balancer. Omit it to manage API connectivity and DNS outside Podplane. |
 | `cluster.secrets.default_provider` | Default secrets provider name used by `podplane secret` and templates when `--provider` is omitted. |
 | `cluster.secrets.providers` | Named secrets providers. Only provider-selection metadata belongs here; credentials are configured on the operator deployment. |
 | `cluster.secrets.providers.<name>.kind` | Secrets provider kind, such as `aws`, `gcp`, or `openbao`. |
@@ -197,8 +213,6 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.secrets.providers.<name>.ca_cert` | Optional PEM CA bundle for a Vault/OpenBao endpoint served by a private CA. Local fakevault config sets this automatically. |
 | `cluster.secrets.providers.<name>.auth_path` | Vault/OpenBao Kubernetes/JWT auth mount path used by the operator. Defaults to `auth/kubernetes`. |
 | `cluster.secrets.providers.<name>.operator_role` | Vault/OpenBao role used by the operator service account. Defaults to `podplane-operator`. Workload CSI reads use the binding/service account role separately. |
-| `cluster.kubernetes.api_hostname` | External hostname for the kube-apiserver (defaults to `k8s.<first domain zone>`) |
-| `cluster.kubernetes.api_port` | Port for the kube-apiserver (default: `6443`) |
 | `cluster.kubernetes.cluster_cidr` | CIDR ranges for Pod IPs, joined with commas for kube-controller-manager `--cluster-cidr` |
 | `cluster.kubernetes.service_cidr` | CIDR ranges for Service ClusterIPs, joined with commas for kube-apiserver `--service-cluster-ip-range` |
 | `cluster.registry.hostname` | Cluster registry hostname used by node-local Zot, `podplane push`, and optional Docker-push-compatible ingress. |

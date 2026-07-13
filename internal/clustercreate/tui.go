@@ -34,10 +34,12 @@ func cloudProviderItems() []list.Item {
 }
 
 type configField struct {
-	label    string
-	value    string
-	validate func(string) error
-	advanced bool
+	label      string
+	value      string
+	validate   func(string) error
+	advanced   bool
+	domainOnly bool
+	noDomain   bool
 }
 
 type configForm struct {
@@ -48,6 +50,7 @@ type configForm struct {
 	seedVersion    string
 	err            error
 	showNetworking bool
+	domain         string
 	cancel         bool
 	complete       bool
 }
@@ -88,6 +91,9 @@ func newConfigForm(oidcIssuerURL, seedVersion string) configForm {
 	fields := []configField{
 		{label: "Cluster name", value: draft.Cluster.Name, validate: tui.Required("cluster name")},
 		{label: "Cluster ID / slug", value: draft.Cluster.ID, validate: validateClusterID},
+		{label: "Cluster domain (optional)", validate: validateOptionalDomain},
+		{label: "DNS provider (aws or blank for manual)", validate: validateDNSProvider, domainOnly: true},
+		{label: "Kubernetes API hostname", validate: validateDomain, noDomain: true},
 		{label: "AWS region", value: provider.Region, validate: tui.Required("AWS region")},
 		{label: "AWS profile (optional)", value: provider.Profile},
 		{label: "Initial platform components (recommended, minimal, none)", value: seeds.Recommended, validate: validateSeedName},
@@ -169,6 +175,9 @@ func (m configForm) moveNext() (tea.Model, tea.Cmd) {
 	if field.label == "Configure networking options?" {
 		m.showNetworking = strings.EqualFold(value, "yes") || strings.EqualFold(value, "y")
 	}
+	if field.label == "Cluster domain (optional)" {
+		m.domain = value
+	}
 	m.err = nil
 	m.index = m.nextIndex(m.index + 1)
 	if m.index >= len(m.fields) {
@@ -208,12 +217,15 @@ func (m *configForm) storeCurrentValue() {
 	if m.fields[m.index].label == "Configure networking options?" {
 		m.showNetworking = strings.EqualFold(value, "yes") || strings.EqualFold(value, "y")
 	}
+	if m.fields[m.index].label == "Cluster domain (optional)" {
+		m.domain = value
+	}
 }
 
 // nextIndex returns the next visible field index, skipping advanced networking
 // fields unless the user requested them.
 func (m configForm) nextIndex(index int) int {
-	for index < len(m.fields) && m.fields[index].advanced && !m.showNetworking {
+	for index < len(m.fields) && !m.fieldVisible(m.fields[index]) {
 		index++
 	}
 	return index
@@ -222,10 +234,24 @@ func (m configForm) nextIndex(index int) int {
 // previousIndex returns the previous visible field index, skipping advanced
 // networking fields unless the user requested them.
 func (m configForm) previousIndex(index int) int {
-	for index >= 0 && m.fields[index].advanced && !m.showNetworking {
+	for index >= 0 && !m.fieldVisible(m.fields[index]) {
 		index--
 	}
 	return index
+}
+
+// fieldVisible reports whether a field applies to the current wizard answers.
+func (m configForm) fieldVisible(field configField) bool {
+	if field.advanced && !m.showNetworking {
+		return false
+	}
+	if field.domainOnly && m.domain == "" {
+		return false
+	}
+	if field.noDomain && m.domain != "" {
+		return false
+	}
+	return true
 }
 
 // config converts completed form answers into a cluster configuration.
@@ -272,6 +298,31 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 	provider.Zones = map[string][]clusterconfig.Subnet{
 		zone: provider.Zones["us-east-1a"],
 	}
+	domain := values["Cluster domain (optional)"]
+	if domain == "" {
+		cfg.Cluster.Kubernetes.APIHostname = values["Kubernetes API hostname"]
+		cfg.Cluster.Registry.Hostname = cfg.Cluster.ID + "-registry.local"
+		provider.LoadBalancers = nil
+	} else {
+		configuredDomain := clusterconfig.Domain{Zone: domain}
+		if values["DNS provider (aws or blank for manual)"] == "aws" {
+			configuredDomain.Provider = &clusterconfig.DomainProvider{Kind: "aws"}
+		}
+		cfg.Cluster.Domains = []clusterconfig.Domain{configuredDomain}
+		cfg.Cluster.Kubernetes.APIHostname = "k8s." + domain
+		cfg.Cluster.Kubernetes.APILoadBalancer = "main"
+		cfg.Cluster.Registry.Hostname = "registry." + domain
+		provider.LoadBalancers = map[string]clusterconfig.LoadBalancer{
+			"main": {
+				Public:  true,
+				Subnets: "public",
+				Listeners: []clusterconfig.Listener{
+					{Port: 443, Pool: "control-plane"},
+					{Port: 6443, Pool: "control-plane"},
+				},
+			},
+		}
+	}
 	cfg.Cluster.Providers[0] = provider
 	return cfg, nil
 }
@@ -282,6 +333,30 @@ func validateClusterID(value string) error {
 		return fmt.Errorf("cluster ID %w", err)
 	}
 	return nil
+}
+
+// validateOptionalDomain accepts an empty domain or validates a DNS name.
+func validateOptionalDomain(value string) error {
+	if value == "" {
+		return nil
+	}
+	return validateDomain(value)
+}
+
+// validateDomain validates a DNS name using the cluster config contract.
+func validateDomain(value string) error {
+	if err := clusterconfig.ValidateDomainName(value); err != nil {
+		return fmt.Errorf("domain %w", err)
+	}
+	return nil
+}
+
+// validateDNSProvider validates the DNS providers supported by cluster create.
+func validateDNSProvider(value string) error {
+	if value == "" || value == "aws" {
+		return nil
+	}
+	return fmt.Errorf("DNS provider must be aws or blank for manual DNS")
 }
 
 // validateArch validates the supported control-plane CPU architectures.

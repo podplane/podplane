@@ -36,12 +36,20 @@ const validClusterConfigJSON = `{
           { "v4cidr": "172.18.1.0/24", "pool": "control-plane" }
         ]
       },
-      "load_balancer": {
-        "public": true,
-        "listeners": [{ "port": 6443, "pool": "control-plane" }]
+      "load_balancers": {
+        "main": {
+          "public": true,
+          "subnets": "public",
+          "listeners": [
+            { "port": 443, "pool": "control-plane" },
+            { "port": 6443, "pool": "control-plane" }
+          ]
+        }
       }
     }],
     "kubernetes": {
+      "api_hostname": "k8s.example.com",
+      "api_load_balancer": "main",
       "cluster_cidr": ["100.64.0.0/10"],
       "service_cidr": ["198.18.0.0/15"]
     }
@@ -65,6 +73,7 @@ func TestClusterCreateNoApplyGeneratesTerraform(t *testing.T) {
 		"podplane.cluster.schema.json",
 		"podplane.cluster.main.tf",
 		"podplane.cluster.buckets.tf",
+		"podplane.cluster.dns.tf",
 		"podplane.cluster.roles.tf",
 		"podplane.cluster.inputs.runtime.tf",
 		"podplane.cluster.inputs.vm.tf",

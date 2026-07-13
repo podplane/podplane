@@ -34,10 +34,6 @@ func newDraftProvider(kind string) Provider {
 					{V4CIDR: "172.18.1.0/24", V6CIDR: "auto", Pool: "control-plane"},
 				},
 			},
-			LoadBalancer: LoadBalancer{
-				Public:    true,
-				Listeners: []Listener{{Port: 6443, Pool: "control-plane"}},
-			},
 		}
 	default:
 		return Provider{Kind: kind}
@@ -66,7 +62,7 @@ var defaultDraftConfig = ClusterConfig{Cluster: Cluster{
 	Name: "Example Cluster",
 	OIDC: OIDC{IssuerURL: "https://auth.example.com"},
 	Registry: Registry{
-		Hostname: "registry.example.com",
+		Hostname: "example-cluster-registry.local",
 	},
 	Pools: map[string]Pool{
 		"control-plane": {
@@ -76,6 +72,7 @@ var defaultDraftConfig = ClusterConfig{Cluster: Cluster{
 		},
 	},
 	Kubernetes: Kubernetes{
+		APIHostname: "example-cluster.k8s.local",
 		ClusterCIDR: []string{"100.64.0.0/10"},
 		ServiceCIDR: []string{"198.18.0.0/15"},
 	},
@@ -86,6 +83,14 @@ func copyClusterConfig(in ClusterConfig) ClusterConfig {
 	out := in
 	out.Cluster.Domains = append([]Domain(nil), in.Cluster.Domains...)
 	out.Cluster.Providers = append([]Provider(nil), in.Cluster.Providers...)
+	for i := range out.Cluster.Providers {
+		provider := &out.Cluster.Providers[i]
+		provider.LoadBalancers = make(map[string]LoadBalancer, len(in.Cluster.Providers[i].LoadBalancers))
+		for name, loadBalancer := range in.Cluster.Providers[i].LoadBalancers {
+			loadBalancer.Listeners = append([]Listener(nil), loadBalancer.Listeners...)
+			provider.LoadBalancers[name] = loadBalancer
+		}
+	}
 	out.Cluster.Kubernetes.ClusterCIDR = append([]string(nil), in.Cluster.Kubernetes.ClusterCIDR...)
 	out.Cluster.Kubernetes.ServiceCIDR = append([]string(nil), in.Cluster.Kubernetes.ServiceCIDR...)
 	if in.Cluster.Components.Source != nil {

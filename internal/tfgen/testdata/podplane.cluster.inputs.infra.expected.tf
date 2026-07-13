@@ -29,6 +29,9 @@ locals {
     "control-plane" = {
       "us-east-1a" = [{ ipv4_cidr = "172.18.1.0/24", nat_subnet = "public" }]
     }
+    "ingress" = {
+      "us-east-1a" = [{ ipv4_cidr = "172.18.2.0/24", nat_subnet = "public" }]
+    }
     "nstance" = {
       "us-east-1a" = [{ ipv4_cidr = "172.18.20.0/28", nat_subnet = "public" }]
     }
@@ -37,7 +40,7 @@ locals {
     }
   }
   load_balancers = {
-    "public-control-plane" = { ports = [6443], subnets = "public", public = true }
+    "main" = { listeners = [{ port = 443, target_port = 443 }, { port = 6443, target_port = 6443 }], subnets = "public", public = true }
   }
 }
 

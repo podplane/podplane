@@ -17,7 +17,17 @@
     "cluster": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "oidc"],
+      "required": ["id", "oidc", "kubernetes"],
+      "allOf": [{
+        "if": {
+          "properties": { "domains": { "minItems": 1 } },
+          "required": ["domains"]
+        },
+        "then": {
+          "required": ["registry"],
+          "properties": { "registry": { "required": ["hostname"] } }
+        }
+      }],
       "properties": {
         "id": {
           "type": "string",
@@ -105,13 +115,17 @@
     "domain": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["zone", "provider"],
+      "required": ["zone"],
       "properties": {
         "zone": {
           "type": "string",
-          "description": "DNS zone name used by the cluster."
+          "format": "hostname",
+          "maxLength": 253,
+          "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$",
+          "description": "Exact ingress apex used by the cluster."
         },
-        "provider": { "$ref": "#/$defs/domainProvider" }
+        "provider": { "$ref": "#/$defs/domainProvider" },
+        "load_balancer": { "type": "string", "description": "Provider load-balancer key. Defaults to main." }
       }
     },
     "domainProvider": {
@@ -190,7 +204,11 @@
             "items": { "$ref": "#/$defs/subnet" }
           }
         },
-        "load_balancer": { "$ref": "#/$defs/loadBalancer" },
+        "load_balancers": {
+          "type": "object",
+          "description": "Named load balancers referenced by domains and Kubernetes API configuration.",
+          "additionalProperties": { "$ref": "#/$defs/loadBalancer" }
+        },
         "buckets": {
           "type": "array",
           "description": "Additional provider bucket names used by the cluster.",
@@ -282,12 +300,13 @@
     "loadBalancer": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["public"],
+      "required": ["public", "subnets", "listeners"],
       "properties": {
         "public": { "type": "boolean", "description": "Whether the provider load balancer is internet-facing." },
+        "subnets": { "type": "string", "description": "Subnet role in which the provider load balancer is placed." },
         "listeners": {
           "type": "array",
-          "description": "Load-balancer listeners that forward to cluster pools.",
+          "description": "Listeners exposed by the load balancer.",
           "items": { "$ref": "#/$defs/listener" }
         }
       }
@@ -297,9 +316,9 @@
       "additionalProperties": false,
       "required": ["port", "pool"],
       "properties": {
-        "port": { "type": "integer", "description": "External listener port.", "minimum": 1, "maximum": 65535 },
-        "pool": { "type": "string", "description": "Target pool name." },
-        "target_port": { "type": "integer", "description": "Target port on pool VMs. Defaults to port when omitted.", "minimum": 1, "maximum": 65535 }
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "External listener port." },
+        "target_port": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Port on target VMs. Defaults to port." },
+        "pool": { "type": "string", "description": "Pool whose VMs are registered with this listener's target group." }
       }
     },
     "role": {
@@ -318,9 +337,11 @@
     "kubernetes": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["api_hostname"],
       "properties": {
-        "api_hostname": { "type": "string", "description": "Public Kubernetes API hostname." },
+        "api_hostname": { "type": "string", "format": "hostname", "maxLength": 253, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$", "description": "Kubernetes API hostname." },
         "api_port": { "type": "integer", "description": "Public Kubernetes API port. Defaults to 6443.", "minimum": 1, "maximum": 65535 },
+        "api_load_balancer": { "type": "string", "description": "Optional provider load-balancer key used for managed API connectivity and DNS." },
         "cluster_cidr": {
           "type": "array",
           "description": "Kubernetes pod CIDR ranges.",
@@ -383,7 +404,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "hostname": { "type": "string", "description": "Cluster registry hostname used by node-local Zot, podplane push, and optional Docker-compatible ingress." },
+        "hostname": { "type": "string", "format": "hostname", "maxLength": 253, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$", "description": "Cluster registry hostname used by node-local Zot, podplane push, and optional Docker-compatible ingress." },
         "ingress": { "$ref": "#/$defs/registryIngress" }
       }
     },

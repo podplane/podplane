@@ -16,7 +16,13 @@ func (c Cluster) RegistryMirrorHostname() string {
 	if c.Components.Registry != nil && c.Components.Registry.Mirror.Hostname != "" {
 		return c.Components.Registry.Mirror.Hostname
 	}
-	return c.Registry.Hostname
+	if c.Registry.Hostname != "" {
+		return c.Registry.Hostname
+	}
+	if len(c.Domains) == 0 {
+		return c.ID + "-registry.local"
+	}
+	return ""
 }
 
 // RegistryMirrorPrefix returns the cleaned mirror prefix, defaulting to mirror.

@@ -304,7 +304,7 @@ func TestWriteSnapshotWritesBytes(t *testing.T) {
 		ID:   "local",
 		OIDC: clusterconfig.OIDC{IssuerURL: "https://oidc.localhost/oidc"},
 		Domains: []clusterconfig.Domain{
-			{Zone: "local.localhost", Provider: clusterconfig.DomainProvider{Kind: "local"}},
+			{Zone: "local.localhost", Provider: &clusterconfig.DomainProvider{Kind: "local"}},
 		},
 		Components: clusterconfig.Components{Registry: &clusterconfig.ComponentsRegistry{
 			Mirror: clusterconfig.ComponentsRegistryMirror{Enabled: true, Hostname: "dev-registry.local"},

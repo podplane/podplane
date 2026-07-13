@@ -6,12 +6,37 @@ package clusterconfig
 
 import (
 	"fmt"
+	"net/netip"
 	"regexp"
 	"strings"
 )
 
 var clusterIDPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 var secretsProviderNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+var domainLabelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+
+// ValidateDomainName validates a fully qualified DNS name without a trailing
+// dot or wildcard label.
+func ValidateDomainName(name string) error {
+	if name == "" {
+		return fmt.Errorf("is required")
+	}
+	if len(name) > 253 {
+		return fmt.Errorf("must be at most 253 characters")
+	}
+	if name != strings.ToLower(name) || strings.HasSuffix(name, ".") {
+		return fmt.Errorf("must be lowercase and must not end with a dot")
+	}
+	if _, err := netip.ParseAddr(name); err == nil {
+		return fmt.Errorf("must be a DNS hostname, not an IP address")
+	}
+	for _, label := range strings.Split(name, ".") {
+		if len(label) > 63 || !domainLabelPattern.MatchString(label) {
+			return fmt.Errorf("must contain only DNS labels")
+		}
+	}
+	return nil
+}
 
 // ValidateClusterID validates a cluster ID using Netsy's identifier rules.
 func ValidateClusterID(id string) error {
@@ -161,10 +186,24 @@ func Validate(cfg *ClusterConfig) error {
 	if cfg.Cluster.OIDC.IssuerURL == "" {
 		return fmt.Errorf("cluster.oidc.issuer_url is required")
 	}
+	if err := ValidateDomainName(cfg.Cluster.Kubernetes.APIHostname); err != nil {
+		return fmt.Errorf("cluster.kubernetes.api_hostname: %w", err)
+	}
+	if port := cfg.Cluster.Kubernetes.APIPort; port < 0 || port > 65535 {
+		return fmt.Errorf("cluster.kubernetes.api_port must be 1-65535 when set")
+	}
+	if hostname := cfg.Cluster.Registry.Hostname; hostname != "" {
+		if err := ValidateDomainName(hostname); err != nil {
+			return fmt.Errorf("cluster.registry.hostname: %w", err)
+		}
+	}
+	if len(cfg.Cluster.Domains) > 0 && cfg.Cluster.Registry.Hostname == "" {
+		return fmt.Errorf("cluster.registry.hostname is required when domains are configured")
+	}
 	if _, err := ServiceNetworkFromCIDRs(cfg.Cluster.Kubernetes.ServiceCIDR); err != nil {
 		return fmt.Errorf("cluster.kubernetes.service_cidr: %w", err)
 	}
-	if cfg.Cluster.Registry.Hostname == "" && cfg.Cluster.Components.Registry != nil && cfg.Cluster.Components.Registry.Mirror.Enabled && cfg.Cluster.Components.Registry.Mirror.Hostname == "" {
+	if cfg.Cluster.Components.Registry != nil && cfg.Cluster.Components.Registry.Mirror.Enabled && cfg.Cluster.RegistryMirrorHostname() == "" {
 		return fmt.Errorf("cluster.registry.hostname is required when components.registry.mirror.enabled is true without components.registry.mirror.hostname")
 	}
 	if err := ValidateSeed(cfg.Cluster.Seed); err != nil {
@@ -201,7 +240,70 @@ func Validate(cfg *ClusterConfig) error {
 			return err
 		}
 	}
+	return validateDomains(cfg, cfg.Cluster.Providers[0])
+}
+
+// validateDomains validates domain names and their required load-balancer
+// listeners.
+func validateDomains(cfg *ClusterConfig, provider Provider) error {
+	zones := make(map[string]bool, len(cfg.Cluster.Domains))
+	for i, domain := range cfg.Cluster.Domains {
+		prefix := fmt.Sprintf("cluster.domains[%d]", i)
+		if err := ValidateDomainName(domain.Zone); err != nil {
+			return fmt.Errorf("%s.zone: %w", prefix, err)
+		}
+		if zones[domain.Zone] {
+			return fmt.Errorf("%s.zone duplicates %q", prefix, domain.Zone)
+		}
+		zones[domain.Zone] = true
+		if domain.Provider != nil {
+			switch domain.Provider.Kind {
+			case "aws", "cloudflare", "google", "local":
+			default:
+				return fmt.Errorf("%s.provider.kind must be aws, cloudflare, google, or local", prefix)
+			}
+		}
+		if err := requireListener(provider, domain.ResolvedDomainLoadBalancer(), 443, 443, ""); err != nil {
+			return fmt.Errorf("%s.load_balancer: %w", prefix, err)
+		}
+	}
+	if loadBalancer := cfg.Cluster.Kubernetes.APILoadBalancer; loadBalancer != "" {
+		for _, domain := range cfg.Cluster.Domains {
+			if domain.Zone == cfg.Cluster.Kubernetes.APIHostname && domain.ResolvedDomainLoadBalancer() != loadBalancer {
+				return fmt.Errorf("cluster.kubernetes.api_load_balancer %q conflicts with domain apex %q load balancer %q", loadBalancer, domain.Zone, domain.ResolvedDomainLoadBalancer())
+			}
+		}
+		port := cfg.Cluster.Kubernetes.APIPort
+		if port == 0 {
+			port = 6443
+		}
+		if err := requireListener(provider, loadBalancer, port, 6443, "control-plane"); err != nil {
+			return fmt.Errorf("cluster.kubernetes.api_load_balancer: %w", err)
+		}
+	}
 	return nil
+}
+
+// requireListener verifies that a named load balancer has the required port,
+// target, and pool.
+func requireListener(provider Provider, loadBalancer string, port, targetPort int, pool string) error {
+	lb, ok := provider.LoadBalancers[loadBalancer]
+	if !ok {
+		return fmt.Errorf("references unknown load balancer %q", loadBalancer)
+	}
+	for _, listener := range lb.Listeners {
+		targetPortValue := listener.TargetPort
+		if targetPortValue == 0 {
+			targetPortValue = listener.Port
+		}
+		if listener.Port == port && targetPortValue == targetPort && (pool == "" || listener.Pool == pool) {
+			return nil
+		}
+	}
+	if pool != "" {
+		return fmt.Errorf("load balancer %q requires listener port %d targeting port %d for pool %q", loadBalancer, port, targetPort, pool)
+	}
+	return fmt.Errorf("load balancer %q requires listener port %d targeting port %d", loadBalancer, port, targetPort)
 }
 
 func validateProvider(cfg *ClusterConfig, index int, provider Provider) error {
@@ -230,6 +332,7 @@ func validateProvider(cfg *ClusterConfig, index int, provider Provider) error {
 	if len(provider.Zones) == 0 {
 		return fmt.Errorf("%s.zones must contain at least one zone", prefix)
 	}
+	subnetRoles := make(map[string]bool)
 	for zone, subnets := range provider.Zones {
 		if zone == "" {
 			return fmt.Errorf("%s.zones contains an empty zone name", prefix)
@@ -241,6 +344,7 @@ func validateProvider(cfg *ClusterConfig, index int, provider Provider) error {
 			if err := validateSubnet(cfg, fmt.Sprintf("%s.zones.%s[%d]", prefix, zone, i), subnet); err != nil {
 				return err
 			}
+			subnetRoles[subnet.ResolvedRole()] = true
 		}
 	}
 	buckets := map[string]bool{}
@@ -257,12 +361,32 @@ func validateProvider(cfg *ClusterConfig, index int, provider Provider) error {
 			return fmt.Errorf("%s.roles.%s.permissions must be read-write or read-only", prefix, name)
 		}
 	}
-	for i, listener := range provider.LoadBalancer.Listeners {
-		if listener.Port <= 0 || listener.Port > 65535 {
-			return fmt.Errorf("%s.load_balancer.listeners[%d].port must be 1-65535", prefix, i)
+	for name, loadBalancer := range provider.LoadBalancers {
+		if name == "" {
+			return fmt.Errorf("%s.load_balancers contains an empty name", prefix)
 		}
-		if _, ok := cfg.Cluster.Pools[listener.Pool]; !ok {
-			return fmt.Errorf("%s.load_balancer.listeners[%d].pool references unknown pool %q", prefix, i, listener.Pool)
+		if loadBalancer.Subnets == "" {
+			return fmt.Errorf("%s.load_balancers.%s.subnets is required", prefix, name)
+		}
+		if !subnetRoles[loadBalancer.Subnets] {
+			return fmt.Errorf("%s.load_balancers.%s.subnets references unknown subnet role %q", prefix, name, loadBalancer.Subnets)
+		}
+		ports := make(map[int]bool, len(loadBalancer.Listeners))
+		for i, listener := range loadBalancer.Listeners {
+			listenerPrefix := fmt.Sprintf("%s.load_balancers.%s.listeners[%d]", prefix, name, i)
+			if listener.Port < 1 || listener.Port > 65535 {
+				return fmt.Errorf("%s.port must be 1-65535", listenerPrefix)
+			}
+			if ports[listener.Port] {
+				return fmt.Errorf("%s.port duplicates port %d", listenerPrefix, listener.Port)
+			}
+			ports[listener.Port] = true
+			if listener.TargetPort < 0 || listener.TargetPort > 65535 {
+				return fmt.Errorf("%s.target_port must be 1-65535 when set", listenerPrefix)
+			}
+			if _, ok := cfg.Cluster.Pools[listener.Pool]; !ok {
+				return fmt.Errorf("%s.pool references unknown pool %q", listenerPrefix, listener.Pool)
+			}
 		}
 	}
 	return nil

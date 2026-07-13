@@ -4,7 +4,10 @@
 
 package clusterconfig
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // ClusterConfig represents a cluster configuration file
 // Typically files are named podplane.cluster.jsonc or have
@@ -147,8 +150,9 @@ type OIDC struct {
 
 // Domain is one entry in cluster.domains.
 type Domain struct {
-	Zone     string         `json:"zone"`
-	Provider DomainProvider `json:"provider"`
+	Zone         string          `json:"zone"`
+	Provider     *DomainProvider `json:"provider,omitempty"`
+	LoadBalancer string          `json:"load_balancer,omitempty"`
 }
 
 // DomainProvider is the DNS provider for a Domain.
@@ -176,17 +180,17 @@ type Pool struct {
 
 // Provider is one entry in cluster.providers[].
 type Provider struct {
-	Kind         string              `json:"kind"`
-	Region       string              `json:"region,omitempty"`
-	Account      string              `json:"account,omitempty"`
-	Profile      string              `json:"profile,omitempty"`
-	Project      string              `json:"project,omitempty"`
-	Tags         map[string]string   `json:"tags,omitempty"`
-	VPC          VPC                 `json:"vpc"`
-	Zones        map[string][]Subnet `json:"zones,omitempty"`
-	LoadBalancer LoadBalancer        `json:"load_balancer"`
-	Buckets      []string            `json:"buckets,omitempty"`
-	Roles        map[string]Role     `json:"roles,omitempty"`
+	Kind          string                  `json:"kind"`
+	Region        string                  `json:"region,omitempty"`
+	Account       string                  `json:"account,omitempty"`
+	Profile       string                  `json:"profile,omitempty"`
+	Project       string                  `json:"project,omitempty"`
+	Tags          map[string]string       `json:"tags,omitempty"`
+	VPC           VPC                     `json:"vpc"`
+	Zones         map[string][]Subnet     `json:"zones,omitempty"`
+	LoadBalancers map[string]LoadBalancer `json:"load_balancers,omitempty"`
+	Buckets       []string                `json:"buckets,omitempty"`
+	Roles         map[string]Role         `json:"roles,omitempty"`
 }
 
 // VPC describes the cluster's VPC. Either ID (existing) or V4CIDR/V6CIDR
@@ -207,17 +211,32 @@ type Subnet struct {
 	V6CIDR   string   `json:"v6cidr,omitempty"`
 }
 
-// LoadBalancer describes the provider's external load balancer.
-type LoadBalancer struct {
-	Public    bool       `json:"public"`
-	Listeners []Listener `json:"listeners,omitempty"`
+// ResolvedRole returns the subnet role used by the Nstance network module.
+func (s Subnet) ResolvedRole() string {
+	if s.Pool != "" {
+		return s.Pool
+	}
+	if slices.Contains(s.Services, "nstance") {
+		return "nstance"
+	}
+	if s.Public && (slices.Contains(s.Services, "nat") || slices.Contains(s.Services, "nlb")) {
+		return "public"
+	}
+	return "services"
 }
 
-// Listener is one entry in cluster.providers[].load_balancer.listeners[].
+// LoadBalancer describes one provider load balancer.
+type LoadBalancer struct {
+	Public    bool       `json:"public"`
+	Subnets   string     `json:"subnets"`
+	Listeners []Listener `json:"listeners"`
+}
+
+// Listener describes one load-balancer listener and its target pool.
 type Listener struct {
 	Port       int    `json:"port"`
-	Pool       string `json:"pool"`
 	TargetPort int    `json:"target_port,omitempty"`
+	Pool       string `json:"pool"`
 }
 
 // Role is one entry in cluster.providers[].roles.<name>.
@@ -228,10 +247,40 @@ type Role struct {
 
 // Kubernetes describes how the API server is reached and configured.
 type Kubernetes struct {
-	APIHostname string   `json:"api_hostname,omitempty"`
-	APIPort     int      `json:"api_port,omitempty"`
-	ClusterCIDR []string `json:"cluster_cidr,omitempty"`
-	ServiceCIDR []string `json:"service_cidr,omitempty"`
+	APIHostname     string   `json:"api_hostname"`
+	APIPort         int      `json:"api_port,omitempty"`
+	APILoadBalancer string   `json:"api_load_balancer,omitempty"`
+	ClusterCIDR     []string `json:"cluster_cidr,omitempty"`
+	ServiceCIDR     []string `json:"service_cidr,omitempty"`
+}
+
+// DefaultDomain returns the first configured domain, or nil when the cluster
+// has no domains.
+func (c *ClusterConfig) DefaultDomain() *Domain {
+	if len(c.Cluster.Domains) == 0 {
+		return nil
+	}
+	return &c.Cluster.Domains[0]
+}
+
+// ResolvedDomainLoadBalancer returns the domain's selected load balancer.
+func (d Domain) ResolvedDomainLoadBalancer() string {
+	if d.LoadBalancer != "" {
+		return d.LoadBalancer
+	}
+	return "main"
+}
+
+// ResolvedRegistryHostname returns the configured registry hostname or the
+// stable domainless hostname.
+func (c *ClusterConfig) ResolvedRegistryHostname() string {
+	if c.Cluster.Registry.Hostname != "" {
+		return c.Cluster.Registry.Hostname
+	}
+	if len(c.Cluster.Domains) > 0 {
+		return ""
+	}
+	return c.Cluster.ID + "-registry.local"
 }
 
 // ResolvedClientID returns the configured OIDC client_id, defaulting to the

@@ -33,6 +33,15 @@ data "podplane_userdata" "knc_arm64" {
   enable_ssm = var.enable_ssm
 }
 
+data "podplane_userdata" "knd_arm64" {
+  manifest_json = file("${path.module}/podplane.cluster.vmconfig_knd_debian-13_arm64.json")
+  deps_mirror_url = "https://deps.podplane.dev"
+  provider_kind = local.provider_kind
+  aws_account_id = local.aws_account_id
+  immutable_ssh_authorized_keys = var.immutable_ssh_authorized_keys
+  enable_ssm = var.enable_ssm
+}
+
 locals {
   aws_account_id = data.aws_caller_identity.current.account_id
   aws_region = data.aws_region.current.region
@@ -101,23 +110,34 @@ locals {
       files = { "mutable.env" = { kind = "env", template = local.mutable_env }, "containerd.client.crt" = { kind = "certificate", template = "containerd.client", key = { source = "agent", name = "containerd.client" } }, "kube2iam.client.crt" = { kind = "certificate", template = "kube2iam.client", key = { source = "agent", name = "kube2iam.client" } }, "kubelet.client.crt" = { kind = "certificate", template = "kubelet.client", key = { source = "agent", name = "kubelet.client" } }, "kubelet.server.crt" = { kind = "certificate", template = "kubelet.server", key = { source = "agent", name = "kubelet.server" } }, "registry.server.crt" = { kind = "certificate", template = "registry.server", key = { source = "agent", name = "registry.server" } }, "front-proxy.client.crt" = { kind = "certificate", template = "front-proxy.client", key = { source = "agent", name = "front-proxy.client" } }, "kube-apiserver.client.crt" = { kind = "certificate", template = "kube-apiserver.client", key = { source = "agent", name = "kube-apiserver.client" } }, "kube-apiserver.server.crt" = { kind = "certificate", template = "kube-apiserver.server", key = { source = "agent", name = "kube-apiserver.server" } }, "kube-controller-manager.client.crt" = { kind = "certificate", template = "kube-controller-manager.client", key = { source = "agent", name = "kube-controller-manager.client" } }, "kube-scheduler.client.crt" = { kind = "certificate", template = "kube-scheduler.client", key = { source = "agent", name = "kube-scheduler.client" } }, "netsy.client.crt" = { kind = "certificate", template = "netsy.client", key = { source = "agent", name = "netsy.client" } }, "netsy.server.crt" = { kind = "certificate", template = "netsy.server", key = { source = "agent", name = "netsy.server" } } }
       args = { ImageId = "{{ .Image.debian_13_arm64 }}" }
     }
+    "ingress" = {
+      kind = "knd"
+      arch = "arm64"
+      vars = local.mutable_env
+      userdata = { source = "inline", encoding = "base64", content = base64encode(data.podplane_userdata.knd_arm64.content) }
+      files = { "mutable.env" = { kind = "env", template = local.mutable_env }, "containerd.client.crt" = { kind = "certificate", template = "containerd.client", key = { source = "agent", name = "containerd.client" } }, "kube2iam.client.crt" = { kind = "certificate", template = "kube2iam.client", key = { source = "agent", name = "kube2iam.client" } }, "kubelet.client.crt" = { kind = "certificate", template = "kubelet.client", key = { source = "agent", name = "kubelet.client" } }, "kubelet.server.crt" = { kind = "certificate", template = "kubelet.server", key = { source = "agent", name = "kubelet.server" } }, "registry.server.crt" = { kind = "certificate", template = "registry.server", key = { source = "agent", name = "registry.server" } } }
+      args = { ImageId = "{{ .Image.debian_13_arm64 }}" }
+    }
   }
 }
 
 module "cluster" {
   source = "nstance-dev/nstance/aws//modules/cluster"
+  version = "~> 2.0"
   cluster_id = local.cluster_id
   name_prefix = local.name_prefix
 }
 
 module "account_123456789012_us_east_1" {
   source = "nstance-dev/nstance/aws//modules/account"
+  version = "~> 2.0"
   cluster = module.cluster
   enable_ssm = var.enable_ssm
 }
 
 module "network_123456789012_us_east_1" {
   source = "nstance-dev/nstance/aws//modules/network"
+  version = "~> 2.0"
   cluster = module.cluster
   enable_ssm = var.enable_ssm
   vpc_id = var.vpc_id
@@ -129,6 +149,7 @@ module "network_123456789012_us_east_1" {
 
 module "shard_us_east_1a" {
   source = "nstance-dev/nstance/aws//modules/shard"
+  version = "~> 2.0"
   cluster = module.cluster
   account = module.account_123456789012_us_east_1
   network = module.network_123456789012_us_east_1
@@ -145,7 +166,19 @@ module "shard_us_east_1a" {
         subnet_pool = "control-plane"
         instance_type = var.pool_instance_types["control-plane"]
         vars = local.mutable_env
-        load_balancers = ["public-control-plane"]
+        load_balancers = {
+          "main" = [6443]
+        }
+      }
+      "ingress" = {
+        template = "ingress"
+        size = var.pool_sizes["ingress"]
+        subnet_pool = "ingress"
+        instance_type = var.pool_instance_types["ingress"]
+        vars = local.mutable_env
+        load_balancers = {
+          "main" = [443]
+        }
       }
     }
   }

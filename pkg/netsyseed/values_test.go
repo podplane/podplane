@@ -13,7 +13,7 @@ import (
 )
 
 func TestBuildPlatformComponentsValuesLocalDomain(t *testing.T) {
-	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{Domains: []clusterconfig.Domain{{Zone: "internaltools.localhost", Provider: clusterconfig.DomainProvider{Kind: "local"}}}}}
+	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{Domains: []clusterconfig.Domain{{Zone: "internaltools.localhost", Provider: &clusterconfig.DomainProvider{Kind: "local"}}}}}
 	values, err := buildPlatformComponentsValues(cfg, buildPlatformComponentsValuesOptions{})
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
@@ -51,7 +51,7 @@ func TestBuildPlatformComponentsValuesAWSProviderEnablesEBSCSI(t *testing.T) {
 func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ID:      "test-cluster",
-		Domains: []clusterconfig.Domain{{Zone: "internaltools.localhost", Provider: clusterconfig.DomainProvider{Kind: "local"}}},
+		Domains: []clusterconfig.Domain{{Zone: "internaltools.localhost", Provider: &clusterconfig.DomainProvider{Kind: "local"}}},
 		OIDC: clusterconfig.OIDC{
 			IssuerURL:     "https://auth.example.com",
 			ClientID:      "operator-client",
@@ -289,8 +289,8 @@ func TestBuildPlatformComponentsValuesGroupsAWSSolvers(t *testing.T) {
 		ACME:      &clusterconfig.ACME{Server: "https://acme.example/directory", Email: "ops@example.com"},
 		Providers: []clusterconfig.Provider{{Kind: "aws", Account: "123", Region: "us-east-1"}},
 		Domains: []clusterconfig.Domain{
-			{Zone: "example.com", Provider: clusterconfig.DomainProvider{Kind: "aws", Account: "123", HostedZoneID: "Z123", RoleARN: "arn:aws:iam::123:role/cert-manager"}},
-			{Zone: "example.net", Provider: clusterconfig.DomainProvider{Kind: "aws", Account: "123", HostedZoneID: "Z123", RoleARN: "arn:aws:iam::123:role/cert-manager"}},
+			{Zone: "example.com", Provider: &clusterconfig.DomainProvider{Kind: "aws", Account: "123", HostedZoneID: "Z123", RoleARN: "arn:aws:iam::123:role/cert-manager"}},
+			{Zone: "example.net", Provider: &clusterconfig.DomainProvider{Kind: "aws", Account: "123", HostedZoneID: "Z123", RoleARN: "arn:aws:iam::123:role/cert-manager"}},
 		},
 	}}
 	values, err := buildPlatformComponentsValues(cfg, buildPlatformComponentsValuesOptions{})
@@ -319,7 +319,7 @@ func TestBuildPlatformComponentsValuesGroupsAWSSolvers(t *testing.T) {
 func TestBuildPlatformComponentsValuesCloudflareSecretSync(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ACME: &clusterconfig.ACME{Server: "https://acme.example/directory", Email: "ops@example.com"},
-		Domains: []clusterconfig.Domain{{Zone: "example.com", Provider: clusterconfig.DomainProvider{
+		Domains: []clusterconfig.Domain{{Zone: "example.com", Provider: &clusterconfig.DomainProvider{
 			Kind: "cloudflare", SecretName: "cloudflare-dns01", SecretProviderClassName: "cloudflare-dns01",
 		}}},
 	}}
@@ -342,7 +342,7 @@ func TestBuildPlatformComponentsValuesAmbiguousAWSRegion(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ACME:      &clusterconfig.ACME{Server: "https://acme.example/directory", Email: "ops@example.com"},
 		Providers: []clusterconfig.Provider{{Kind: "aws", Region: "us-east-1"}, {Kind: "aws", Region: "us-west-2"}},
-		Domains:   []clusterconfig.Domain{{Zone: "example.com", Provider: clusterconfig.DomainProvider{Kind: "aws"}}},
+		Domains:   []clusterconfig.Domain{{Zone: "example.com", Provider: &clusterconfig.DomainProvider{Kind: "aws"}}},
 	}}
 	if _, err := buildPlatformComponentsValues(cfg, buildPlatformComponentsValuesOptions{}); err == nil {
 		t.Fatalf("expected ambiguous AWS provider error")

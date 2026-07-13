@@ -53,7 +53,21 @@ func GenerateCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts C
 	if provider.Kind != "aws" {
 		return nil, fmt.Errorf("cluster provider %q is not supported", provider.Kind)
 	}
+	if err := validateDNSProviders(cfg); err != nil {
+		return nil, err
+	}
 	return renderAWSCluster(configPath, cfg, provider, opts, network), nil
+}
+
+// validateDNSProviders rejects DNS providers that managed Terraform generation
+// does not implement.
+func validateDNSProviders(cfg *clusterconfig.ClusterConfig) error {
+	for i, domain := range cfg.Cluster.Domains {
+		if domain.Provider != nil && domain.Provider.Kind != "aws" {
+			return fmt.Errorf("cluster.domains[%d].provider.kind %q is not supported by Terraform generation", i, domain.Provider.Kind)
+		}
+	}
+	return nil
 }
 
 // WriteCluster writes managed Terraform files for a cluster config path.
@@ -73,6 +87,7 @@ func WriteCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts Clus
 func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provider, opts ClusterOptions, serviceNetwork clusterconfig.ServiceNetwork) []File {
 	var mainDoc hclDocument
 	var bucketsDoc hclDocument
+	var dnsDoc hclDocument
 	var rolesDoc hclDocument
 	var runtimeInputsDoc hclDocument
 	var vmInputsDoc hclDocument
@@ -144,10 +159,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		mainDoc.AddBlock(userdata)
 	}
 
-	var registryHostnameDefault hclValue = expr("null")
-	if cfg.Cluster.Registry.Hostname != "" {
-		registryHostnameDefault = str(cfg.Cluster.Registry.Hostname)
-	}
+	registryHostnameDefault := str(cfg.ResolvedRegistryHostname())
 	var oidcSigningAlgsDefault hclValue = expr("null")
 	if len(cfg.Cluster.OIDC.SigningAlgs) > 0 {
 		oidcSigningAlgsDefault = stringValueList(cfg.Cluster.OIDC.SigningAlgs)
@@ -269,6 +281,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 
 	cluster := block("module", "cluster")
 	cluster.Body.Attr("source", str("nstance-dev/nstance/aws//modules/cluster"))
+	cluster.Body.Attr("version", str("~> 2.0"))
 	cluster.Body.Attr("cluster_id", expr("local.cluster_id"))
 	cluster.Body.Attr("name_prefix", expr("local.name_prefix"))
 	if provider.Profile != "" {
@@ -279,6 +292,8 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	}
 	mainDoc.AddBlock(cluster)
 
+	accountName := safeName("account", provider.Account, provider.Region)
+	networkName := safeName("network", provider.Account, provider.Region)
 	clusterID := block("output", "cluster_id")
 	clusterID.Body.Attr("value", expr("local.cluster_id"))
 	outputsDoc.AddBlock(clusterID)
@@ -287,31 +302,43 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	apiURL.Body.Attr("value", str("https://${var.kubernetes_api_hostname}:${var.kubernetes_api_port}"))
 	outputsDoc.AddBlock(apiURL)
 
-	accountName := safeName("account", provider.Account, provider.Region)
-	networkName := safeName("network", provider.Account, provider.Region)
+	domainTargets := block("output", "domain_targets")
+	domainTargets.Body.Attr("description", str("Configured domain names and their load-balancer DNS targets."))
+	domainTargets.Body.Attr("value", domainTargetsValue(cfg, networkName))
+	outputsDoc.AddBlock(domainTargets)
+
+	manualDNS := block("output", "manual_dns_records")
+	manualDNS.Body.Attr("description", str("DNS records requiring manual setup. Use CNAME where valid, or an apex alias or flattening record."))
+	manualDNS.Body.Attr("value", manualDNSRecordsValue(cfg, networkName))
+	outputsDoc.AddBlock(manualDNS)
+
 	account := block("module", accountName)
 	account.Body.Attr("source", str("nstance-dev/nstance/aws//modules/account"))
+	account.Body.Attr("version", str("~> 2.0"))
 	account.Body.Attr("cluster", expr("module.cluster"))
 	account.Body.Attr("enable_ssm", expr("var.enable_ssm"))
 	mainDoc.AddBlock(account)
 
 	network := block("module", networkName)
 	network.Body.Attr("source", str("nstance-dev/nstance/aws//modules/network"))
+	network.Body.Attr("version", str("~> 2.0"))
 	network.Body.Attr("cluster", expr("module.cluster"))
 	network.Body.Attr("enable_ssm", expr("var.enable_ssm"))
 	network.Body.Attr("vpc_id", expr("var.vpc_id"))
 	network.Body.Attr("vpc_cidr_ipv4", expr("var.vpc_cidr_ipv4"))
 	network.Body.Attr("enable_ipv6", expr("var.enable_ipv6"))
 	network.Body.Attr("subnets", expr("local.subnets"))
-	if len(provider.LoadBalancer.Listeners) > 0 {
+	if len(provider.LoadBalancers) > 0 {
 		network.Body.Attr("load_balancers", expr("local.load_balancers"))
 	}
 	mainDoc.AddBlock(network)
+	addAWSDNS(&dnsDoc, cfg, networkName)
 
 	for _, zone := range sortedKeys(provider.Zones) {
 		moduleName := safeName("shard", zone)
 		shard := block("module", moduleName)
 		shard.Body.Attr("source", str("nstance-dev/nstance/aws//modules/shard"))
+		shard.Body.Attr("version", str("~> 2.0"))
 		shard.Body.Attr("cluster", expr("module.cluster"))
 		shard.Body.Attr("account", expr("module."+accountName))
 		shard.Body.Attr("network", expr("module."+networkName))
@@ -360,6 +387,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	files := []File{
 		{Name: "podplane.cluster.main.tf", Content: mainDoc.String(), Type: FileTypeTerraform},
 		{Name: "podplane.cluster.buckets.tf", Content: bucketsDoc.String(), Type: FileTypeTerraform},
+		{Name: "podplane.cluster.dns.tf", Content: dnsDoc.String(), Type: FileTypeTerraform},
 		{Name: "podplane.cluster.roles.tf", Content: rolesDoc.String(), Type: FileTypeTerraform},
 		{Name: "podplane.cluster.inputs.runtime.tf", Content: runtimeInputsDoc.String(), Type: FileTypeTerraform},
 		{Name: "podplane.cluster.inputs.vm.tf", Content: vmInputsDoc.String(), Type: FileTypeTerraform},
@@ -375,6 +403,143 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		})
 	}
 	return files
+}
+
+// addAWSDNS adds Route53 aliases for managed domains and the managed
+// Kubernetes API hostname.
+func addAWSDNS(doc *hclDocument, cfg *clusterconfig.ClusterConfig, networkName string) {
+	locals := block("locals")
+	locals.Body.Attr("managed_dns_zones", managedDNSZonesValue(cfg))
+	locals.Body.Attr("managed_dns_records", managedDNSRecordsValue(cfg))
+	doc.AddBlock(locals)
+
+	zone := block("data", "aws_route53_zone", "managed")
+	zone.Body.Attr("for_each", expr("local.managed_dns_zones"))
+	zone.Body.Attr("zone_id", expr("each.value.hosted_zone_id"))
+	zone.Body.Attr("name", expr("each.value.hosted_zone_id == null ? each.key : null"))
+	zone.Body.Attr("private_zone", expr("each.value.hosted_zone_id == null ? false : null"))
+	doc.AddBlock(zone)
+
+	addRoute53Aliases(doc, "managed_ipv4", "A", "local.managed_dns_records", networkName)
+	addRoute53Aliases(doc, "managed_ipv6", "AAAA", "var.enable_ipv6 ? local.managed_dns_records : {}", networkName)
+}
+
+// addRoute53Aliases adds one iterated Route53 alias resource.
+func addRoute53Aliases(doc *hclDocument, name, recordType, records, networkName string) {
+	record := block("resource", "aws_route53_record", name)
+	record.Body.Attr("for_each", expr(records))
+	record.Body.Attr("zone_id", expr("data.aws_route53_zone.managed[each.value.zone].zone_id"))
+	record.Body.Attr("name", expr("each.key"))
+	record.Body.Attr("type", str(recordType))
+	alias := block("alias")
+	alias.Body.Attr("name", expr(fmt.Sprintf("module.%s.load_balancers[each.value.load_balancer].dns_name", networkName)))
+	alias.Body.Attr("zone_id", expr(fmt.Sprintf("module.%s.load_balancers[each.value.load_balancer].zone_id", networkName)))
+	alias.Body.Attr("evaluate_target_health", boolean(false))
+	record.Body.Block(alias)
+	doc.AddBlock(record)
+}
+
+// managedDNSZonesValue builds Route53 zone lookup configuration keyed by zone.
+func managedDNSZonesValue(cfg *clusterconfig.ClusterConfig) hclObject {
+	fields := []hclObjectField{}
+	for _, domain := range cfg.Cluster.Domains {
+		if domain.Provider == nil {
+			continue
+		}
+		var hostedZoneID hclValue = expr("null")
+		if domain.Provider.HostedZoneID != "" {
+			hostedZoneID = str(domain.Provider.HostedZoneID)
+		}
+		fields = append(fields, field(domain.Zone, object(
+			identField("hosted_zone_id", hostedZoneID),
+		)))
+	}
+	return object(fields...)
+}
+
+// managedDNSRecordsValue builds managed hostnames keyed by exact record name.
+func managedDNSRecordsValue(cfg *clusterconfig.ClusterConfig) hclObject {
+	fields := []hclObjectField{}
+	for _, domain := range cfg.Cluster.Domains {
+		if domain.Provider == nil {
+			continue
+		}
+		record := object(
+			identField("zone", str(domain.Zone)),
+			identField("load_balancer", str(domain.ResolvedDomainLoadBalancer())),
+		)
+		fields = append(fields, field(domain.Zone, record), field("*."+domain.Zone, record))
+	}
+	if domainIndex, managed := managedAPIDomain(cfg); managed && !apiRecordCoveredByDomain(cfg) {
+		domain := cfg.Cluster.Domains[domainIndex]
+		fields = append(fields, field(cfg.Cluster.Kubernetes.APIHostname, object(
+			identField("zone", str(domain.Zone)),
+			identField("load_balancer", str(cfg.Cluster.Kubernetes.APILoadBalancer)),
+		)))
+	}
+	return object(fields...)
+}
+
+// managedAPIDomain returns the default domain index when Route53 can manage
+// the configured Kubernetes API hostname.
+func managedAPIDomain(cfg *clusterconfig.ClusterConfig) (int, bool) {
+	if cfg.Cluster.Kubernetes.APILoadBalancer == "" || len(cfg.Cluster.Domains) == 0 {
+		return 0, false
+	}
+	domain := cfg.Cluster.Domains[0]
+	if domain.Provider == nil || !domainCoversHostname(domain.Zone, cfg.Cluster.Kubernetes.APIHostname) {
+		return 0, false
+	}
+	return 0, true
+}
+
+// domainCoversHostname reports whether a DNS zone is authoritative for a
+// hostname.
+func domainCoversHostname(zone, hostname string) bool {
+	return hostname == zone || strings.HasSuffix(hostname, "."+zone)
+}
+
+// apiRecordCoveredByDomain reports whether an existing domain apex record
+// already targets the Kubernetes API load balancer.
+func apiRecordCoveredByDomain(cfg *clusterconfig.ClusterConfig) bool {
+	for _, domain := range cfg.Cluster.Domains {
+		if domain.Zone == cfg.Cluster.Kubernetes.APIHostname && domain.ResolvedDomainLoadBalancer() == cfg.Cluster.Kubernetes.APILoadBalancer {
+			return true
+		}
+	}
+	return false
+}
+
+// domainTargetsValue builds concise outputs for every configured domain.
+func domainTargetsValue(cfg *clusterconfig.ClusterConfig, networkName string) hclObject {
+	fields := make([]hclObjectField, 0, len(cfg.Cluster.Domains))
+	for _, domain := range cfg.Cluster.Domains {
+		target := fmt.Sprintf("module.%s.load_balancers[%s].dns_name", networkName, quote(domain.ResolvedDomainLoadBalancer()))
+		fields = append(fields, field(domain.Zone, object(
+			identField("names", stringValueList([]string{domain.Zone, "*." + domain.Zone})),
+			identField("target", expr(target)),
+			identField("managed", boolean(domain.Provider != nil)),
+		)))
+	}
+	return object(fields...)
+}
+
+// manualDNSRecordsValue builds record-to-target outputs for DNS records that
+// Podplane cannot manage.
+func manualDNSRecordsValue(cfg *clusterconfig.ClusterConfig, networkName string) hclObject {
+	fields := []hclObjectField{}
+	for _, domain := range cfg.Cluster.Domains {
+		if domain.Provider != nil {
+			continue
+		}
+		target := expr(fmt.Sprintf("module.%s.load_balancers[%s].dns_name", networkName, quote(domain.ResolvedDomainLoadBalancer())))
+		fields = append(fields, field(domain.Zone, target), field("*."+domain.Zone, target))
+	}
+	if _, managed := managedAPIDomain(cfg); cfg.Cluster.Kubernetes.APILoadBalancer != "" && !managed && !apiRecordCoveredByDomain(cfg) {
+		target := expr(fmt.Sprintf("module.%s.load_balancers[%s].dns_name", networkName, quote(cfg.Cluster.Kubernetes.APILoadBalancer)))
+		fields = append(fields, field(cfg.Cluster.Kubernetes.APIHostname, target))
+	}
+	return object(fields...)
 }
 
 // addPodplaneAWSBuckets adds Podplane-owned S3 buckets.
@@ -559,7 +724,7 @@ func subnetsValue(provider clusterconfig.Provider) hclObject {
 	roles := map[string][]entry{}
 	for _, zone := range sortedKeys(provider.Zones) {
 		for _, subnet := range provider.Zones[zone] {
-			role := subnetRole(subnet)
+			role := subnet.ResolvedRole()
 			roles[role] = append(roles[role], entry{zone: zone, subnet: subnet})
 		}
 	}
@@ -599,53 +764,38 @@ func subnetValue(subnet clusterconfig.Subnet, index int) hclInlineObject {
 	if slices.Contains(subnet.Services, "nat") {
 		fields = append(fields, identField("nat_gateway", boolean(true)))
 	}
-	if !subnet.Public && subnetRole(subnet) != "public" {
+	if !subnet.Public && subnet.ResolvedRole() != "public" {
 		fields = append(fields, identField("nat_subnet", str("public")))
 	}
 	return inlineObject(fields...)
 }
 
-// subnetRole returns the generated subnet role for the network module.
-func subnetRole(subnet clusterconfig.Subnet) string {
-	if subnet.Pool != "" {
-		return subnet.Pool
-	}
-	if slices.Contains(subnet.Services, "nstance") {
-		return "nstance"
-	}
-	if subnet.Public && (slices.Contains(subnet.Services, "nat") || slices.Contains(subnet.Services, "nlb")) {
-		return "public"
-	}
-	return "services"
-}
-
-// loadBalancersValue converts load balancer listeners into an ordered HCL
-// object for the network module.
+// loadBalancersValue converts named load balancers into the Nstance network
+// module input.
 func loadBalancersValue(provider clusterconfig.Provider) hclObject {
-	if len(provider.LoadBalancer.Listeners) == 0 {
+	if len(provider.LoadBalancers) == 0 {
 		return nil
 	}
-	portsByPool := map[string][]int{}
-	for _, listener := range provider.LoadBalancer.Listeners {
-		portsByPool[listener.Pool] = append(portsByPool[listener.Pool], listener.Port)
-	}
 	fields := []hclObjectField{}
-	for _, pool := range sortedKeys(portsByPool) {
-		ports := portsByPool[pool]
-		name := "internal-" + pool
-		subnets := pool
-		if provider.LoadBalancer.Public {
-			name = "public-" + pool
-			subnets = "public"
-		}
-		portValues := make(hclList, 0, len(ports))
-		for _, port := range ports {
-			portValues = append(portValues, num(port))
+	for _, name := range sortedKeys(provider.LoadBalancers) {
+		loadBalancer := provider.LoadBalancers[name]
+		listeners := append([]clusterconfig.Listener(nil), loadBalancer.Listeners...)
+		slices.SortFunc(listeners, func(a, b clusterconfig.Listener) int { return a.Port - b.Port })
+		listenerValues := make(hclList, 0, len(listeners))
+		for _, listener := range listeners {
+			targetPort := listener.TargetPort
+			if targetPort == 0 {
+				targetPort = listener.Port
+			}
+			listenerValues = append(listenerValues, inlineObject(
+				identField("port", num(listener.Port)),
+				identField("target_port", num(targetPort)),
+			))
 		}
 		fields = append(fields, field(name, inlineObject(
-			identField("ports", portValues),
-			identField("subnets", str(subnets)),
-			identField("public", boolean(provider.LoadBalancer.Public)),
+			identField("listeners", listenerValues),
+			identField("subnets", str(loadBalancer.Subnets)),
+			identField("public", boolean(loadBalancer.Public)),
 		)))
 	}
 	return object(fields...)
@@ -654,14 +804,18 @@ func loadBalancersValue(provider clusterconfig.Provider) hclObject {
 // groupsValue converts cluster pools into the shard groups object expected by
 // the Nstance Terraform module.
 func groupsValue(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provider) hclObject {
-	lbsByPool := map[string][]string{}
-	for _, listener := range provider.LoadBalancer.Listeners {
-		name := "internal-" + listener.Pool
-		if provider.LoadBalancer.Public {
-			name = "public-" + listener.Pool
+	lbsByPool := make(map[string]map[string][]int)
+	for name, loadBalancer := range provider.LoadBalancers {
+		for _, listener := range loadBalancer.Listeners {
+			if lbsByPool[listener.Pool] == nil {
+				lbsByPool[listener.Pool] = make(map[string][]int)
+			}
+			lbsByPool[listener.Pool][name] = append(lbsByPool[listener.Pool][name], listener.Port)
 		}
-		if !slices.Contains(lbsByPool[listener.Pool], name) {
-			lbsByPool[listener.Pool] = append(lbsByPool[listener.Pool], name)
+	}
+	for _, loadBalancers := range lbsByPool {
+		for _, ports := range loadBalancers {
+			slices.Sort(ports)
 		}
 	}
 	poolFields := []hclObjectField{}
@@ -678,7 +832,15 @@ func groupsValue(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provid
 			fields = append(fields, identField("disk_size", num(pool.DiskSize)))
 		}
 		if len(lbsByPool[poolName]) > 0 {
-			fields = append(fields, identField("load_balancers", stringValueList(lbsByPool[poolName])))
+			loadBalancerFields := make([]hclObjectField, 0, len(lbsByPool[poolName]))
+			for _, name := range sortedKeys(lbsByPool[poolName]) {
+				ports := make(hclList, 0, len(lbsByPool[poolName][name]))
+				for _, port := range lbsByPool[poolName][name] {
+					ports = append(ports, num(port))
+				}
+				loadBalancerFields = append(loadBalancerFields, field(name, ports))
+			}
+			fields = append(fields, identField("load_balancers", object(loadBalancerFields...)))
 		}
 		poolFields = append(poolFields, field(poolName, object(fields...)))
 	}
@@ -819,16 +981,9 @@ func stringMapValue(values map[string]string) hclObject {
 	return object(fields...)
 }
 
-// resolvedAPIHostname returns the configured Kubernetes API hostname or a
-// generated fallback.
+// resolvedAPIHostname returns the required Kubernetes API hostname.
 func resolvedAPIHostname(cfg *clusterconfig.ClusterConfig) string {
-	if cfg.Cluster.Kubernetes.APIHostname != "" {
-		return cfg.Cluster.Kubernetes.APIHostname
-	}
-	if len(cfg.Cluster.Domains) > 0 && cfg.Cluster.Domains[0].Zone != "" {
-		return "k8s." + cfg.Cluster.Domains[0].Zone
-	}
-	return cfg.Cluster.ID + ".k8s.local"
+	return cfg.Cluster.Kubernetes.APIHostname
 }
 
 // resolvedAPIPort returns the configured Kubernetes API port or the default.

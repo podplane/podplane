@@ -84,7 +84,9 @@ func newDepsDownloadCmd(manager *deps.Manager, kind, arch string) *cobra.Command
 				providers = append(providers, provider.Kind)
 			}
 			for _, domain := range cfg.Cluster.Domains {
-				providers = append(providers, domain.Provider.Kind)
+				if domain.Provider != nil {
+					providers = append(providers, domain.Provider.Kind)
+				}
 			}
 			providers = append(providers, inferredSecretsProviders(providers)...)
 		}

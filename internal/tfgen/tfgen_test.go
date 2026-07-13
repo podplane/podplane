@@ -44,14 +44,19 @@ func sampleVMConfigManifest(kind string, arch string) *deps.Manifest {
 // testClusterOptions returns fixed dependency inputs so cluster tfgen tests do
 // not read the local deps cache or fetch remote manifests.
 func testClusterOptions() ClusterOptions {
-	manifest, err := json.MarshalIndent(sampleVMConfigManifest("knc", "arm64"), "", "  ")
+	kncManifest, err := json.MarshalIndent(sampleVMConfigManifest("knc", "arm64"), "", "  ")
+	if err != nil {
+		panic(err)
+	}
+	kndManifest, err := json.MarshalIndent(sampleVMConfigManifest("knd", "arm64"), "", "  ")
 	if err != nil {
 		panic(err)
 	}
 	return ClusterOptions{
 		DepsMirrorURL: "https://deps.podplane.dev",
 		VMConfigManifests: []VMConfigManifest{
-			{Kind: "knc", Arch: "arm64", Filename: "vmconfig_knc_debian-13_arm64.json", JSON: append(manifest, '\n')},
+			{Kind: "knc", Arch: "arm64", Filename: "vmconfig_knc_debian-13_arm64.json", JSON: append(kncManifest, '\n')},
+			{Kind: "knd", Arch: "arm64", Filename: "vmconfig_knd_debian-13_arm64.json", JSON: append(kndManifest, '\n')},
 		},
 	}
 }
@@ -63,12 +68,20 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		ID:   "test-cluster",
 		Name: "Test Cluster",
 		OIDC: clusterconfig.OIDC{IssuerURL: "https://auth.example.com", SigningAlgs: []string{"RS256", "ES256"}},
+		Domains: []clusterconfig.Domain{{
+			Zone:     "example.com",
+			Provider: &clusterconfig.DomainProvider{Kind: "aws"},
+		}},
+		Registry: clusterconfig.Registry{Hostname: "registry.example.com"},
 		Kubernetes: clusterconfig.Kubernetes{
-			APIPort: 6443,
+			APIHostname:     "k8s.example.com",
+			APIPort:         6443,
+			APILoadBalancer: "main",
 		},
 		Seed: clusterconfig.Seed{Name: "recommended", Version: "v1.0.0-1", Digest: "sha512:" + strings.Repeat("0", 128)},
 		Pools: map[string]clusterconfig.Pool{
 			"control-plane": {Arch: "arm64", InstanceType: "t4g.medium", Size: 1},
+			"ingress":       {Arch: "arm64", InstanceType: "t4g.medium", Size: 2},
 		},
 		Providers: []clusterconfig.Provider{{
 			Kind:    "aws",
@@ -80,11 +93,18 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 					{V4CIDR: "172.18.10.0/28", Services: []string{"nat", "nlb"}, Public: true},
 					{V4CIDR: "172.18.20.0/28", Services: []string{"nstance"}},
 					{V4CIDR: "172.18.1.0/24", Pool: "control-plane"},
+					{V4CIDR: "172.18.2.0/24", Pool: "ingress"},
 				},
 			},
-			LoadBalancer: clusterconfig.LoadBalancer{
-				Public:    true,
-				Listeners: []clusterconfig.Listener{{Port: 6443, Pool: "control-plane"}},
+			LoadBalancers: map[string]clusterconfig.LoadBalancer{
+				"main": {
+					Public:  true,
+					Subnets: "public",
+					Listeners: []clusterconfig.Listener{
+						{Port: 443, Pool: "ingress"},
+						{Port: 6443, Pool: "control-plane"},
+					},
+				},
 			},
 		}},
 	}}
@@ -92,19 +112,21 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCluster returned error: %v", err)
 	}
-	if len(files) != 8 {
-		t.Fatalf("len(files) = %d, want 8", len(files))
+	if len(files) != 10 {
+		t.Fatalf("len(files) = %d, want 10", len(files))
 	}
 	contents := fileContents(files)
 	for _, name := range []string{
 		"podplane.cluster.main.tf",
 		"podplane.cluster.buckets.tf",
+		"podplane.cluster.dns.tf",
 		"podplane.cluster.roles.tf",
 		"podplane.cluster.inputs.runtime.tf",
 		"podplane.cluster.inputs.vm.tf",
 		"podplane.cluster.inputs.infra.tf",
 		"podplane.cluster.outputs.tf",
 		"podplane.cluster.vmconfig_knc_debian-13_arm64.json",
+		"podplane.cluster.vmconfig_knd_debian-13_arm64.json",
 	} {
 		if _, ok := contents[name]; !ok {
 			t.Fatalf("generated files missing %s: %#v", name, files)
@@ -112,12 +134,13 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	}
 	assertExpectedTerraform(t, "podplane.cluster.main.expected.tf", contents["podplane.cluster.main.tf"])
 	assertExpectedTerraform(t, "podplane.cluster.buckets.expected.tf", contents["podplane.cluster.buckets.tf"])
+	assertExpectedTerraform(t, "podplane.cluster.dns.expected.tf", contents["podplane.cluster.dns.tf"])
 	assertExpectedTerraform(t, "podplane.cluster.roles.expected.tf", contents["podplane.cluster.roles.tf"])
 	assertExpectedTerraform(t, "podplane.cluster.inputs.runtime.expected.tf", contents["podplane.cluster.inputs.runtime.tf"])
 	assertExpectedTerraform(t, "podplane.cluster.inputs.vm.expected.tf", contents["podplane.cluster.inputs.vm.tf"])
 	assertExpectedTerraform(t, "podplane.cluster.inputs.infra.expected.tf", contents["podplane.cluster.inputs.infra.tf"])
 	assertExpectedTerraform(t, "podplane.cluster.outputs.expected.tf", contents["podplane.cluster.outputs.tf"])
-	got := contents["podplane.cluster.main.tf"] + contents["podplane.cluster.buckets.tf"] + contents["podplane.cluster.roles.tf"] + contents["podplane.cluster.inputs.runtime.tf"] + contents["podplane.cluster.inputs.vm.tf"] + contents["podplane.cluster.inputs.infra.tf"] + contents["podplane.cluster.outputs.tf"]
+	got := contents["podplane.cluster.main.tf"] + contents["podplane.cluster.buckets.tf"] + contents["podplane.cluster.dns.tf"] + contents["podplane.cluster.roles.tf"] + contents["podplane.cluster.inputs.runtime.tf"] + contents["podplane.cluster.inputs.vm.tf"] + contents["podplane.cluster.inputs.infra.tf"] + contents["podplane.cluster.outputs.tf"]
 	for _, want := range []string{
 		`provider "aws"`,
 		`module "network_123456789012_us_east_1"`,
@@ -134,8 +157,16 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		`enable_ssm = var.enable_ssm`,
 		`content = base64encode(data.podplane_userdata.knc_arm64.content)`,
 		`vars = local.mutable_env`,
-		`"public-control-plane" = { ports = [6443], subnets = "public", public = true }`,
-		`load_balancers = ["public-control-plane"]`,
+		`"main" = { listeners = [{ port = 443, target_port = 443 }, { port = 6443, target_port = 6443 }]`,
+		`subnets = "public", public = true`,
+		`load_balancers = {`,
+		`"main" = [443]`,
+		`"main" = [6443]`,
+		`managed_dns_zones = {`,
+		`managed_dns_records = {`,
+		`resource "aws_route53_record" "managed_ipv4"`,
+		`resource "aws_route53_record" "managed_ipv6"`,
+		`zone_id = module.network_123456789012_us_east_1.load_balancers[each.value.load_balancer].zone_id`,
 		`REGISTRY_ASSUME_ROLE = aws_iam_role.podplane_cluster["registry-read-only"].arn`,
 		`output "registry_read_write_role_arn"`,
 	} {
@@ -211,13 +242,91 @@ func fileContents(files []File) map[string]string {
 	return contents
 }
 
+// TestLoadBalancersValuePreservesTargetPorts verifies listener target-port
+// mappings are passed through to Nstance.
+func TestLoadBalancersValuePreservesTargetPorts(t *testing.T) {
+	provider := clusterconfig.Provider{LoadBalancers: map[string]clusterconfig.LoadBalancer{
+		"api": {
+			Public:  true,
+			Subnets: "public",
+			Listeners: []clusterconfig.Listener{
+				{Port: 443, TargetPort: 6443, Pool: "control-plane"},
+			},
+		},
+	}}
+	got := loadBalancersValue(provider).renderHCL(0)
+	if !strings.Contains(got, `port = 443, target_port = 6443`) {
+		t.Fatalf("load balancer target-port mapping missing from generated value:\n%s", got)
+	}
+}
+
+// TestValidateDNSProvidersRejectsUnsupportedTerraformProviders verifies that
+// recognizing provider metadata does not advertise Terraform generation.
+func TestValidateDNSProvidersRejectsUnsupportedTerraformProviders(t *testing.T) {
+	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+		Domains: []clusterconfig.Domain{{
+			Zone:     "example.com",
+			Provider: &clusterconfig.DomainProvider{Kind: "cloudflare"},
+		}},
+	}}
+	err := validateDNSProviders(cfg)
+	if err == nil || !strings.Contains(err.Error(), `provider.kind "cloudflare" is not supported by Terraform generation`) {
+		t.Fatalf("validateDNSProviders error = %v, want unsupported Terraform provider error", err)
+	}
+
+	cfg.Cluster.Domains[0].Provider.Kind = "aws"
+	if err := validateDNSProviders(cfg); err != nil {
+		t.Fatalf("validateDNSProviders rejected Route53: %v", err)
+	}
+
+	cfg.Cluster.Domains[0].Provider = nil
+	if err := validateDNSProviders(cfg); err != nil {
+		t.Fatalf("validateDNSProviders rejected manual DNS: %v", err)
+	}
+}
+
+// TestDNSOutputValues distinguishes manual domain and API records from
+// provider-managed records.
+func TestDNSOutputValues(t *testing.T) {
+	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+		Domains: []clusterconfig.Domain{{Zone: "example.com"}},
+		Kubernetes: clusterconfig.Kubernetes{
+			APIHostname:     "k8s.example.com",
+			APILoadBalancer: "api",
+		},
+	}}
+	got := manualDNSRecordsValue(cfg, "network").renderHCL(0)
+	for _, want := range []string{`"example.com"`, `"*.example.com"`, `"k8s.example.com"`, `load_balancers["api"].dns_name`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("manual DNS output missing %q:\n%s", want, got)
+		}
+	}
+
+	cfg.Cluster.Domains[0].Provider = &clusterconfig.DomainProvider{Kind: "aws"}
+	if got := manualDNSRecordsValue(cfg, "network").renderHCL(0); got != "{}" {
+		t.Fatalf("managed DNS output = %s, want empty", got)
+	}
+	cfg.Cluster.Kubernetes.APIHostname = "k8s.other.example"
+	if got := manualDNSRecordsValue(cfg, "network").renderHCL(0); !strings.Contains(got, `"k8s.other.example"`) {
+		t.Fatalf("out-of-zone API hostname must remain manual:\n%s", got)
+	}
+
+	cfg.Cluster.Domains[0].Provider = nil
+	cfg.Cluster.Kubernetes.APIHostname = "example.com"
+	cfg.Cluster.Kubernetes.APILoadBalancer = "main"
+	if got := manualDNSRecordsValue(cfg, "network").renderHCL(0); strings.Count(got, `"example.com" =`) != 1 {
+		t.Fatalf("domain apex and API must have one manual DNS owner:\n%s", got)
+	}
+}
+
 // TestGenerateAWSClusterTerraformWithoutSeed verifies bare clusters do not
 // upload an empty Netsy seed snapshot.
 func TestGenerateAWSClusterTerraformWithoutSeed(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
-		ID:   "bare-cluster",
-		Name: "Bare Cluster",
-		OIDC: clusterconfig.OIDC{IssuerURL: "https://auth.example.com"},
+		ID:         "bare-cluster",
+		Name:       "Bare Cluster",
+		OIDC:       clusterconfig.OIDC{IssuerURL: "https://auth.example.com"},
+		Kubernetes: clusterconfig.Kubernetes{APIHostname: "k8s.example.com"},
 		Pools: map[string]clusterconfig.Pool{
 			"control-plane": {Arch: "arm64", InstanceType: "t4g.medium", Size: 1},
 		},

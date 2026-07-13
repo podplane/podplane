@@ -41,7 +41,11 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, opts buildP
 	if cfg.Cluster.Components.Registry != nil && cfg.Cluster.Components.Registry.Mirror.Enabled {
 		applyRegistryMirror(components, cfg.Cluster)
 	}
-	if cfg.Cluster.Registry.Hostname != "" {
+	registryHostname := cfg.Cluster.Registry.Hostname
+	if registryHostname == "" && len(cfg.Cluster.Providers) > 0 {
+		registryHostname = cfg.ResolvedRegistryHostname()
+	}
+	if registryHostname != "" {
 		componentValues = ensureChildMap(components, "values")
 		isLocal := len(cfg.Cluster.Providers) == 0
 		zotStorage := map[string]any{
@@ -75,7 +79,7 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, opts buildP
 		entry := map[string]any{
 			"platform": map[string]any{
 				"zotRegistry": map[string]any{
-					"registryHostname": cfg.Cluster.Registry.Hostname,
+					"registryHostname": registryHostname,
 					"storage":          zotStorage,
 					"oidc":             zotOIDC,
 				},
@@ -381,10 +385,10 @@ func acmeSolvers(cfg *clusterconfig.ClusterConfig) ([]map[string]any, error) {
 	groups := map[string]*solverGroup{}
 	for _, domain := range cfg.Cluster.Domains {
 		provider := domain.Provider
-		if provider.Kind == "" {
+		if provider == nil || provider.Kind == "" {
 			return nil, fmt.Errorf("cluster.domains[] provider.kind is required for %s", domain.Zone)
 		}
-		providerValue, key, err := dnsProviderSolver(cfg, provider)
+		providerValue, key, err := dnsProviderSolver(cfg, *provider)
 		if err != nil {
 			return nil, fmt.Errorf("domain %s: %w", domain.Zone, err)
 		}
@@ -498,6 +502,9 @@ func secretSyncValues(domains []clusterconfig.Domain) map[string]any {
 	seen := map[string]bool{}
 	mounts := []map[string]any{}
 	for _, domain := range domains {
+		if domain.Provider == nil {
+			continue
+		}
 		spc := domain.Provider.SecretProviderClassName
 		if spc == "" || seen[spc] {
 			continue

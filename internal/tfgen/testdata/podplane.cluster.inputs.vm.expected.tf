@@ -11,6 +11,7 @@ variable "pool_instance_types" {
   type = map(string)
   default = {
     "control-plane" = "t4g.medium"
+    "ingress" = "t4g.medium"
   }
 }
 
@@ -19,5 +20,6 @@ variable "pool_sizes" {
   type = map(number)
   default = {
     "control-plane" = 1
+    "ingress" = 2
   }
 }

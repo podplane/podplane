@@ -91,7 +91,7 @@ variable "kube_api_etcd_servers" {
 variable "kubernetes_api_hostname" {
   description = "Kubernetes API hostname; existing VMs are reconfigured."
   type = string
-  default = "test-cluster.k8s.local"
+  default = "k8s.example.com"
 }
 
 variable "kubernetes_api_port" {
@@ -195,7 +195,7 @@ variable "registry_secret_access_key" {
 variable "registry_hostname" {
   description = "Registry hostname; existing VMs are reconfigured when set."
   type = string
-  default = null
+  default = "registry.example.com"
 }
 
 locals {

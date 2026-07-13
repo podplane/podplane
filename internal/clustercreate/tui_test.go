@@ -68,6 +68,16 @@ func TestNewConfigFormPromptsOIDCIssuerFieldWhenMissing(t *testing.T) {
 	t.Fatal("OIDC issuer URL field should be shown when issuer URL is not resolved")
 }
 
+// TestNewConfigFormRequiresIntentionalDomainlessAPIHostname verifies the API
+// endpoint prompt has no inferred placeholder.
+func TestNewConfigFormRequiresIntentionalDomainlessAPIHostname(t *testing.T) {
+	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	field := form.fields[indexForField(t, form, "Kubernetes API hostname")]
+	if field.value != "" {
+		t.Fatalf("Kubernetes API hostname default = %q, want empty", field.value)
+	}
+}
+
 func TestNewConfigFormDefaultsToRecommendedSeed(t *testing.T) {
 	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
 	seedField := form.fields[indexForField(t, form, "Initial platform components (recommended, minimal, none)")]
@@ -100,6 +110,52 @@ func TestConfigFormCanSelectBareSeed(t *testing.T) {
 	}
 	if got := cfg.Cluster.Seed.Version; got != "" {
 		t.Fatalf("cluster seed version = %q, want empty for bare seed", got)
+	}
+}
+
+// TestConfigFormBuildsManagedDomainDefaults verifies the concise domain flow.
+func TestConfigFormBuildsManagedDomainDefaults(t *testing.T) {
+	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form.fields[indexForField(t, form, "Cluster domain (optional)")].value = "staging.example.com"
+	form.fields[indexForField(t, form, "DNS provider (aws or blank for manual)")].value = "aws"
+
+	cfg, err := form.config()
+	if err != nil {
+		t.Fatalf("config returned error: %v", err)
+	}
+	if got, want := cfg.Cluster.Kubernetes.APIHostname, "k8s.staging.example.com"; got != want {
+		t.Fatalf("API hostname = %q, want %q", got, want)
+	}
+	if got, want := cfg.Cluster.Registry.Hostname, "registry.staging.example.com"; got != want {
+		t.Fatalf("registry hostname = %q, want %q", got, want)
+	}
+	listeners := cfg.Cluster.Providers[0].LoadBalancers["main"].Listeners
+	if cfg.Cluster.Kubernetes.APILoadBalancer != "main" || len(listeners) != 2 || listeners[0].Pool != "control-plane" || listeners[1].Pool != "control-plane" {
+		t.Fatalf("managed load balancer defaults = %#v, %#v", cfg.Cluster.Kubernetes, cfg.Cluster.Providers[0].LoadBalancers)
+	}
+	if cfg.Cluster.Domains[0].Provider == nil || cfg.Cluster.Domains[0].Provider.Kind != "aws" {
+		t.Fatalf("domain provider = %#v, want aws", cfg.Cluster.Domains[0].Provider)
+	}
+}
+
+// TestConfigFormBuildsDomainlessCluster verifies explicit unmanaged API setup.
+func TestConfigFormBuildsDomainlessCluster(t *testing.T) {
+	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form.fields[indexForField(t, form, "Cluster ID / slug")].value = "production"
+	form.fields[indexForField(t, form, "Kubernetes API hostname")].value = "api.example.net"
+
+	cfg, err := form.config()
+	if err != nil {
+		t.Fatalf("config returned error: %v", err)
+	}
+	if got, want := cfg.Cluster.Kubernetes.APIHostname, "api.example.net"; got != want {
+		t.Fatalf("API hostname = %q, want %q", got, want)
+	}
+	if got, want := cfg.Cluster.Registry.Hostname, "production-registry.local"; got != want {
+		t.Fatalf("registry hostname = %q, want %q", got, want)
+	}
+	if len(cfg.Cluster.Domains) != 0 || len(cfg.Cluster.Providers[0].LoadBalancers) != 0 || cfg.Cluster.Kubernetes.APILoadBalancer != "" {
+		t.Fatalf("domainless managed wiring = domains %#v, load balancers %#v, API load balancer %q", cfg.Cluster.Domains, cfg.Cluster.Providers[0].LoadBalancers, cfg.Cluster.Kubernetes.APILoadBalancer)
 	}
 }
 

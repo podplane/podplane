@@ -6,6 +6,22 @@ output "kubernetes_api_url" {
   value = "https://${var.kubernetes_api_hostname}:${var.kubernetes_api_port}"
 }
 
+output "domain_targets" {
+  description = "Configured domain names and their load-balancer DNS targets."
+  value = {
+    "example.com" = {
+      names = ["example.com", "*.example.com"]
+      target = module.network_123456789012_us_east_1.load_balancers["main"].dns_name
+      managed = true
+    }
+  }
+}
+
+output "manual_dns_records" {
+  description = "DNS records requiring manual setup. Use CNAME where valid, or an apex alias or flattening record."
+  value = {}
+}
+
 output "nstance_bucket" {
   value = module.cluster.bucket
 }
