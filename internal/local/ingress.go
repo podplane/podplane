@@ -163,6 +163,21 @@ type cachedProxy struct {
 	proxy  *httputil.ReverseProxy
 }
 
+// upgradeAwareTransport keeps ordinary API traffic on HTTP/2 while routing
+// protocol upgrades such as kubectl exec and port-forward over HTTP/1.1.
+// HTTP/2 forbids the Connection and Upgrade headers required by SPDY.
+type upgradeAwareTransport struct {
+	http2 *http.Transport
+	http1 *http.Transport
+}
+
+func (t *upgradeAwareTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Header.Get("Upgrade") != "" {
+		return t.http1.RoundTrip(r)
+	}
+	return t.http2.RoundTrip(r)
+}
+
 // localIngressProxy builds the local TLS ingress reverse proxy to either the
 // VM's raw Traefik HTTPS endpoint or the reserved Kubernetes API endpoint.
 //
@@ -252,16 +267,25 @@ func localIngressProxy(runtimeDir string) http.Handler {
 	})
 }
 
-// newUpstreamTransport returns an *http.Transport tuned for proxying many
-// concurrent requests to the local cluster VM Kubernetes API or Traefik.
+// newUpstreamTransport returns a transport tuned for proxying many concurrent
+// requests to the local cluster VM Kubernetes API or Traefik.
 //
-// HTTP/2 is explicitly enabled via ForceAttemptHTTP2 because Go's net/http
-// package conservatively disables auto-upgrade to HTTP/2 whenever a custom
-// TLSClientConfig is supplied. Negotiating HTTP/2 to the upstream is the key
-// robustness lever for this proxy: it lets bursts of requests (e.g., helm's
-// parallel CRD applies during a cold cluster install) multiplex over one
-// connection instead of triggering a TLS-handshake / connection storm.
-func newUpstreamTransport() *http.Transport {
+// Ordinary traffic explicitly enables HTTP/2 because Go's net/http package
+// conservatively disables it when a custom TLSClientConfig is supplied. SPDY
+// upgrades use a separate HTTP/1.1 transport. HTTP/2 multiplexing remains the
+// key robustness lever for bursts such as helm's parallel CRD applies.
+func newUpstreamTransport() http.RoundTripper {
+	return &upgradeAwareTransport{
+		http2: newUpstreamHTTPTransport(true),
+		http1: newUpstreamHTTPTransport(false),
+	}
+}
+
+func newUpstreamHTTPTransport(enableHTTP2 bool) *http.Transport {
+	nextProtos := []string{"http/1.1"}
+	if enableHTTP2 {
+		nextProtos = []string{"h2", "http/1.1"}
+	}
 	return &http.Transport{
 		Proxy: nil,
 		DialContext: (&net.Dialer{
@@ -272,9 +296,9 @@ func newUpstreamTransport() *http.Transport {
 			//nolint:gosec // upstream is loopback QEMU hostfwd to VM TLS endpoints:
 			// kube-apiserver uses fake Nstance CA; Traefik may use in-cluster/self-signed local certs.
 			InsecureSkipVerify: true,
-			NextProtos:         []string{"h2", "http/1.1"},
+			NextProtos:         nextProtos,
 		},
-		ForceAttemptHTTP2:     true,
+		ForceAttemptHTTP2:     enableHTTP2,
 		MaxIdleConns:          proxyMaxIdleConns,
 		MaxIdleConnsPerHost:   proxyMaxIdleConnsPerHost,
 		MaxConnsPerHost:       proxyMaxConnsPerHost,

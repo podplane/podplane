@@ -5,6 +5,7 @@
 package local
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
@@ -295,6 +296,122 @@ func TestLocalIngressProxyUpstreamNegotiatesHTTP2(t *testing.T) {
 	v, ok := seen.Load("HTTP/2.0")
 	if !ok || v.(*atomic.Int64).Load() == 0 {
 		t.Fatalf("upstream did not negotiate HTTP/2; protocol counts:%s", got)
+	}
+}
+
+// TestLocalIngressProxyUpgradeUsesHTTP1 asserts that SPDY upgrades used by
+// kubectl exec and port-forward reach kube-apiserver over HTTP/1.1 and carry
+// bidirectional traffic through the upgraded connection.
+func TestLocalIngressProxyUpgradeUsesHTTP1(t *testing.T) {
+	const (
+		clientPayload  = "from-client"
+		backendPayload = "from-backend"
+	)
+	backendResult := make(chan error, 1)
+	backend := startTLSHTTP2Server(t, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		var result error
+		defer func() {
+			backendResult <- result
+		}()
+		if r.Proto != "HTTP/1.1" {
+			result = fmt.Errorf("upgrade used %s, want HTTP/1.1", r.Proto)
+			http.Error(rw, result.Error(), http.StatusBadRequest)
+			return
+		}
+		if r.Header.Get("Connection") != "Upgrade" || r.Header.Get("Upgrade") != "SPDY/3.1" {
+			result = fmt.Errorf("upgrade request headers = %v", r.Header)
+			http.Error(rw, result.Error(), http.StatusBadRequest)
+			return
+		}
+		hijacker, ok := rw.(http.Hijacker)
+		if !ok {
+			result = fmt.Errorf("response writer cannot be hijacked")
+			http.Error(rw, result.Error(), http.StatusInternalServerError)
+			return
+		}
+		conn, buffered, err := hijacker.Hijack()
+		if err != nil {
+			result = fmt.Errorf("hijack backend connection: %w", err)
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			result = fmt.Errorf("set backend connection deadline: %w", err)
+			return
+		}
+		if _, err := buffered.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: SPDY/3.1\r\n\r\n"); err != nil {
+			result = fmt.Errorf("write upgrade response: %w", err)
+			return
+		}
+		if err := buffered.Flush(); err != nil {
+			result = fmt.Errorf("flush upgrade response: %w", err)
+			return
+		}
+		payload := make([]byte, len(clientPayload))
+		if _, err := io.ReadFull(buffered, payload); err != nil {
+			result = fmt.Errorf("read upgraded client payload: %w", err)
+			return
+		}
+		if got := string(payload); got != clientPayload {
+			result = fmt.Errorf("upgraded client payload = %q, want %q", got, clientPayload)
+			return
+		}
+		if _, err := buffered.WriteString(backendPayload); err != nil {
+			result = fmt.Errorf("write upgraded backend payload: %w", err)
+			return
+		}
+		if err := buffered.Flush(); err != nil {
+			result = fmt.Errorf("flush upgraded backend payload: %w", err)
+		}
+	}))
+
+	runtimeDir := t.TempDir()
+	writeDevState(t, runtimeDir, backendPort(t, backend), 0)
+
+	frontend := httptest.NewTLSServer(localIngressProxy(runtimeDir))
+	t.Cleanup(frontend.Close)
+	frontendURL, err := url.Parse(frontend.URL)
+	if err != nil {
+		t.Fatalf("parse frontend URL: %v", err)
+	}
+	conn, err := tls.Dial("tcp", frontendURL.Host, &tls.Config{
+		//nolint:gosec // test server uses a generated self-signed certificate.
+		InsecureSkipVerify: true,
+		NextProtos:         []string{"http/1.1"},
+	})
+	if err != nil {
+		t.Fatalf("dial frontend: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set frontend connection deadline: %v", err)
+	}
+	if _, err := fmt.Fprintf(conn, "POST /api/v1/namespaces/default/pods/example/exec HTTP/1.1\r\nHost: dev.k8s.localhost\r\nConnection: Upgrade\r\nUpgrade: SPDY/3.1\r\nContent-Length: 0\r\n\r\n"); err != nil {
+		t.Fatalf("write upgrade request: %v", err)
+	}
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, &http.Request{Method: http.MethodPost})
+	if err != nil {
+		t.Fatalf("read upgrade response: %v", err)
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusSwitchingProtocols)
+	}
+	if resp.Header.Get("Connection") != "Upgrade" || resp.Header.Get("Upgrade") != "SPDY/3.1" {
+		t.Fatalf("upgrade response headers = %v", resp.Header)
+	}
+	if _, err := io.WriteString(conn, clientPayload); err != nil {
+		t.Fatalf("write upgraded client payload: %v", err)
+	}
+	payload := make([]byte, len(backendPayload))
+	if _, err := io.ReadFull(reader, payload); err != nil {
+		t.Fatalf("read upgraded backend payload: %v", err)
+	}
+	if got := string(payload); got != backendPayload {
+		t.Fatalf("upgraded backend payload = %q, want %q", got, backendPayload)
+	}
+	if err := <-backendResult; err != nil {
+		t.Fatalf("backend: %v", err)
 	}
 }
 
