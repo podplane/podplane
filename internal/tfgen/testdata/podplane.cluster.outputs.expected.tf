@@ -24,13 +24,13 @@ output "mutable_env" {
 }
 
 output "registry_read_only_role_arn" {
-  value = aws_iam_role.registry_read_only.arn
+  value = aws_iam_role.podplane_cluster["registry-read-only"].arn
 }
 
 output "registry_read_write_role_arn" {
-  value = aws_iam_role.registry_read_write.arn
+  value = aws_iam_role.podplane_cluster["registry-read-write"].arn
 }
 
 output "netsy_role_arn" {
-  value = aws_iam_role.netsy.arn
+  value = aws_iam_role.podplane_cluster["netsy"].arn
 }

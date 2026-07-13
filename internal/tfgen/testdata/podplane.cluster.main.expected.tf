@@ -69,17 +69,17 @@ locals {
     KUBE_API_PORT = tostring(local.kubernetes_api_port)
     KUBE_LOG_LEVEL = tostring(var.kube_log_level)
     AWS_S3_USE_PATH_STYLE = var.aws_s3_use_path_style
-    NETSY_BUCKET = aws_s3_bucket.netsy.bucket
+    NETSY_BUCKET = aws_s3_bucket.podplane_cluster["netsy"].bucket
     NETSY_REGION = local.aws_region
     NETSY_ENDPOINT = var.netsy_endpoint
-    NETSY_ASSUME_ROLE = aws_iam_role.netsy.arn
+    NETSY_ASSUME_ROLE = aws_iam_role.podplane_cluster["netsy"].arn
     NETSY_ACCESS_KEY_ID = var.netsy_access_key_id
     NETSY_SECRET_ACCESS_KEY = var.netsy_secret_access_key
     REGISTRY_ENABLED = tostring(var.registry_enabled)
-    REGISTRY_BUCKET = aws_s3_bucket.registry.bucket
+    REGISTRY_BUCKET = aws_s3_bucket.podplane_cluster["registry"].bucket
     REGISTRY_REGION = local.aws_region
     REGISTRY_ENDPOINT = var.registry_endpoint
-    REGISTRY_ASSUME_ROLE = aws_iam_role.registry_read_only.arn
+    REGISTRY_ASSUME_ROLE = aws_iam_role.podplane_cluster["registry-read-only"].arn
     REGISTRY_ACCESS_KEY_ID = var.registry_access_key_id
     REGISTRY_SECRET_ACCESS_KEY = var.registry_secret_access_key
     REGISTRY_HOSTNAME = var.registry_hostname
@@ -120,152 +120,6 @@ module "account_123456789012_us_east_1" {
   source = "nstance-dev/nstance/aws//modules/account"
   cluster = module.cluster
   enable_ssm = var.enable_ssm
-}
-
-resource "aws_s3_bucket" "netsy" {
-  bucket = local.netsy_bucket_name
-}
-
-resource "aws_s3_bucket_public_access_block" "netsy" {
-  bucket = aws_s3_bucket.netsy.id
-  block_public_acls = true
-  block_public_policy = true
-  ignore_public_acls = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "netsy" {
-  bucket = aws_s3_bucket.netsy.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-resource "aws_s3_bucket" "registry" {
-  bucket = local.registry_bucket_name
-}
-
-resource "aws_s3_bucket_public_access_block" "registry" {
-  bucket = aws_s3_bucket.registry.id
-  block_public_acls = true
-  block_public_policy = true
-  ignore_public_acls = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "registry" {
-  bucket = aws_s3_bucket.registry.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-data "aws_iam_policy_document" "assume_from_knc" {
-  statement {
-    actions = ["sts:AssumeRole"]
-
-    principals {
-      type = "AWS"
-      identifiers = [module.account_123456789012_us_east_1.agent_iam_role_arn]
-    }
-  }
-}
-
-resource "aws_iam_role" "netsy" {
-  name = "${local.name_prefix}-netsy"
-  assume_role_policy = data.aws_iam_policy_document.assume_from_knc.json
-}
-
-resource "aws_iam_role_policy" "netsy" {
-  name = "${local.name_prefix}-netsy-policy"
-  role = aws_iam_role.netsy.id
-  policy = data.aws_iam_policy_document.netsy.json
-}
-
-resource "aws_iam_role" "registry_read_only" {
-  name = "${local.name_prefix}-registry-read-only"
-  assume_role_policy = data.aws_iam_policy_document.assume_from_knc.json
-}
-
-resource "aws_iam_role_policy" "registry_read_only" {
-  name = "${local.name_prefix}-registry-read-only-policy"
-  role = aws_iam_role.registry_read_only.id
-  policy = data.aws_iam_policy_document.registry_read_only.json
-}
-
-resource "aws_iam_role" "registry_read_write" {
-  name = "${local.name_prefix}-registry-read-write"
-  assume_role_policy = data.aws_iam_policy_document.assume_from_knc.json
-}
-
-resource "aws_iam_role_policy" "registry_read_write" {
-  name = "${local.name_prefix}-registry-read-write-policy"
-  role = aws_iam_role.registry_read_write.id
-  policy = data.aws_iam_policy_document.registry_read_write.json
-}
-
-data "aws_iam_policy_document" "podplane_knc" {
-  statement {
-    sid = "AssumePodplaneWorkloadRoles"
-    actions = ["sts:AssumeRole"]
-    resources = [aws_iam_role.netsy.arn, aws_iam_role.registry_read_only.arn, aws_iam_role.registry_read_write.arn]
-  }
-
-  statement {
-    sid = "DescribeRegions"
-    actions = ["ec2:DescribeRegions"]
-    resources = ["*"]
-  }
-}
-
-resource "aws_iam_role_policy" "podplane_knc" {
-  name = "${local.name_prefix}-podplane-knc-policy"
-  role = module.account_123456789012_us_east_1.agent_iam_role_name
-  policy = data.aws_iam_policy_document.podplane_knc.json
-}
-
-data "aws_iam_policy_document" "netsy" {
-  statement {
-    sid = "NetsyS3ObjectOperations"
-    actions = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:GetObjectAttributes", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]
-    resources = ["${aws_s3_bucket.netsy.arn}/*"]
-  }
-
-  statement {
-    sid = "NetsyS3BucketOperations"
-    actions = ["s3:ListBucket", "s3:ListBucketMultipartUploads"]
-    resources = [aws_s3_bucket.netsy.arn]
-  }
-}
-
-data "aws_iam_policy_document" "registry_read_only" {
-  statement {
-    actions = ["s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketMultipartUploads"]
-    resources = [aws_s3_bucket.registry.arn]
-  }
-
-  statement {
-    actions = ["s3:GetObject", "s3:ListMultipartUploadParts"]
-    resources = ["${aws_s3_bucket.registry.arn}/*"]
-  }
-}
-
-data "aws_iam_policy_document" "registry_read_write" {
-  statement {
-    actions = ["s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketMultipartUploads"]
-    resources = [aws_s3_bucket.registry.arn]
-  }
-
-  statement {
-    actions = ["s3:GetObject", "s3:ListMultipartUploadParts", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"]
-    resources = ["${aws_s3_bucket.registry.arn}/*"]
-  }
 }
 
 module "network_123456789012_us_east_1" {
@@ -312,11 +166,4 @@ module "shard_us_east_1a" {
       }
     }
   }
-}
-
-resource "podplane_netsy_seed_s3" "cluster" {
-  cluster_config_path = "${path.module}/podplane.cluster.jsonc"
-  bucket = aws_s3_bucket.netsy.bucket
-  region = local.aws_region
-  depends_on = [aws_s3_bucket.netsy]
 }

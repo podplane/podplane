@@ -67,6 +67,8 @@ func WriteCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts Clus
 // renderAWSCluster renders the AWS cluster Terraform files.
 func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provider, opts ClusterOptions) []File {
 	var mainDoc hclDocument
+	var bucketsDoc hclDocument
+	var rolesDoc hclDocument
 	var variablesDoc hclDocument
 	var outputsDoc hclDocument
 
@@ -216,8 +218,6 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	account.Body.Attr("enable_ssm", expr("var.enable_ssm"))
 	mainDoc.AddBlock(account)
 
-	addPodplaneAWSStorageAndRoles(&mainDoc, accountName)
-
 	network := block("module", networkName)
 	network.Body.Attr("source", str("nstance-dev/nstance/aws//modules/network"))
 	network.Body.Attr("cluster", expr("module.cluster"))
@@ -252,16 +252,19 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		mainDoc.AddBlock(shard)
 	}
 
+	addPodplaneAWSBuckets(&bucketsDoc)
+	addPodplaneAWSRoles(&rolesDoc, accountName)
+
 	if cfg.Cluster.Seed.Name != "" && cfg.Cluster.Seed.Name != seeds.None {
 		seed := block("resource", "podplane_netsy_seed_s3", "cluster")
 		seed.Body.Attr("cluster_config_path", str("${path.module}/"+filepath.Base(configPath)))
-		seed.Body.Attr("bucket", expr("aws_s3_bucket.netsy.bucket"))
+		seed.Body.Attr("bucket", expr("aws_s3_bucket.podplane_cluster[\"netsy\"].bucket"))
 		seed.Body.Attr("region", expr("local.aws_region"))
 		if provider.Profile != "" {
 			seed.Body.Attr("profile", str(provider.Profile))
 		}
-		seed.Body.Attr("depends_on", list(expr("aws_s3_bucket.netsy")))
-		mainDoc.AddBlock(seed)
+		seed.Body.Attr("depends_on", list(expr("aws_s3_bucket.podplane_cluster[\"netsy\"]")))
+		bucketsDoc.AddBlock(seed)
 	}
 
 	bucket := block("output", "nstance_bucket")
@@ -277,18 +280,20 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	outputsDoc.AddBlock(mutableEnv)
 
 	registryReadOnlyRole := block("output", "registry_read_only_role_arn")
-	registryReadOnlyRole.Body.Attr("value", expr("aws_iam_role.registry_read_only.arn"))
+	registryReadOnlyRole.Body.Attr("value", expr("aws_iam_role.podplane_cluster[\"registry-read-only\"].arn"))
 	outputsDoc.AddBlock(registryReadOnlyRole)
 
 	registryReadWriteRole := block("output", "registry_read_write_role_arn")
-	registryReadWriteRole.Body.Attr("value", expr("aws_iam_role.registry_read_write.arn"))
+	registryReadWriteRole.Body.Attr("value", expr("aws_iam_role.podplane_cluster[\"registry-read-write\"].arn"))
 	outputsDoc.AddBlock(registryReadWriteRole)
 
 	netsyRole := block("output", "netsy_role_arn")
-	netsyRole.Body.Attr("value", expr("aws_iam_role.netsy.arn"))
+	netsyRole.Body.Attr("value", expr("aws_iam_role.podplane_cluster[\"netsy\"].arn"))
 	outputsDoc.AddBlock(netsyRole)
 	files := []File{
 		{Name: "podplane.cluster.main.tf", Content: mainDoc.String(), Type: FileTypeTerraform},
+		{Name: "podplane.cluster.buckets.tf", Content: bucketsDoc.String(), Type: FileTypeTerraform},
+		{Name: "podplane.cluster.roles.tf", Content: rolesDoc.String(), Type: FileTypeTerraform},
 		{Name: "podplane.cluster.variables.tf", Content: variablesDoc.String(), Type: FileTypeTerraform},
 		{Name: "podplane.cluster.outputs.tf", Content: outputsDoc.String(), Type: FileTypeTerraform},
 	}
@@ -303,31 +308,62 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	return files
 }
 
-// addPodplaneAWSStorageAndRoles adds Podplane-owned S3 buckets and workload
-// roles that are intentionally outside the Nstance account/network/shard modules.
-func addPodplaneAWSStorageAndRoles(doc *hclDocument, accountName string) {
-	for _, bucketName := range []string{"netsy", "registry"} {
-		bucket := block("resource", "aws_s3_bucket", bucketName)
-		bucket.Body.Attr("bucket", expr("local."+bucketName+"_bucket_name"))
-		doc.AddBlock(bucket)
+// addPodplaneAWSBuckets adds Podplane-owned S3 buckets.
+func addPodplaneAWSBuckets(doc *hclDocument) {
+	bucketLocals := block("locals")
+	bucketLocals.Body.Attr("buckets", object(
+		field("netsy", expr("local.netsy_bucket_name")),
+		field("registry", expr("local.registry_bucket_name")),
+	))
+	doc.AddBlock(bucketLocals)
 
-		publicAccess := block("resource", "aws_s3_bucket_public_access_block", bucketName)
-		publicAccess.Body.Attr("bucket", expr("aws_s3_bucket."+bucketName+".id"))
-		publicAccess.Body.Attr("block_public_acls", boolean(true))
-		publicAccess.Body.Attr("block_public_policy", boolean(true))
-		publicAccess.Body.Attr("ignore_public_acls", boolean(true))
-		publicAccess.Body.Attr("restrict_public_buckets", boolean(true))
-		doc.AddBlock(publicAccess)
+	bucket := block("resource", "aws_s3_bucket", "podplane_cluster")
+	bucket.Body.Attr("for_each", expr("local.buckets"))
+	bucket.Body.Attr("bucket", expr("each.value"))
+	doc.AddBlock(bucket)
 
-		encryption := block("resource", "aws_s3_bucket_server_side_encryption_configuration", bucketName)
-		encryption.Body.Attr("bucket", expr("aws_s3_bucket."+bucketName+".id"))
-		rule := block("rule")
-		applyDefault := block("apply_server_side_encryption_by_default")
-		applyDefault.Body.Attr("sse_algorithm", str("AES256"))
-		rule.Body.Block(applyDefault)
-		encryption.Body.Block(rule)
-		doc.AddBlock(encryption)
-	}
+	publicAccess := block("resource", "aws_s3_bucket_public_access_block", "podplane_cluster")
+	publicAccess.Body.Attr("for_each", expr("local.buckets"))
+	publicAccess.Body.Attr("bucket", expr("aws_s3_bucket.podplane_cluster[each.key].id"))
+	publicAccess.Body.Attr("block_public_acls", boolean(true))
+	publicAccess.Body.Attr("block_public_policy", boolean(true))
+	publicAccess.Body.Attr("ignore_public_acls", boolean(true))
+	publicAccess.Body.Attr("restrict_public_buckets", boolean(true))
+	doc.AddBlock(publicAccess)
+
+	encryption := block("resource", "aws_s3_bucket_server_side_encryption_configuration", "podplane_cluster")
+	encryption.Body.Attr("for_each", expr("local.buckets"))
+	encryption.Body.Attr("bucket", expr("aws_s3_bucket.podplane_cluster[each.key].id"))
+	rule := block("rule")
+	applyDefault := block("apply_server_side_encryption_by_default")
+	applyDefault.Body.Attr("sse_algorithm", str("AES256"))
+	rule.Body.Block(applyDefault)
+	encryption.Body.Block(rule)
+	doc.AddBlock(encryption)
+}
+
+// addPodplaneAWSRoles adds Podplane workload roles that are intentionally
+// outside the Nstance account/network/shard modules.
+func addPodplaneAWSRoles(doc *hclDocument, accountName string) {
+	roleLocals := block("locals")
+	roleLocals.Body.Attr("roles", object(
+		field("netsy", object(
+			identField("bucket", str("netsy")),
+			identField("bucket_actions", stringValueList([]string{"s3:ListBucket", "s3:ListBucketMultipartUploads"})),
+			identField("object_actions", stringValueList([]string{"s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:GetObjectAttributes", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"})),
+		)),
+		field("registry-read-only", object(
+			identField("bucket", str("registry")),
+			identField("bucket_actions", stringValueList([]string{"s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketMultipartUploads"})),
+			identField("object_actions", stringValueList([]string{"s3:GetObject", "s3:ListMultipartUploadParts"})),
+		)),
+		field("registry-read-write", object(
+			identField("bucket", str("registry")),
+			identField("bucket_actions", stringValueList([]string{"s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketMultipartUploads"})),
+			identField("object_actions", stringValueList([]string{"s3:GetObject", "s3:ListMultipartUploadParts", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"})),
+		)),
+	))
+	doc.AddBlock(roleLocals)
 
 	assume := block("data", "aws_iam_policy_document", "assume_from_knc")
 	statement := block("statement")
@@ -339,29 +375,32 @@ func addPodplaneAWSStorageAndRoles(doc *hclDocument, accountName string) {
 	assume.Body.Block(statement)
 	doc.AddBlock(assume)
 
-	addIAMRoleWithInlinePolicy(doc, "netsy", "${local.name_prefix}-netsy", "data.aws_iam_policy_document.netsy.json")
-	addIAMRoleWithInlinePolicy(doc, "registry_read_only", "${local.name_prefix}-registry-read-only", "data.aws_iam_policy_document.registry_read_only.json")
-	addIAMRoleWithInlinePolicy(doc, "registry_read_write", "${local.name_prefix}-registry-read-write", "data.aws_iam_policy_document.registry_read_write.json")
-	addPodplaneKNCPolicy(doc, accountName)
-
-	addNetsyPolicyDocument(doc)
-	addRegistryPolicyDocument(doc, "registry_read_only", false)
-	addRegistryPolicyDocument(doc, "registry_read_write", true)
-}
-
-// addIAMRoleWithInlinePolicy adds an IAM role with the shared KNC trust policy
-// and one inline policy document.
-func addIAMRoleWithInlinePolicy(doc *hclDocument, name string, roleName string, policyDocument string) {
-	role := block("resource", "aws_iam_role", name)
-	role.Body.Attr("name", str(roleName))
+	role := block("resource", "aws_iam_role", "podplane_cluster")
+	role.Body.Attr("for_each", expr("local.roles"))
+	role.Body.Attr("name", str("${local.name_prefix}-${each.key}"))
 	role.Body.Attr("assume_role_policy", expr("data.aws_iam_policy_document.assume_from_knc.json"))
 	doc.AddBlock(role)
 
-	policy := block("resource", "aws_iam_role_policy", name)
-	policy.Body.Attr("name", str(roleName+"-policy"))
-	policy.Body.Attr("role", expr("aws_iam_role."+name+".id"))
-	policy.Body.Attr("policy", expr(policyDocument))
+	policyDocument := block("data", "aws_iam_policy_document", "podplane_cluster")
+	policyDocument.Body.Attr("for_each", expr("local.roles"))
+	bucketStatement := block("statement")
+	bucketStatement.Body.Attr("actions", expr("each.value.bucket_actions"))
+	bucketStatement.Body.Attr("resources", list(expr("aws_s3_bucket.podplane_cluster[each.value.bucket].arn")))
+	policyDocument.Body.Block(bucketStatement)
+	objectStatement := block("statement")
+	objectStatement.Body.Attr("actions", expr("each.value.object_actions"))
+	objectStatement.Body.Attr("resources", list(expr("\"${aws_s3_bucket.podplane_cluster[each.value.bucket].arn}/*\"")))
+	policyDocument.Body.Block(objectStatement)
+	doc.AddBlock(policyDocument)
+
+	policy := block("resource", "aws_iam_role_policy", "podplane_cluster")
+	policy.Body.Attr("for_each", expr("local.roles"))
+	policy.Body.Attr("name", str("${local.name_prefix}-${each.key}-policy"))
+	policy.Body.Attr("role", expr("aws_iam_role.podplane_cluster[each.key].id"))
+	policy.Body.Attr("policy", expr("data.aws_iam_policy_document.podplane_cluster[each.key].json"))
 	doc.AddBlock(policy)
+
+	addPodplaneKNCPolicy(doc, accountName)
 }
 
 // addPodplaneKNCPolicy allows Podplane worker nodes to assume only the
@@ -373,9 +412,9 @@ func addPodplaneKNCPolicy(doc *hclDocument, accountName string) {
 	assumeWorkloadRoles.Body.Attr("sid", str("AssumePodplaneWorkloadRoles"))
 	assumeWorkloadRoles.Body.Attr("actions", stringValueList([]string{"sts:AssumeRole"}))
 	assumeWorkloadRoles.Body.Attr("resources", list(
-		expr("aws_iam_role.netsy.arn"),
-		expr("aws_iam_role.registry_read_only.arn"),
-		expr("aws_iam_role.registry_read_write.arn"),
+		expr("aws_iam_role.podplane_cluster[\"netsy\"].arn"),
+		expr("aws_iam_role.podplane_cluster[\"registry-read-only\"].arn"),
+		expr("aws_iam_role.podplane_cluster[\"registry-read-write\"].arn"),
 	))
 	policy.Body.Block(assumeWorkloadRoles)
 
@@ -391,54 +430,6 @@ func addPodplaneKNCPolicy(doc *hclDocument, accountName string) {
 	rolePolicy.Body.Attr("role", expr("module."+accountName+".agent_iam_role_name"))
 	rolePolicy.Body.Attr("policy", expr("data.aws_iam_policy_document.podplane_knc.json"))
 	doc.AddBlock(rolePolicy)
-}
-
-// addNetsyPolicyDocument adds the Netsy object-storage read/write policy.
-func addNetsyPolicyDocument(doc *hclDocument) {
-	policy := block("data", "aws_iam_policy_document", "netsy")
-	objectStatement := block("statement")
-	objectStatement.Body.Attr("sid", str("NetsyS3ObjectOperations"))
-	objectStatement.Body.Attr("actions", stringValueList([]string{
-		"s3:GetObject",
-		"s3:PutObject",
-		"s3:DeleteObject",
-		"s3:GetObjectAttributes",
-		"s3:AbortMultipartUpload",
-		"s3:ListMultipartUploadParts",
-	}))
-	objectStatement.Body.Attr("resources", list(expr("\"${aws_s3_bucket.netsy.arn}/*\"")))
-	policy.Body.Block(objectStatement)
-
-	bucketStatement := block("statement")
-	bucketStatement.Body.Attr("sid", str("NetsyS3BucketOperations"))
-	bucketStatement.Body.Attr("actions", stringValueList([]string{"s3:ListBucket", "s3:ListBucketMultipartUploads"}))
-	bucketStatement.Body.Attr("resources", list(expr("aws_s3_bucket.netsy.arn")))
-	policy.Body.Block(bucketStatement)
-	doc.AddBlock(policy)
-}
-
-// addRegistryPolicyDocument adds a registry bucket policy. Read-only is used by
-// host-level zot; read-write is used by the in-cluster registry component.
-func addRegistryPolicyDocument(doc *hclDocument, name string, write bool) {
-	policy := block("data", "aws_iam_policy_document", name)
-	bucketStatement := block("statement")
-	bucketStatement.Body.Attr("actions", stringValueList([]string{
-		"s3:ListBucket",
-		"s3:GetBucketLocation",
-		"s3:ListBucketMultipartUploads",
-	}))
-	bucketStatement.Body.Attr("resources", list(expr("aws_s3_bucket.registry.arn")))
-	policy.Body.Block(bucketStatement)
-
-	objectActions := []string{"s3:GetObject", "s3:ListMultipartUploadParts"}
-	if write {
-		objectActions = append(objectActions, "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload")
-	}
-	objectStatement := block("statement")
-	objectStatement.Body.Attr("actions", stringValueList(objectActions))
-	objectStatement.Body.Attr("resources", list(expr("\"${aws_s3_bucket.registry.arn}/*\"")))
-	policy.Body.Block(objectStatement)
-	doc.AddBlock(policy)
 }
 
 // mutableEnvValue returns the Terraform expression for vmconfig mutable.env
@@ -464,17 +455,17 @@ func mutableEnvValue() hclExpression {
   KUBE_API_PORT = tostring(local.kubernetes_api_port)
   KUBE_LOG_LEVEL = tostring(var.kube_log_level)
   AWS_S3_USE_PATH_STYLE = var.aws_s3_use_path_style
-  NETSY_BUCKET = aws_s3_bucket.netsy.bucket
+  NETSY_BUCKET = aws_s3_bucket.podplane_cluster["netsy"].bucket
   NETSY_REGION = local.aws_region
   NETSY_ENDPOINT = var.netsy_endpoint
-  NETSY_ASSUME_ROLE = aws_iam_role.netsy.arn
+  NETSY_ASSUME_ROLE = aws_iam_role.podplane_cluster["netsy"].arn
   NETSY_ACCESS_KEY_ID = var.netsy_access_key_id
   NETSY_SECRET_ACCESS_KEY = var.netsy_secret_access_key
   REGISTRY_ENABLED = tostring(var.registry_enabled)
-  REGISTRY_BUCKET = aws_s3_bucket.registry.bucket
+  REGISTRY_BUCKET = aws_s3_bucket.podplane_cluster["registry"].bucket
   REGISTRY_REGION = local.aws_region
   REGISTRY_ENDPOINT = var.registry_endpoint
-  REGISTRY_ASSUME_ROLE = aws_iam_role.registry_read_only.arn
+  REGISTRY_ASSUME_ROLE = aws_iam_role.podplane_cluster["registry-read-only"].arn
   REGISTRY_ACCESS_KEY_ID = var.registry_access_key_id
   REGISTRY_SECRET_ACCESS_KEY = var.registry_secret_access_key
   REGISTRY_HOSTNAME = var.registry_hostname

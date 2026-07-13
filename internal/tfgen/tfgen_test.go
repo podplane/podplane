@@ -89,12 +89,14 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCluster returned error: %v", err)
 	}
-	if len(files) != 4 {
-		t.Fatalf("len(files) = %d, want 4", len(files))
+	if len(files) != 6 {
+		t.Fatalf("len(files) = %d, want 6", len(files))
 	}
 	contents := fileContents(files)
 	for _, name := range []string{
 		"podplane.cluster.main.tf",
+		"podplane.cluster.buckets.tf",
+		"podplane.cluster.roles.tf",
 		"podplane.cluster.variables.tf",
 		"podplane.cluster.outputs.tf",
 		"podplane.cluster.vmconfig_knc_debian-13_arm64.json",
@@ -104,16 +106,18 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		}
 	}
 	assertExpectedTerraform(t, "podplane.cluster.main.expected.tf", contents["podplane.cluster.main.tf"])
+	assertExpectedTerraform(t, "podplane.cluster.buckets.expected.tf", contents["podplane.cluster.buckets.tf"])
+	assertExpectedTerraform(t, "podplane.cluster.roles.expected.tf", contents["podplane.cluster.roles.tf"])
 	assertExpectedTerraform(t, "podplane.cluster.variables.expected.tf", contents["podplane.cluster.variables.tf"])
 	assertExpectedTerraform(t, "podplane.cluster.outputs.expected.tf", contents["podplane.cluster.outputs.tf"])
-	got := contents["podplane.cluster.main.tf"] + contents["podplane.cluster.variables.tf"] + contents["podplane.cluster.outputs.tf"]
+	got := contents["podplane.cluster.main.tf"] + contents["podplane.cluster.buckets.tf"] + contents["podplane.cluster.roles.tf"] + contents["podplane.cluster.variables.tf"] + contents["podplane.cluster.outputs.tf"]
 	for _, want := range []string{
 		`provider "aws"`,
 		`module "network_123456789012_us_east_1"`,
 		`source = "podplane/podplane"`,
 		`resource "podplane_netsy_seed_s3" "cluster"`,
 		`cluster_config_path = "${path.module}/podplane.cluster.jsonc"`,
-		`bucket = aws_s3_bucket.netsy.bucket`,
+		`bucket = aws_s3_bucket.podplane_cluster["netsy"].bucket`,
 		`region = local.aws_region`,
 		`certificates = local.certificates`,
 		`templates = local.templates`,
@@ -125,7 +129,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		`vars = local.mutable_env`,
 		`"public-control-plane" = { ports = [6443], subnets = "public", public = true }`,
 		`load_balancers = ["public-control-plane"]`,
-		`REGISTRY_ASSUME_ROLE = aws_iam_role.registry_read_only.arn`,
+		`REGISTRY_ASSUME_ROLE = aws_iam_role.podplane_cluster["registry-read-only"].arn`,
 		`output "registry_read_write_role_arn"`,
 	} {
 		if !strings.Contains(got, want) {
@@ -176,7 +180,7 @@ func TestGenerateAWSClusterTerraformWithoutSeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCluster returned error: %v", err)
 	}
-	got := fileContents(files)["podplane.cluster.main.tf"]
+	got := fileContents(files)["podplane.cluster.buckets.tf"]
 	if strings.Contains(got, `resource "podplane_netsy_seed_s3" "cluster"`) {
 		t.Fatalf("generated cluster tf unexpectedly contains seed resource:\n%s", got)
 	}

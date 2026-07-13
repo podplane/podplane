@@ -64,6 +64,8 @@ func TestClusterCreateNoApplyGeneratesTerraform(t *testing.T) {
 	for _, name := range []string{
 		"podplane.cluster.schema.json",
 		"podplane.cluster.main.tf",
+		"podplane.cluster.buckets.tf",
+		"podplane.cluster.roles.tf",
 		"podplane.cluster.variables.tf",
 		"podplane.cluster.outputs.tf",
 	} {
