@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -17,6 +18,20 @@ import (
 	"github.com/podplane/podplane/internal/tui"
 	"github.com/podplane/podplane/pkg/seeds"
 )
+
+// SelectCloudProvider asks which cloud provider should host the new cluster.
+// AWS is selected initially because it is the first list item.
+func SelectCloudProvider() (string, bool, error) {
+	return tui.SelectList("Select cloud provider", "Which cloud provider?", cloudProviderItems())
+}
+
+func cloudProviderItems() []list.Item {
+	return []list.Item{
+		tui.Item{Key: "aws", Label: "Amazon Web Services (AWS)"},
+		tui.Item{Key: "google", Label: "Google Cloud"},
+		tui.Item{Label: "Cancel", Cancel: true},
+	}
+}
 
 type configField struct {
 	label    string

@@ -50,6 +50,16 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 			// the command can operate on a single resolved config value.
 			var cfg *clusterconfig.ClusterConfig
 			if _, err := os.Stat(path); os.IsNotExist(err) {
+				providerKind, cancelled, err := clustercreate.SelectCloudProvider()
+				if err != nil {
+					return err
+				}
+				if cancelled {
+					return nil
+				}
+				if providerKind == "google" {
+					return fmt.Errorf("google cloud cluster creation is not supported yet")
+				}
 				// Read or download the latest seed snapshots for determining cluster seed file version to use
 				seedManifest, err := depsManager.EnsureSeedSnapshotsCached(context.Background())
 				if err != nil {

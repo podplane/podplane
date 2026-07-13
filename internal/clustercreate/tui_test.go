@@ -9,8 +9,35 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/podplane/podplane/internal/tui"
 	"github.com/podplane/podplane/pkg/seeds"
 )
+
+func TestCloudProviderItemsDefaultToAWSAndIncludeCancel(t *testing.T) {
+	items := cloudProviderItems()
+	if len(items) != 3 {
+		t.Fatalf("cloud provider item count = %d, want 3", len(items))
+	}
+
+	aws, ok := items[0].(tui.Item)
+	if !ok {
+		t.Fatalf("first cloud provider item has type %T, want tui.Item", items[0])
+	}
+	if aws.Key != "aws" || aws.Label != "Amazon Web Services (AWS)" || aws.Cancel {
+		t.Fatalf("first cloud provider item = %#v, want default AWS option", aws)
+	}
+
+	google := items[1].(tui.Item)
+	if google.Key != "google" || google.Label != "Google Cloud" || google.Cancel {
+		t.Fatalf("second cloud provider item = %#v, want Google Cloud option", google)
+	}
+
+	cancel := items[2].(tui.Item)
+	if cancel.Label != "Cancel" || !cancel.Cancel {
+		t.Fatalf("third cloud provider item = %#v, want cancel option", cancel)
+	}
+}
 
 func TestNewConfigFormSkipsOIDCIssuerFieldWhenProvided(t *testing.T) {
 	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
