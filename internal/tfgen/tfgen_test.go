@@ -143,6 +143,12 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 			t.Fatalf("generated cluster tf missing %q:\n%s", want, got)
 		}
 	}
+	if count := strings.Count(contents["podplane.cluster.inputs.runtime.tf"], "sensitive = true"); count != 6 {
+		t.Fatalf("sensitive runtime variables = %d, want 6", count)
+	}
+	if strings.Contains(contents["podplane.cluster.outputs.tf"], `output "mutable_env"`) {
+		t.Fatal("generated outputs expose internal mutable_env")
+	}
 	if strings.Contains(got, "local.instance_vars") {
 		t.Fatalf("generated cluster tf must not put immutable inputs in Nstance runtime vars:\n%s", got)
 	}

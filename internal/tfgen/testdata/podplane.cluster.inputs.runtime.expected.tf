@@ -2,16 +2,90 @@
 # which means if you only change and apply one of these, you should only see the Nstance server
 # configuration file in the planned changes.
 
+variable "ssh_authorized_keys" {
+  description = "SSH login keys; existing VMs are reconfigured when set."
+  type = string
+  default = null
+}
+
+variable "telemetry_enabled" {
+  description = "Telemetry state; existing VMs are reconfigured when set."
+  type = bool
+  default = null
+}
+
+variable "telemetry_log_cloudinit" {
+  description = "Cloud-init log collection; existing VMs are reconfigured when set."
+  type = bool
+  default = null
+}
+
+variable "telemetry_log_services" {
+  description = "Telemetry services; existing VMs are reconfigured when set."
+  type = string
+  default = null
+}
+
+variable "telemetry_otlp_endpoint" {
+  description = "OTLP endpoint; existing VMs are reconfigured when set."
+  type = string
+  default = null
+}
+
+variable "telemetry_s3_bucket" {
+  description = "Telemetry bucket; existing VMs are reconfigured when set."
+  type = string
+  default = null
+}
+
+variable "telemetry_s3_endpoint" {
+  description = "Telemetry S3 endpoint; existing VMs are reconfigured when set."
+  type = string
+  default = null
+}
+
+variable "telemetry_s3_assume_role" {
+  description = "Telemetry role; existing VMs are reconfigured when set."
+  type = string
+  default = null
+}
+
+variable "telemetry_s3_access_key_id" {
+  description = "Static telemetry access key ID; prefer telemetry_s3_assume_role when available. Existing VMs are reconfigured when set."
+  type = string
+  default = null
+  sensitive = true
+}
+
+variable "telemetry_s3_secret_access_key" {
+  description = "Static telemetry secret access key; prefer telemetry_s3_assume_role when available. Existing VMs are reconfigured when set."
+  type = string
+  default = null
+  sensitive = true
+}
+
 variable "oidc_issuer_url" {
   description = "OIDC issuer; existing VMs are reconfigured."
   type = string
   default = "https://auth.example.com"
 }
 
+variable "oidc_ca_cert" {
+  description = "OIDC CA certificate; existing VMs are reconfigured when set."
+  type = string
+  default = null
+}
+
 variable "oidc_signing_algs" {
   description = "OIDC signing algorithms accepted by kube-apiserver; existing VMs are reconfigured. vmconfig defaults to RS256 when unset."
   type = list(string)
   default = ["RS256", "ES256"]
+}
+
+variable "kube_api_etcd_servers" {
+  description = "etcd endpoints; existing VMs are reconfigured when set."
+  type = string
+  default = null
 }
 
 variable "kubernetes_api_hostname" {
@@ -60,33 +134,15 @@ variable "kubernetes_service_cidr" {
   default = ["198.18.0.0/15", "fdc6::/108"]
 }
 
-variable "registry_hostname" {
-  description = "Registry hostname; existing VMs are reconfigured when set."
-  type = string
-  default = null
-}
-
-variable "ssh_authorized_keys" {
-  description = "SSH login keys; existing VMs are reconfigured when set."
-  type = string
-  default = null
-}
-
-variable "kube_api_etcd_servers" {
-  description = "etcd endpoints; existing VMs are reconfigured when set."
-  type = string
-  default = null
-}
-
-variable "oidc_ca_cert" {
-  description = "OIDC CA certificate; existing VMs are reconfigured when set."
-  type = string
-  default = null
-}
-
 variable "kube_log_level" {
   description = "Kubernetes log level; existing VMs are reconfigured when set."
   type = number
+  default = null
+}
+
+variable "aws_s3_use_path_style" {
+  description = "S3 path style; existing VMs are reconfigured when set."
+  type = string
   default = null
 }
 
@@ -97,69 +153,17 @@ variable "netsy_endpoint" {
 }
 
 variable "netsy_access_key_id" {
-  description = "Netsy access key; existing VMs are reconfigured when set."
+  description = "Static Netsy access key ID; prefer assume-role credentials when available. Existing VMs are reconfigured when set."
   type = string
   default = null
+  sensitive = true
 }
 
 variable "netsy_secret_access_key" {
-  description = "Netsy secret key; existing VMs are reconfigured when set."
+  description = "Static Netsy secret access key; prefer assume-role credentials when available. Existing VMs are reconfigured when set."
   type = string
   default = null
-}
-
-variable "telemetry_enabled" {
-  description = "Telemetry state; existing VMs are reconfigured when set."
-  type = bool
-  default = null
-}
-
-variable "telemetry_log_services" {
-  description = "Telemetry services; existing VMs are reconfigured when set."
-  type = string
-  default = null
-}
-
-variable "telemetry_log_cloudinit" {
-  description = "Cloud-init log collection; existing VMs are reconfigured when set."
-  type = bool
-  default = null
-}
-
-variable "telemetry_s3_bucket" {
-  description = "Telemetry bucket; existing VMs are reconfigured when set."
-  type = string
-  default = null
-}
-
-variable "telemetry_s3_endpoint" {
-  description = "Telemetry S3 endpoint; existing VMs are reconfigured when set."
-  type = string
-  default = null
-}
-
-variable "telemetry_s3_assume_role" {
-  description = "Telemetry role; existing VMs are reconfigured when set."
-  type = string
-  default = null
-}
-
-variable "telemetry_s3_access_key_id" {
-  description = "Telemetry access key; existing VMs are reconfigured when set."
-  type = string
-  default = null
-}
-
-variable "telemetry_s3_secret_access_key" {
-  description = "Telemetry secret key; existing VMs are reconfigured when set."
-  type = string
-  default = null
-}
-
-variable "telemetry_otlp_endpoint" {
-  description = "OTLP endpoint; existing VMs are reconfigured when set."
-  type = string
-  default = null
+  sensitive = true
 }
 
 variable "registry_enabled" {
@@ -175,19 +179,21 @@ variable "registry_endpoint" {
 }
 
 variable "registry_access_key_id" {
-  description = "Registry access key; existing VMs are reconfigured when set."
+  description = "Static registry access key ID; prefer assume-role credentials when available. Existing VMs are reconfigured when set."
   type = string
   default = null
+  sensitive = true
 }
 
 variable "registry_secret_access_key" {
-  description = "Registry secret key; existing VMs are reconfigured when set."
+  description = "Static registry secret access key; prefer assume-role credentials when available. Existing VMs are reconfigured when set."
   type = string
   default = null
+  sensitive = true
 }
 
-variable "aws_s3_use_path_style" {
-  description = "S3 path style; existing VMs are reconfigured when set."
+variable "registry_hostname" {
+  description = "Registry hostname; existing VMs are reconfigured when set."
   type = string
   default = null
 }

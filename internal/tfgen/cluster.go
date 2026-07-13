@@ -152,42 +152,51 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	if len(cfg.Cluster.OIDC.SigningAlgs) > 0 {
 		oidcSigningAlgsDefault = stringValueList(cfg.Cluster.OIDC.SigningAlgs)
 	}
+	// Keep equivalent variables in vmconfig mutable.env order.
 	runtimeVars := []struct {
 		name        string
 		description string
 		typeExpr    string
 		defaultVal  hclValue
 	}{
+		{"ssh_authorized_keys", "SSH login keys; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_enabled", "Telemetry state; existing VMs are reconfigured when set.", "bool", expr("null")},
+		{"telemetry_log_cloudinit", "Cloud-init log collection; existing VMs are reconfigured when set.", "bool", expr("null")},
+		{"telemetry_log_services", "Telemetry services; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_otlp_endpoint", "OTLP endpoint; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_s3_bucket", "Telemetry bucket; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_s3_endpoint", "Telemetry S3 endpoint; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_s3_assume_role", "Telemetry role; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_s3_access_key_id", "Static telemetry access key ID; prefer telemetry_s3_assume_role when available. Existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_s3_secret_access_key", "Static telemetry secret access key; prefer telemetry_s3_assume_role when available. Existing VMs are reconfigured when set.", "string", expr("null")},
 		{"oidc_issuer_url", "OIDC issuer; existing VMs are reconfigured.", "string", str(cfg.Cluster.OIDC.IssuerURL)},
+		{"oidc_ca_cert", "OIDC CA certificate; existing VMs are reconfigured when set.", "string", expr("null")},
 		{"oidc_signing_algs", "OIDC signing algorithms accepted by kube-apiserver; existing VMs are reconfigured. vmconfig defaults to RS256 when unset.", "list(string)", oidcSigningAlgsDefault},
+		{"kube_api_etcd_servers", "etcd endpoints; existing VMs are reconfigured when set.", "string", expr("null")},
 		{"kubernetes_api_hostname", "Kubernetes API hostname; existing VMs are reconfigured.", "string", str(resolvedAPIHostname(cfg))},
 		{"kubernetes_api_port", "External Kubernetes API port used by clients; kube-apiserver listens internally on 6443.", "number", num(resolvedAPIPort(cfg))},
 		{"kubernetes_cluster_cidr", "Pod CIDRs for control-plane services. Existing VMs are reconfigured, but Podplane does not migrate existing Pods, node CIDR allocations, CNI state, routes, or other networking state.", "list(string)", stringValueList(cfg.Cluster.Kubernetes.ClusterCIDR)},
 		{"kubernetes_node_cidr_mask_size_ipv4", "IPv4 Pod CIDR prefix for new node allocations. Existing Node.spec.podCIDRs and CNI state are not resized or migrated; old allocations consume corresponding blocks in the new allocation grid.", "number", expr("null")},
 		{"kubernetes_node_cidr_mask_size_ipv6", "IPv6 Pod CIDR prefix for new node allocations. Existing Node.spec.podCIDRs and CNI state are not resized or migrated; old allocations consume corresponding blocks in the new allocation grid.", "number", expr("null")},
 		{"kubernetes_service_cidr", "Default Service CIDRs for control-plane services. Existing VMs are reconfigured, but Podplane does not migrate existing Services or other networking state; additional ServiceCIDR resources are separate.", "list(string)", stringValueList(serviceNetwork.CIDRs)},
-		{"registry_hostname", "Registry hostname; existing VMs are reconfigured when set.", "string", registryHostnameDefault},
-		{"ssh_authorized_keys", "SSH login keys; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"kube_api_etcd_servers", "etcd endpoints; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"oidc_ca_cert", "OIDC CA certificate; existing VMs are reconfigured when set.", "string", expr("null")},
 		{"kube_log_level", "Kubernetes log level; existing VMs are reconfigured when set.", "number", expr("null")},
+		{"aws_s3_use_path_style", "S3 path style; existing VMs are reconfigured when set.", "string", expr("null")},
 		{"netsy_endpoint", "Netsy endpoint; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"netsy_access_key_id", "Netsy access key; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"netsy_secret_access_key", "Netsy secret key; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"telemetry_enabled", "Telemetry state; existing VMs are reconfigured when set.", "bool", expr("null")},
-		{"telemetry_log_services", "Telemetry services; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"telemetry_log_cloudinit", "Cloud-init log collection; existing VMs are reconfigured when set.", "bool", expr("null")},
-		{"telemetry_s3_bucket", "Telemetry bucket; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"telemetry_s3_endpoint", "Telemetry S3 endpoint; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"telemetry_s3_assume_role", "Telemetry role; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"telemetry_s3_access_key_id", "Telemetry access key; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"telemetry_s3_secret_access_key", "Telemetry secret key; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"telemetry_otlp_endpoint", "OTLP endpoint; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"netsy_access_key_id", "Static Netsy access key ID; prefer assume-role credentials when available. Existing VMs are reconfigured when set.", "string", expr("null")},
+		{"netsy_secret_access_key", "Static Netsy secret access key; prefer assume-role credentials when available. Existing VMs are reconfigured when set.", "string", expr("null")},
 		{"registry_enabled", "Registry state; existing VMs are reconfigured when set.", "bool", expr("null")},
 		{"registry_endpoint", "Registry endpoint; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"registry_access_key_id", "Registry access key; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"registry_secret_access_key", "Registry secret key; existing VMs are reconfigured when set.", "string", expr("null")},
-		{"aws_s3_use_path_style", "S3 path style; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"registry_access_key_id", "Static registry access key ID; prefer assume-role credentials when available. Existing VMs are reconfigured when set.", "string", expr("null")},
+		{"registry_secret_access_key", "Static registry secret access key; prefer assume-role credentials when available. Existing VMs are reconfigured when set.", "string", expr("null")},
+		{"registry_hostname", "Registry hostname; existing VMs are reconfigured when set.", "string", registryHostnameDefault},
+	}
+	sensitiveRuntimeVars := map[string]bool{
+		"telemetry_s3_access_key_id":     true,
+		"telemetry_s3_secret_access_key": true,
+		"netsy_access_key_id":            true,
+		"netsy_secret_access_key":        true,
+		"registry_access_key_id":         true,
+		"registry_secret_access_key":     true,
 	}
 	numberMax := map[string]int{
 		"kubernetes_node_cidr_mask_size_ipv4": 32,
@@ -198,6 +207,9 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		variable.Body.Attr("description", str(item.description))
 		variable.Body.Attr("type", expr(item.typeExpr))
 		variable.Body.Attr("default", item.defaultVal)
+		if sensitiveRuntimeVars[item.name] {
+			variable.Body.Attr("sensitive", boolean(true))
+		}
 		if max := numberMax[item.name]; max > 0 {
 			validation := block("validation")
 			validation.Body.Attr("condition", expr(fmt.Sprintf("var.%s == null ? true : (var.%s >= 0 && var.%s <= %d && floor(var.%s) == var.%s)", item.name, item.name, item.name, max, item.name, item.name)))
@@ -333,10 +345,6 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	shards := block("output", "nstance_shards")
 	shards.Body.Attr("value", nstanceShardsValue(provider))
 	outputsDoc.AddBlock(shards)
-
-	mutableEnv := block("output", "mutable_env")
-	mutableEnv.Body.Attr("value", expr("local.mutable_env"))
-	outputsDoc.AddBlock(mutableEnv)
 
 	registryReadOnlyRole := block("output", "registry_read_only_role_arn")
 	registryReadOnlyRole.Body.Attr("value", expr("aws_iam_role.podplane_cluster[\"registry-read-only\"].arn"))

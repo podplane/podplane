@@ -159,6 +159,8 @@ These variables can be set/overriden alongside the Podplane-generated `.tf` conf
 | `REGISTRY_SECRET_ACCESS_KEY` | `var.registry_secret_access_key` |
 | `REGISTRY_HOSTNAME` | `var.registry_hostname` |
 
+Prefer assume-role credentials over static access keys whenever the object store supports them. The generated static credential variables are marked sensitive to redact them from normal OpenTofu/Terraform output, but sensitive values are still stored in state. Use an encrypted, access-controlled state backend and avoid committing credential-bearing `.tfvars` files when static credentials are unavoidable.
+
 The Podplane `.tf` configuration derives the following variables which can also be propagated via the `mutable.env` file:
 
 | Environment variable | Generated OpenTofu/Terraform source |

@@ -19,10 +19,6 @@ output "nstance_shards" {
   }
 }
 
-output "mutable_env" {
-  value = local.mutable_env
-}
-
 output "registry_read_only_role_arn" {
   value = aws_iam_role.podplane_cluster["registry-read-only"].arn
 }
