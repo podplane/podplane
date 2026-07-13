@@ -114,7 +114,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	))
 	requiredProviders.Body.Attr("podplane", object(
 		identField("source", str("podplane/podplane")),
-		identField("version", str(">= 1.0.0")),
+		identField("version", str(">= 1.1.0")),
 	))
 	terraform.Body.Block(requiredProviders)
 	mainDoc.AddBlock(terraform)
