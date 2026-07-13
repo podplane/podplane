@@ -62,7 +62,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ID:   "test-cluster",
 		Name: "Test Cluster",
-		OIDC: clusterconfig.OIDC{IssuerURL: "https://auth.example.com"},
+		OIDC: clusterconfig.OIDC{IssuerURL: "https://auth.example.com", SigningAlgs: []string{"RS256", "ES256"}},
 		Seed: clusterconfig.Seed{Name: "recommended", Version: "v1.0.0-1"},
 		Pools: map[string]clusterconfig.Pool{
 			"control-plane": {Arch: "arm64", InstanceType: "t4g.medium", Size: 1},
@@ -89,15 +89,17 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCluster returned error: %v", err)
 	}
-	if len(files) != 6 {
-		t.Fatalf("len(files) = %d, want 6", len(files))
+	if len(files) != 8 {
+		t.Fatalf("len(files) = %d, want 8", len(files))
 	}
 	contents := fileContents(files)
 	for _, name := range []string{
 		"podplane.cluster.main.tf",
 		"podplane.cluster.buckets.tf",
 		"podplane.cluster.roles.tf",
-		"podplane.cluster.variables.tf",
+		"podplane.cluster.inputs.runtime.tf",
+		"podplane.cluster.inputs.vm.tf",
+		"podplane.cluster.inputs.infra.tf",
 		"podplane.cluster.outputs.tf",
 		"podplane.cluster.vmconfig_knc_debian-13_arm64.json",
 	} {
@@ -108,9 +110,11 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	assertExpectedTerraform(t, "podplane.cluster.main.expected.tf", contents["podplane.cluster.main.tf"])
 	assertExpectedTerraform(t, "podplane.cluster.buckets.expected.tf", contents["podplane.cluster.buckets.tf"])
 	assertExpectedTerraform(t, "podplane.cluster.roles.expected.tf", contents["podplane.cluster.roles.tf"])
-	assertExpectedTerraform(t, "podplane.cluster.variables.expected.tf", contents["podplane.cluster.variables.tf"])
+	assertExpectedTerraform(t, "podplane.cluster.inputs.runtime.expected.tf", contents["podplane.cluster.inputs.runtime.tf"])
+	assertExpectedTerraform(t, "podplane.cluster.inputs.vm.expected.tf", contents["podplane.cluster.inputs.vm.tf"])
+	assertExpectedTerraform(t, "podplane.cluster.inputs.infra.expected.tf", contents["podplane.cluster.inputs.infra.tf"])
 	assertExpectedTerraform(t, "podplane.cluster.outputs.expected.tf", contents["podplane.cluster.outputs.tf"])
-	got := contents["podplane.cluster.main.tf"] + contents["podplane.cluster.buckets.tf"] + contents["podplane.cluster.roles.tf"] + contents["podplane.cluster.variables.tf"] + contents["podplane.cluster.outputs.tf"]
+	got := contents["podplane.cluster.main.tf"] + contents["podplane.cluster.buckets.tf"] + contents["podplane.cluster.roles.tf"] + contents["podplane.cluster.inputs.runtime.tf"] + contents["podplane.cluster.inputs.vm.tf"] + contents["podplane.cluster.inputs.infra.tf"] + contents["podplane.cluster.outputs.tf"]
 	for _, want := range []string{
 		`provider "aws"`,
 		`module "network_123456789012_us_east_1"`,
@@ -142,8 +146,50 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	if strings.Contains(got, "IMMUTABLE_SSH_AUTHORIZED_KEYS=") {
 		t.Fatalf("generated Terraform must not embed rendered userdata:\n%s", got)
 	}
+	if strings.Contains(got, "pool_disk_sizes") {
+		t.Fatalf("generated Terraform must not advertise disk sizing as an independent override:\n%s", got)
+	}
+	infra := contents["podplane.cluster.inputs.infra.tf"]
+	for _, want := range []string{`default = ""`, `default = "172.18.0.0/16"`, `subnets = {`} {
+		if !strings.Contains(infra, want) {
+			t.Fatalf("generated infra inputs missing %q:\n%s", want, infra)
+		}
+	}
+	if strings.Contains(contents["podplane.cluster.main.tf"], "TELEMETRY_ENABLED = tostring(var.telemetry_enabled)") || !strings.Contains(contents["podplane.cluster.main.tf"], "if value != null") {
+		t.Fatalf("generated mutable env must omit unset vmconfig-owned defaults:\n%s", contents["podplane.cluster.main.tf"])
+	}
 	if !strings.Contains(contents["podplane.cluster.vmconfig_knc_debian-13_arm64.json"], `"kind": "knc"`) {
 		t.Fatalf("generated manifest copy is invalid:\n%s", contents["podplane.cluster.vmconfig_knc_debian-13_arm64.json"])
+	}
+
+	// CIDRs are runtime inputs. A JSON CIDR change must affect only runtime inputs.
+	cfg.Cluster.Kubernetes.ClusterCIDR = []string{"100.64.0.0/10"}
+	changedFiles, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions())
+	if err != nil {
+		t.Fatalf("GenerateCluster after CIDR change returned error: %v", err)
+	}
+	changed := fileContents(changedFiles)
+	if changed["podplane.cluster.inputs.runtime.tf"] == contents["podplane.cluster.inputs.runtime.tf"] {
+		t.Fatal("Kubernetes CIDR change did not affect runtime impact inputs")
+	}
+	if changed["podplane.cluster.inputs.infra.tf"] != contents["podplane.cluster.inputs.infra.tf"] {
+		t.Fatal("Kubernetes CIDR change unexpectedly affected infra impact inputs")
+	}
+
+	// Nstance uses empty strings, not null, as the managed/existing VPC
+	// sentinels. Existing-VPC generation must clear the managed CIDR.
+	cfg.Cluster.Providers[0].VPC.ID = "vpc-0123456789abcdef0"
+	cfg.Cluster.Providers[0].VPC.V4CIDR = ""
+	cfg.Cluster.Providers[0].VPC.V6CIDR = ""
+	existingFiles, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions())
+	if err != nil {
+		t.Fatalf("GenerateCluster for existing VPC returned error: %v", err)
+	}
+	existingInfra := fileContents(existingFiles)["podplane.cluster.inputs.infra.tf"]
+	for _, want := range []string{`default = "vpc-0123456789abcdef0"`, "variable \"vpc_cidr_ipv4\" {\n  description = \"Managed VPC IPv4 CIDR; changing it may replace networking.\"\n  type = string\n  default = \"\""} {
+		if !strings.Contains(existingInfra, want) {
+			t.Fatalf("existing-VPC infra inputs missing %q:\n%s", want, existingInfra)
+		}
 	}
 }
 

@@ -36,6 +36,8 @@ func TestMutableEnvRejectsInvalidValues(t *testing.T) {
 		{"TELEMETRY_LOG_CLOUDINIT": "maybe", "REGISTRY_HOSTNAME": "registry.example.com"},
 		{"TELEMETRY_LOG_SERVICES": "kubelet,ssh.service", "REGISTRY_HOSTNAME": "registry.example.com"},
 		{"OIDC_CA_CERT": "line1\nline2", "REGISTRY_HOSTNAME": "registry.example.com"},
+		{"KUBE_NODE_CIDR_MASK_SIZE_IPV4": "33", "REGISTRY_HOSTNAME": "registry.example.com"},
+		{"KUBE_NODE_CIDR_MASK_SIZE_IPV6": "-1", "REGISTRY_HOSTNAME": "registry.example.com"},
 	}
 	for _, env := range tests {
 		env.ApplyDefaults("example-cluster")
@@ -56,5 +58,23 @@ func TestMutableEnvObjectStorageSetters(t *testing.T) {
 	}
 	if env["NETSY_REGION"] != "region-1" || env["TELEMETRY_S3_REGION"] != "region-1" || env["REGISTRY_REGION"] != "region-1" {
 		t.Fatalf("expected shared object storage region to be set on all components: %#v", env)
+	}
+}
+
+// TestMutableEnvAppliesKubernetesCIDRDefaults verifies vmconfig-owned network defaults.
+func TestMutableEnvAppliesKubernetesCIDRDefaults(t *testing.T) {
+	env := MutableEnv{"REGISTRY_HOSTNAME": "registry.example.com"}
+	env.ApplyDefaults("example-cluster")
+	if env["KUBE_CLUSTER_CIDR"] != "100.64.0.0/10,fd64::/48" {
+		t.Fatalf("KUBE_CLUSTER_CIDR = %q", env["KUBE_CLUSTER_CIDR"])
+	}
+	if env["KUBE_SERVICE_CLUSTER_IP_RANGE"] != "198.18.0.0/15,fdc6::/108" {
+		t.Fatalf("KUBE_SERVICE_CLUSTER_IP_RANGE = %q", env["KUBE_SERVICE_CLUSTER_IP_RANGE"])
+	}
+	if env["KUBE_NODE_CIDR_MASK_SIZE_IPV4"] != "24" || env["KUBE_NODE_CIDR_MASK_SIZE_IPV6"] != "64" {
+		t.Fatalf("node CIDR mask defaults = %q/%q", env["KUBE_NODE_CIDR_MASK_SIZE_IPV4"], env["KUBE_NODE_CIDR_MASK_SIZE_IPV6"])
+	}
+	if env["OIDC_SIGNING_ALGS"] != "RS256" {
+		t.Fatalf("OIDC_SIGNING_ALGS = %q", env["OIDC_SIGNING_ALGS"])
 	}
 }

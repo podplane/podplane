@@ -38,13 +38,15 @@ func sortedKeys[V any](m map[string]V) []string {
 }
 
 type hclDocument struct {
+	header []string
 	blocks []hclBlock
 }
 
 type hclBlock struct {
-	Type   string
-	Labels []string
-	Body   hclBody
+	Comments []string
+	Type     string
+	Labels   []string
+	Body     hclBody
 }
 
 type hclBody struct {
@@ -93,6 +95,14 @@ func (d *hclDocument) AddBlock(block hclBlock) {
 // String renders the document as HCL with stable block ordering.
 func (d hclDocument) String() string {
 	var b strings.Builder
+	for _, line := range d.header {
+		b.WriteString("# ")
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	if len(d.header) > 0 && len(d.blocks) > 0 {
+		b.WriteString("\n")
+	}
 	for i, block := range d.blocks {
 		if i > 0 {
 			b.WriteString("\n")
@@ -175,6 +185,12 @@ func identField(key string, value hclValue) hclObjectField {
 func (b hclBlock) renderHCL(indent int) string {
 	var out strings.Builder
 	pad := strings.Repeat(" ", indent)
+	for _, line := range b.Comments {
+		out.WriteString(pad)
+		out.WriteString("# ")
+		out.WriteString(line)
+		out.WriteString("\n")
+	}
 	out.WriteString(pad)
 	out.WriteString(b.Type)
 	for _, label := range b.Labels {

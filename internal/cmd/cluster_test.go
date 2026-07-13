@@ -66,7 +66,9 @@ func TestClusterCreateNoApplyGeneratesTerraform(t *testing.T) {
 		"podplane.cluster.main.tf",
 		"podplane.cluster.buckets.tf",
 		"podplane.cluster.roles.tf",
-		"podplane.cluster.variables.tf",
+		"podplane.cluster.inputs.runtime.tf",
+		"podplane.cluster.inputs.vm.tf",
+		"podplane.cluster.inputs.infra.tf",
 		"podplane.cluster.outputs.tf",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {

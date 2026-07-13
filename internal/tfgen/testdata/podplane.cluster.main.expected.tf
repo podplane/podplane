@@ -14,8 +14,8 @@ terraform {
 }
 
 provider "aws" {
-  region = "us-east-1"
-  allowed_account_ids = ["123456789012"]
+  region = local.provider_region
+  allowed_account_ids = [local.provider_account]
 }
 
 data "aws_caller_identity" "current" {
@@ -27,63 +27,56 @@ data "aws_region" "current" {
 data "podplane_userdata" "knc_arm64" {
   manifest_json = file("${path.module}/podplane.cluster.vmconfig_knc_debian-13_arm64.json")
   deps_mirror_url = "https://deps.podplane.dev"
-  provider_kind = "aws"
+  provider_kind = local.provider_kind
   aws_account_id = local.aws_account_id
   immutable_ssh_authorized_keys = var.immutable_ssh_authorized_keys
   enable_ssm = var.enable_ssm
 }
 
 locals {
-  cluster_name = "Test Cluster"
-  cluster_id = "test-cluster"
-  name_prefix = "test-cluster"
   aws_account_id = data.aws_caller_identity.current.account_id
   aws_region = data.aws_region.current.region
   netsy_bucket_name = "${local.cluster_id}-${local.aws_account_id}-netsy"
   registry_bucket_name = "${local.cluster_id}-${local.aws_account_id}-registry"
-  oidc_issuer_url = "https://auth.example.com"
-  oidc_client_id = "test-cluster"
-  oidc_username_claim = "email"
-  oidc_groups_claim = "groups"
-  kubernetes_api_hostname = "test-cluster.k8s.local"
-  kubernetes_api_port = 6443
-  kubernetes_cluster_cidr = []
-  kubernetes_service_cidr = []
-  mutable_env = {
+  mutable_env = { for key, value in {
+    TELEMETRY_S3_REGION = local.aws_region
+    OIDC_ISSUER = var.oidc_issuer_url
+    OIDC_SIGNING_ALGS = var.oidc_signing_algs == null ? null : join(",", var.oidc_signing_algs)
+    KUBE_API_PUBLIC_HOSTNAME = var.kubernetes_api_hostname
+    KUBE_API_PORT = tostring(var.kubernetes_api_port)
+    KUBE_CLUSTER_CIDR = join(",", var.kubernetes_cluster_cidr)
+    KUBE_SERVICE_CLUSTER_IP_RANGE = join(",", var.kubernetes_service_cidr)
+    NETSY_BUCKET = aws_s3_bucket.podplane_cluster["netsy"].bucket
+    NETSY_REGION = local.aws_region
+    NETSY_ASSUME_ROLE = aws_iam_role.podplane_cluster["netsy"].arn
+    REGISTRY_BUCKET = aws_s3_bucket.podplane_cluster["registry"].bucket
+    REGISTRY_REGION = local.aws_region
+    REGISTRY_ASSUME_ROLE = aws_iam_role.podplane_cluster["registry-read-only"].arn
     SSH_AUTHORIZED_KEYS = var.ssh_authorized_keys
-    TELEMETRY_ENABLED = tostring(var.telemetry_enabled)
-    TELEMETRY_LOG_CLOUDINIT = tostring(var.telemetry_log_cloudinit)
+    TELEMETRY_ENABLED = var.telemetry_enabled == null ? null : tostring(var.telemetry_enabled)
+    TELEMETRY_LOG_CLOUDINIT = var.telemetry_log_cloudinit == null ? null : tostring(var.telemetry_log_cloudinit)
     TELEMETRY_LOG_SERVICES = var.telemetry_log_services
     TELEMETRY_OTLP_ENDPOINT = var.telemetry_otlp_endpoint
     TELEMETRY_S3_BUCKET = var.telemetry_s3_bucket
-    TELEMETRY_S3_REGION = local.aws_region
     TELEMETRY_S3_ENDPOINT = var.telemetry_s3_endpoint
     TELEMETRY_S3_ASSUME_ROLE = var.telemetry_s3_assume_role
     TELEMETRY_S3_ACCESS_KEY_ID = var.telemetry_s3_access_key_id
     TELEMETRY_S3_SECRET_ACCESS_KEY = var.telemetry_s3_secret_access_key
-    OIDC_ISSUER = local.oidc_issuer_url
     OIDC_CA_CERT = var.oidc_ca_cert
     KUBE_API_ETCD_SERVERS = var.kube_api_etcd_servers
-    KUBE_API_PUBLIC_HOSTNAME = local.kubernetes_api_hostname
-    KUBE_API_INTERNAL_LB_HOSTNAME = ""
-    KUBE_API_PORT = tostring(local.kubernetes_api_port)
-    KUBE_LOG_LEVEL = tostring(var.kube_log_level)
+    KUBE_LOG_LEVEL = var.kube_log_level == null ? null : tostring(var.kube_log_level)
+    KUBE_NODE_CIDR_MASK_SIZE_IPV4 = var.kubernetes_node_cidr_mask_size_ipv4 == null ? null : tostring(var.kubernetes_node_cidr_mask_size_ipv4)
+    KUBE_NODE_CIDR_MASK_SIZE_IPV6 = var.kubernetes_node_cidr_mask_size_ipv6 == null ? null : tostring(var.kubernetes_node_cidr_mask_size_ipv6)
     AWS_S3_USE_PATH_STYLE = var.aws_s3_use_path_style
-    NETSY_BUCKET = aws_s3_bucket.podplane_cluster["netsy"].bucket
-    NETSY_REGION = local.aws_region
     NETSY_ENDPOINT = var.netsy_endpoint
-    NETSY_ASSUME_ROLE = aws_iam_role.podplane_cluster["netsy"].arn
     NETSY_ACCESS_KEY_ID = var.netsy_access_key_id
     NETSY_SECRET_ACCESS_KEY = var.netsy_secret_access_key
-    REGISTRY_ENABLED = tostring(var.registry_enabled)
-    REGISTRY_BUCKET = aws_s3_bucket.podplane_cluster["registry"].bucket
-    REGISTRY_REGION = local.aws_region
+    REGISTRY_ENABLED = var.registry_enabled == null ? null : tostring(var.registry_enabled)
     REGISTRY_ENDPOINT = var.registry_endpoint
-    REGISTRY_ASSUME_ROLE = aws_iam_role.podplane_cluster["registry-read-only"].arn
     REGISTRY_ACCESS_KEY_ID = var.registry_access_key_id
     REGISTRY_SECRET_ACCESS_KEY = var.registry_secret_access_key
     REGISTRY_HOSTNAME = var.registry_hostname
-  }
+  } : key => value if value != null }
   certificates = {
     "containerd.client" = { kind = "client", cn = "containerd.client", dns = ["{{ .Instance.Hostname }}", "localhost"], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1"], ttl = 8760 }
     "front-proxy.client" = { kind = "client", cn = "front-proxy-client", dns = ["{{ .Instance.Hostname }}", "localhost"], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1"], ttl = 8760 }
@@ -126,22 +119,11 @@ module "network_123456789012_us_east_1" {
   source = "nstance-dev/nstance/aws//modules/network"
   cluster = module.cluster
   enable_ssm = var.enable_ssm
-  vpc_cidr_ipv4 = "172.18.0.0/16"
-  enable_ipv6 = true
-  subnets = {
-    "control-plane" = {
-      "us-east-1a" = [{ ipv4_cidr = "172.18.1.0/24", nat_subnet = "public" }]
-    }
-    "nstance" = {
-      "us-east-1a" = [{ ipv4_cidr = "172.18.20.0/28", nat_subnet = "public" }]
-    }
-    "public" = {
-      "us-east-1a" = [{ ipv4_cidr = "172.18.10.0/28", public = true, nat_gateway = true }]
-    }
-  }
-  load_balancers = {
-    "public-control-plane" = { ports = [6443], subnets = "public", public = true }
-  }
+  vpc_id = var.vpc_id
+  vpc_cidr_ipv4 = var.vpc_cidr_ipv4
+  enable_ipv6 = var.enable_ipv6
+  subnets = local.subnets
+  load_balancers = local.load_balancers
 }
 
 module "shard_us_east_1a" {
@@ -158,9 +140,9 @@ module "shard_us_east_1a" {
     "default" = {
       "control-plane" = {
         template = "control-plane"
-        size = 1
+        size = var.pool_sizes["control-plane"]
         subnet_pool = "control-plane"
-        instance_type = "t4g.medium"
+        instance_type = var.pool_instance_types["control-plane"]
         vars = local.mutable_env
         load_balancers = ["public-control-plane"]
       }

@@ -335,6 +335,8 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 		"KUBE_LOG_LEVEL":                 "5",
 		"KUBE_API_PUBLIC_HOSTNAME":       "localhost",
 		"KUBE_API_ETCD_SERVERS":          "https://127.0.0.1:2378",
+		"KUBE_CLUSTER_CIDR":              "100.64.0.0/10,fd64::/48",
+		"KUBE_SERVICE_CLUSTER_IP_RANGE":  "198.18.0.0/15,fdc6::/108",
 		"TELEMETRY_LOG_SERVICES":         "first-boot-env,cron,ssh,netsy,nstance-agent,nstance-recv-watch,containerd,kube-apiserver,kube-controller-manager,kube-scheduler,kubelet,zot",
 		"TELEMETRY_S3_ENDPOINT":          s3DataEndpointURL,
 		"TELEMETRY_S3_REGION":            "local",

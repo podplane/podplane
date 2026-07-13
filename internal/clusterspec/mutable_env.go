@@ -30,10 +30,15 @@ var mutableEnvKeys = []string{
 	"TELEMETRY_S3_ASSUME_ROLE",
 	"OIDC_ISSUER",
 	"OIDC_CA_CERT",
+	"OIDC_SIGNING_ALGS",
 	"KUBE_API_ETCD_SERVERS",
 	"KUBE_API_PUBLIC_HOSTNAME",
 	"KUBE_API_INTERNAL_LB_HOSTNAME",
 	"KUBE_API_PORT",
+	"KUBE_CLUSTER_CIDR",
+	"KUBE_NODE_CIDR_MASK_SIZE_IPV4",
+	"KUBE_NODE_CIDR_MASK_SIZE_IPV6",
+	"KUBE_SERVICE_CLUSTER_IP_RANGE",
 	"KUBE_LOG_LEVEL",
 	"AWS_S3_USE_PATH_STYLE",
 	"NETSY_BUCKET",
@@ -85,11 +90,16 @@ func (e MutableEnv) Render() (string, error) {
 // ApplyDefaults populates mutable environment defaults and values derived from clusterID.
 func (e MutableEnv) ApplyDefaults(clusterID string) {
 	defaults := map[string]string{
-		"KUBE_LOG_LEVEL":          "2",
-		"KUBE_API_PORT":           "6443",
-		"TELEMETRY_ENABLED":       "false",
-		"TELEMETRY_LOG_CLOUDINIT": "true",
-		"REGISTRY_ENABLED":        "true",
+		"KUBE_LOG_LEVEL":                "2",
+		"KUBE_API_PORT":                 "6443",
+		"KUBE_CLUSTER_CIDR":             "100.64.0.0/10,fd64::/48",
+		"KUBE_NODE_CIDR_MASK_SIZE_IPV4": "24",
+		"KUBE_NODE_CIDR_MASK_SIZE_IPV6": "64",
+		"KUBE_SERVICE_CLUSTER_IP_RANGE": "198.18.0.0/15,fdc6::/108",
+		"OIDC_SIGNING_ALGS":             "RS256",
+		"TELEMETRY_ENABLED":             "false",
+		"TELEMETRY_LOG_CLOUDINIT":       "true",
+		"REGISTRY_ENABLED":              "true",
 	}
 	for key, value := range defaults {
 		if e[key] == "" {
@@ -123,6 +133,15 @@ func (e MutableEnv) Validate() error {
 	port, err := strconv.ParseUint(e["KUBE_API_PORT"], 10, 16)
 	if err != nil || port == 0 {
 		return fmt.Errorf("KUBE_API_PORT must be an integer between 1 and 65535")
+	}
+	for key, max := range map[string]uint64{
+		"KUBE_NODE_CIDR_MASK_SIZE_IPV4": 32,
+		"KUBE_NODE_CIDR_MASK_SIZE_IPV6": 128,
+	} {
+		prefix, err := strconv.ParseUint(e[key], 10, 8)
+		if err != nil || prefix > max {
+			return fmt.Errorf("%s must be an integer between 0 and %d", key, max)
+		}
 	}
 	for _, key := range []string{"TELEMETRY_LOG_CLOUDINIT", "TELEMETRY_ENABLED", "REGISTRY_ENABLED"} {
 		if e[key] != "true" && e[key] != "false" {

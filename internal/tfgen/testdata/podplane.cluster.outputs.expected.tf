@@ -3,7 +3,7 @@ output "cluster_id" {
 }
 
 output "kubernetes_api_url" {
-  value = "https://${local.kubernetes_api_hostname}:${local.kubernetes_api_port}"
+  value = "https://${var.kubernetes_api_hostname}:${var.kubernetes_api_port}"
 }
 
 output "nstance_bucket" {

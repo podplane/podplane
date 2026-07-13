@@ -77,7 +77,7 @@
         },
         "signing_algs": {
           "type": "array",
-          "description": "Allowed OIDC signing algorithms.",
+          "description": "Allowed OIDC signing algorithms. Passed to kube-apiserver at runtime; vmconfig defaults to RS256 when omitted.",
           "items": { "type": "string" }
         },
         "ca_cert": {

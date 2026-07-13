@@ -69,8 +69,21 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	var mainDoc hclDocument
 	var bucketsDoc hclDocument
 	var rolesDoc hclDocument
-	var variablesDoc hclDocument
+	var runtimeInputsDoc hclDocument
+	var vmInputsDoc hclDocument
+	var infraInputsDoc hclDocument
 	var outputsDoc hclDocument
+	runtimeInputsDoc.header = []string{
+		"Runtime configuration inputs. Changes are pushed to existing VMs and applied without replacement,",
+		"which means if you only change and apply one of these, you should only see the Nstance server",
+		"configuration file in the planned changes.",
+	}
+	vmInputsDoc.header = []string{
+		"VM infrastructure inputs. Changes reconcile VM counts or trigger rolling VM replacement.",
+	}
+	infraInputsDoc.header = []string{
+		"Cluster infrastructure inputs. Changes may add, replace, or remove provider resources.",
+	}
 
 	terraform := block("terraform")
 	terraform.Body.Attr("required_version", str(">= 1.6.0"))
@@ -87,12 +100,12 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	mainDoc.AddBlock(terraform)
 
 	awsProvider := block("provider", "aws")
-	awsProvider.Body.Attr("region", str(provider.Region))
+	awsProvider.Body.Attr("region", expr("local.provider_region"))
 	if provider.Profile != "" {
 		awsProvider.Body.Attr("profile", str(provider.Profile))
 	}
 	if provider.Account != "" {
-		awsProvider.Body.Attr("allowed_account_ids", stringValueList([]string{provider.Account}))
+		awsProvider.Body.Attr("allowed_account_ids", list(expr("local.provider_account")))
 	}
 	if len(provider.Tags) > 0 {
 		defaultTags := block("default_tags")
@@ -119,72 +132,115 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		userdata := block("data", "podplane_userdata", target.dataName())
 		userdata.Body.Attr("manifest_json", expr("file("+quote("${path.module}/podplane.cluster."+manifest.Filename)+")"))
 		userdata.Body.Attr("deps_mirror_url", str(opts.DepsMirrorURL))
-		userdata.Body.Attr("provider_kind", str(provider.Kind))
+		userdata.Body.Attr("provider_kind", expr("local.provider_kind"))
 		userdata.Body.Attr("aws_account_id", expr("local.aws_account_id"))
 		userdata.Body.Attr("immutable_ssh_authorized_keys", expr("var.immutable_ssh_authorized_keys"))
 		userdata.Body.Attr("enable_ssm", expr("var.enable_ssm"))
 		mainDoc.AddBlock(userdata)
 	}
 
-	mutableVars := []struct {
+	var registryHostnameDefault hclValue = expr("null")
+	if cfg.Cluster.Registry.Hostname != "" {
+		registryHostnameDefault = str(cfg.Cluster.Registry.Hostname)
+	}
+	var oidcSigningAlgsDefault hclValue = expr("null")
+	if len(cfg.Cluster.OIDC.SigningAlgs) > 0 {
+		oidcSigningAlgsDefault = stringValueList(cfg.Cluster.OIDC.SigningAlgs)
+	}
+	runtimeVars := []struct {
 		name        string
 		description string
 		typeExpr    string
 		defaultVal  hclValue
 	}{
-		{"ssh_authorized_keys", "SSH public keys allowed for VM login.", "string", str("")},
-		{"immutable_ssh_authorized_keys", "Immutable SSH public keys for debugging early VM boot failures. Changing this value rotates affected VMs.", "string", str("")},
-		{"kube_api_etcd_servers", "etcd-compatible endpoint list used by kube-apiserver.", "string", str("")},
-		{"oidc_ca_cert", "Base64-encoded OIDC issuer CA certificate.", "string", str("")},
-		{"kube_log_level", "Kubernetes component log verbosity.", "number", num(2)},
-		{"netsy_endpoint", "Custom Netsy object-storage endpoint URL.", "string", str("")},
-		{"netsy_access_key_id", "Netsy object-storage access key ID for non-IAM providers.", "string", str("")},
-		{"netsy_secret_access_key", "Netsy object-storage secret access key for non-IAM providers.", "string", str("")},
-		{"telemetry_enabled", "Enable VM telemetry/log forwarding.", "bool", hclBool(false)},
-		{"telemetry_log_services", "Comma-separated systemd services to include in telemetry logs.", "string", str("")},
-		{"telemetry_log_cloudinit", "Include cloud-init logs in telemetry.", "bool", hclBool(true)},
-		{"telemetry_s3_bucket", "Telemetry S3 bucket name.", "string", str("")},
-		{"telemetry_s3_endpoint", "Custom telemetry S3 endpoint URL.", "string", str("")},
-		{"telemetry_s3_assume_role", "Telemetry S3 IAM role ARN to assume.", "string", str("")},
-		{"telemetry_s3_access_key_id", "Telemetry S3 access key ID for non-IAM providers.", "string", str("")},
-		{"telemetry_s3_secret_access_key", "Telemetry S3 secret access key for non-IAM providers.", "string", str("")},
-		{"telemetry_otlp_endpoint", "OTLP endpoint for telemetry export.", "string", str("")},
-		{"registry_enabled", "Enable the VM-hosted registry service.", "bool", hclBool(true)},
-		{"registry_hostname", "Hostname used by clients to reach the registry.", "string", str(cfg.Cluster.Registry.Hostname)},
-		{"registry_endpoint", "Custom registry object-storage endpoint URL.", "string", str("")},
-		{"registry_access_key_id", "Registry object-storage access key ID for non-IAM providers.", "string", str("")},
-		{"registry_secret_access_key", "Registry object-storage secret access key for non-IAM providers.", "string", str("")},
-		{"aws_s3_use_path_style", "Whether S3 clients should use path-style URLs.", "string", str("")},
-		{"enable_ssm", "Enable AWS Systems Manager Session Manager access for cluster VMs.", "bool", hclBool(true)},
+		{"oidc_issuer_url", "OIDC issuer; existing VMs are reconfigured.", "string", str(cfg.Cluster.OIDC.IssuerURL)},
+		{"oidc_signing_algs", "OIDC signing algorithms accepted by kube-apiserver; existing VMs are reconfigured. vmconfig defaults to RS256 when unset.", "list(string)", oidcSigningAlgsDefault},
+		{"kubernetes_api_hostname", "Kubernetes API hostname; existing VMs are reconfigured.", "string", str(resolvedAPIHostname(cfg))},
+		{"kubernetes_api_port", "Kubernetes API port; existing VMs are reconfigured.", "number", num(resolvedAPIPort(cfg))},
+		{"kubernetes_cluster_cidr", "Pod CIDRs for control-plane services. Existing VMs are reconfigured, but Podplane does not migrate existing Pods, node CIDR allocations, CNI state, routes, or other networking state.", "list(string)", stringValueList(cfg.Cluster.Kubernetes.ClusterCIDR)},
+		{"kubernetes_service_cidr", "Default Service CIDRs for control-plane services. Existing VMs are reconfigured, but Podplane does not migrate existing Services or other networking state; additional ServiceCIDR resources are separate.", "list(string)", stringValueList(cfg.Cluster.Kubernetes.ServiceCIDR)},
+		{"kubernetes_node_cidr_mask_size_ipv4", "IPv4 Pod CIDR prefix for new node allocations. Existing Node.spec.podCIDRs and CNI state are not resized or migrated; old allocations consume corresponding blocks in the new allocation grid.", "number", expr("null")},
+		{"kubernetes_node_cidr_mask_size_ipv6", "IPv6 Pod CIDR prefix for new node allocations. Existing Node.spec.podCIDRs and CNI state are not resized or migrated; old allocations consume corresponding blocks in the new allocation grid.", "number", expr("null")},
+		{"registry_hostname", "Registry hostname; existing VMs are reconfigured when set.", "string", registryHostnameDefault},
+		{"ssh_authorized_keys", "SSH login keys; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"kube_api_etcd_servers", "etcd endpoints; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"oidc_ca_cert", "OIDC CA certificate; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"kube_log_level", "Kubernetes log level; existing VMs are reconfigured when set.", "number", expr("null")},
+		{"netsy_endpoint", "Netsy endpoint; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"netsy_access_key_id", "Netsy access key; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"netsy_secret_access_key", "Netsy secret key; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_enabled", "Telemetry state; existing VMs are reconfigured when set.", "bool", expr("null")},
+		{"telemetry_log_services", "Telemetry services; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_log_cloudinit", "Cloud-init log collection; existing VMs are reconfigured when set.", "bool", expr("null")},
+		{"telemetry_s3_bucket", "Telemetry bucket; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_s3_endpoint", "Telemetry S3 endpoint; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_s3_assume_role", "Telemetry role; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_s3_access_key_id", "Telemetry access key; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_s3_secret_access_key", "Telemetry secret key; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"telemetry_otlp_endpoint", "OTLP endpoint; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"registry_enabled", "Registry state; existing VMs are reconfigured when set.", "bool", expr("null")},
+		{"registry_endpoint", "Registry endpoint; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"registry_access_key_id", "Registry access key; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"registry_secret_access_key", "Registry secret key; existing VMs are reconfigured when set.", "string", expr("null")},
+		{"aws_s3_use_path_style", "S3 path style; existing VMs are reconfigured when set.", "string", expr("null")},
 	}
-	for _, item := range mutableVars {
+	numberMax := map[string]int{
+		"kubernetes_node_cidr_mask_size_ipv4": 32,
+		"kubernetes_node_cidr_mask_size_ipv6": 128,
+	}
+	for _, item := range runtimeVars {
 		variable := block("variable", item.name)
 		variable.Body.Attr("description", str(item.description))
 		variable.Body.Attr("type", expr(item.typeExpr))
 		variable.Body.Attr("default", item.defaultVal)
-		variablesDoc.AddBlock(variable)
+		if max := numberMax[item.name]; max > 0 {
+			validation := block("validation")
+			validation.Body.Attr("condition", expr(fmt.Sprintf("var.%s == null ? true : (var.%s >= 0 && var.%s <= %d && floor(var.%s) == var.%s)", item.name, item.name, item.name, max, item.name, item.name)))
+			validation.Body.Attr("error_message", str(fmt.Sprintf("%s must be a whole number between 0 and %d.", item.name, max)))
+			variable.Body.Block(validation)
+		}
+		runtimeInputsDoc.AddBlock(variable)
 	}
+	runtimeLocals := block("locals")
+	runtimeLocals.Body.Attr("oidc_client_id", str(cfg.ResolvedClientID()))
+	runtimeLocals.Body.Attr("oidc_username_claim", str(cfg.ResolvedUsernameClaim()))
+	runtimeLocals.Body.Attr("oidc_groups_claim", str(cfg.ResolvedGroupsClaim()))
+	runtimeInputsDoc.AddBlock(runtimeLocals)
+	poolInstanceTypes := []hclObjectField{}
+	poolSizes := []hclObjectField{}
+	for _, name := range sortedKeys(cfg.Cluster.Pools) {
+		pool := cfg.Cluster.Pools[name]
+		poolInstanceTypes = append(poolInstanceTypes, field(name, str(pool.InstanceType)))
+		poolSizes = append(poolSizes, field(name, num(pool.Size)))
+	}
+	addInputVariable(&vmInputsDoc, "immutable_ssh_authorized_keys", "string", str(""), "Early-boot SSH keys; changing them rolls affected VMs.")
+	addInputVariable(&vmInputsDoc, "pool_instance_types", "map(string)", object(poolInstanceTypes...), "Instance types by pool; changing one rolls that pool.")
+	addInputVariable(&vmInputsDoc, "pool_sizes", "map(number)", object(poolSizes...), "Desired VM counts by pool; changes are reconciled by Nstance.")
+	addInputVariable(&infraInputsDoc, "vpc_id", "string", str(provider.VPC.ID), "Existing VPC ID; changing it replaces network placement.")
+	addInputVariable(&infraInputsDoc, "vpc_cidr_ipv4", "string", str(provider.VPC.V4CIDR), "Managed VPC IPv4 CIDR; changing it may replace networking.")
+	addInputVariable(&infraInputsDoc, "enable_ipv6", "bool", boolean(provider.VPC.V6CIDR == "auto"), "IPv6 state; changing it updates cloud networking.")
+	addInputVariable(&infraInputsDoc, "enable_ssm", "bool", boolean(true), "SSM access; changing it updates cloud infrastructure and VM bootstrap.")
+	topology := block("locals")
+	topology.Body.Attr("subnets", subnetsValue(provider))
+	topology.Body.Attr("load_balancers", loadBalancersValue(provider))
+	infraInputsDoc.AddBlock(topology)
+	identity := block("locals")
+	identity.Comments = []string{
+		"Cluster identity and placement. Changing these values is not supported in place;",
+		"destroy the cluster, then update podplane.cluster.jsonc and recreate it.",
+	}
+	identity.Body.Attr("cluster_id", str(cfg.Cluster.ID))
+	identity.Body.Attr("name_prefix", str(cfg.Cluster.ID))
+	identity.Body.Attr("provider_kind", str(provider.Kind))
+	identity.Body.Attr("provider_account", str(provider.Account))
+	identity.Body.Attr("provider_region", str(provider.Region))
+	infraInputsDoc.AddBlock(identity)
 
 	locals := block("locals")
-	locals.Body.Attr("cluster_name", str(cfg.Cluster.Name))
-	locals.Body.Attr("cluster_id", str(cfg.Cluster.ID))
-	locals.Body.Attr("name_prefix", str(cfg.Cluster.ID))
 	locals.Body.Attr("aws_account_id", expr("data.aws_caller_identity.current.account_id"))
 	locals.Body.Attr("aws_region", expr("data.aws_region.current.region"))
 	locals.Body.Attr("netsy_bucket_name", str("${local.cluster_id}-${local.aws_account_id}-netsy"))
 	locals.Body.Attr("registry_bucket_name", str("${local.cluster_id}-${local.aws_account_id}-registry"))
-	locals.Body.Attr("oidc_issuer_url", str(cfg.Cluster.OIDC.IssuerURL))
-	locals.Body.Attr("oidc_client_id", str(cfg.ResolvedClientID()))
-	locals.Body.Attr("oidc_username_claim", str(cfg.ResolvedUsernameClaim()))
-	groupsClaim := cfg.Cluster.OIDC.GroupsClaim
-	if groupsClaim == "" {
-		groupsClaim = "groups"
-	}
-	locals.Body.Attr("oidc_groups_claim", str(groupsClaim))
-	locals.Body.Attr("kubernetes_api_hostname", str(resolvedAPIHostname(cfg)))
-	locals.Body.Attr("kubernetes_api_port", num(resolvedAPIPort(cfg)))
-	locals.Body.Attr("kubernetes_cluster_cidr", stringValueList(cfg.Cluster.Kubernetes.ClusterCIDR))
-	locals.Body.Attr("kubernetes_service_cidr", stringValueList(cfg.Cluster.Kubernetes.ServiceCIDR))
 	locals.Body.Attr("mutable_env", mutableEnvValue())
 	locals.Body.Attr("certificates", nstanceCertificatesValue())
 	locals.Body.Attr("templates", templatesValue(cfg))
@@ -207,7 +263,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	outputsDoc.AddBlock(clusterID)
 
 	apiURL := block("output", "kubernetes_api_url")
-	apiURL.Body.Attr("value", str("https://${local.kubernetes_api_hostname}:${local.kubernetes_api_port}"))
+	apiURL.Body.Attr("value", str("https://${var.kubernetes_api_hostname}:${var.kubernetes_api_port}"))
 	outputsDoc.AddBlock(apiURL)
 
 	accountName := safeName("account", provider.Account, provider.Region)
@@ -222,17 +278,12 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	network.Body.Attr("source", str("nstance-dev/nstance/aws//modules/network"))
 	network.Body.Attr("cluster", expr("module.cluster"))
 	network.Body.Attr("enable_ssm", expr("var.enable_ssm"))
-	if provider.VPC.ID != "" {
-		network.Body.Attr("vpc_id", str(provider.VPC.ID))
-	} else {
-		network.Body.Attr("vpc_cidr_ipv4", str(provider.VPC.V4CIDR))
-	}
-	if provider.VPC.V6CIDR == "auto" {
-		network.Body.Attr("enable_ipv6", boolean(true))
-	}
-	network.Body.Attr("subnets", subnetsValue(provider))
-	if lbs := loadBalancersValue(provider); len(lbs) > 0 {
-		network.Body.Attr("load_balancers", lbs)
+	network.Body.Attr("vpc_id", expr("var.vpc_id"))
+	network.Body.Attr("vpc_cidr_ipv4", expr("var.vpc_cidr_ipv4"))
+	network.Body.Attr("enable_ipv6", expr("var.enable_ipv6"))
+	network.Body.Attr("subnets", expr("local.subnets"))
+	if len(provider.LoadBalancer.Listeners) > 0 {
+		network.Body.Attr("load_balancers", expr("local.load_balancers"))
 	}
 	mainDoc.AddBlock(network)
 
@@ -294,7 +345,9 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		{Name: "podplane.cluster.main.tf", Content: mainDoc.String(), Type: FileTypeTerraform},
 		{Name: "podplane.cluster.buckets.tf", Content: bucketsDoc.String(), Type: FileTypeTerraform},
 		{Name: "podplane.cluster.roles.tf", Content: rolesDoc.String(), Type: FileTypeTerraform},
-		{Name: "podplane.cluster.variables.tf", Content: variablesDoc.String(), Type: FileTypeTerraform},
+		{Name: "podplane.cluster.inputs.runtime.tf", Content: runtimeInputsDoc.String(), Type: FileTypeTerraform},
+		{Name: "podplane.cluster.inputs.vm.tf", Content: vmInputsDoc.String(), Type: FileTypeTerraform},
+		{Name: "podplane.cluster.inputs.infra.tf", Content: infraInputsDoc.String(), Type: FileTypeTerraform},
 		{Name: "podplane.cluster.outputs.tf", Content: outputsDoc.String(), Type: FileTypeTerraform},
 	}
 	for _, target := range requiredVMTargets(cfg) {
@@ -435,41 +488,45 @@ func addPodplaneKNCPolicy(doc *hclDocument, accountName string) {
 // mutableEnvValue returns the Terraform expression for vmconfig mutable.env
 // values generated from Terraform-managed resources and generated variables.
 func mutableEnvValue() hclExpression {
-	return expr(`{
+	return expr(`{ for key, value in {
+  TELEMETRY_S3_REGION = local.aws_region
+  OIDC_ISSUER = var.oidc_issuer_url
+  OIDC_SIGNING_ALGS = var.oidc_signing_algs == null ? null : join(",", var.oidc_signing_algs)
+  KUBE_API_PUBLIC_HOSTNAME = var.kubernetes_api_hostname
+  KUBE_API_PORT = tostring(var.kubernetes_api_port)
+  KUBE_CLUSTER_CIDR = join(",", var.kubernetes_cluster_cidr)
+  KUBE_SERVICE_CLUSTER_IP_RANGE = join(",", var.kubernetes_service_cidr)
+  NETSY_BUCKET = aws_s3_bucket.podplane_cluster["netsy"].bucket
+  NETSY_REGION = local.aws_region
+  NETSY_ASSUME_ROLE = aws_iam_role.podplane_cluster["netsy"].arn
+  REGISTRY_BUCKET = aws_s3_bucket.podplane_cluster["registry"].bucket
+  REGISTRY_REGION = local.aws_region
+  REGISTRY_ASSUME_ROLE = aws_iam_role.podplane_cluster["registry-read-only"].arn
   SSH_AUTHORIZED_KEYS = var.ssh_authorized_keys
-  TELEMETRY_ENABLED = tostring(var.telemetry_enabled)
-  TELEMETRY_LOG_CLOUDINIT = tostring(var.telemetry_log_cloudinit)
+  TELEMETRY_ENABLED = var.telemetry_enabled == null ? null : tostring(var.telemetry_enabled)
+  TELEMETRY_LOG_CLOUDINIT = var.telemetry_log_cloudinit == null ? null : tostring(var.telemetry_log_cloudinit)
   TELEMETRY_LOG_SERVICES = var.telemetry_log_services
   TELEMETRY_OTLP_ENDPOINT = var.telemetry_otlp_endpoint
   TELEMETRY_S3_BUCKET = var.telemetry_s3_bucket
-  TELEMETRY_S3_REGION = local.aws_region
   TELEMETRY_S3_ENDPOINT = var.telemetry_s3_endpoint
   TELEMETRY_S3_ASSUME_ROLE = var.telemetry_s3_assume_role
   TELEMETRY_S3_ACCESS_KEY_ID = var.telemetry_s3_access_key_id
   TELEMETRY_S3_SECRET_ACCESS_KEY = var.telemetry_s3_secret_access_key
-  OIDC_ISSUER = local.oidc_issuer_url
   OIDC_CA_CERT = var.oidc_ca_cert
   KUBE_API_ETCD_SERVERS = var.kube_api_etcd_servers
-  KUBE_API_PUBLIC_HOSTNAME = local.kubernetes_api_hostname
-  KUBE_API_INTERNAL_LB_HOSTNAME = ""
-  KUBE_API_PORT = tostring(local.kubernetes_api_port)
-  KUBE_LOG_LEVEL = tostring(var.kube_log_level)
+  KUBE_LOG_LEVEL = var.kube_log_level == null ? null : tostring(var.kube_log_level)
+  KUBE_NODE_CIDR_MASK_SIZE_IPV4 = var.kubernetes_node_cidr_mask_size_ipv4 == null ? null : tostring(var.kubernetes_node_cidr_mask_size_ipv4)
+  KUBE_NODE_CIDR_MASK_SIZE_IPV6 = var.kubernetes_node_cidr_mask_size_ipv6 == null ? null : tostring(var.kubernetes_node_cidr_mask_size_ipv6)
   AWS_S3_USE_PATH_STYLE = var.aws_s3_use_path_style
-  NETSY_BUCKET = aws_s3_bucket.podplane_cluster["netsy"].bucket
-  NETSY_REGION = local.aws_region
   NETSY_ENDPOINT = var.netsy_endpoint
-  NETSY_ASSUME_ROLE = aws_iam_role.podplane_cluster["netsy"].arn
   NETSY_ACCESS_KEY_ID = var.netsy_access_key_id
   NETSY_SECRET_ACCESS_KEY = var.netsy_secret_access_key
-  REGISTRY_ENABLED = tostring(var.registry_enabled)
-  REGISTRY_BUCKET = aws_s3_bucket.podplane_cluster["registry"].bucket
-  REGISTRY_REGION = local.aws_region
+  REGISTRY_ENABLED = var.registry_enabled == null ? null : tostring(var.registry_enabled)
   REGISTRY_ENDPOINT = var.registry_endpoint
-  REGISTRY_ASSUME_ROLE = aws_iam_role.podplane_cluster["registry-read-only"].arn
   REGISTRY_ACCESS_KEY_ID = var.registry_access_key_id
   REGISTRY_SECRET_ACCESS_KEY = var.registry_secret_access_key
   REGISTRY_HOSTNAME = var.registry_hostname
-}`)
+} : key => value if value != null }`)
 }
 
 // subnetsValue converts provider zones into the network module subnets object.
@@ -591,9 +648,9 @@ func groupsValue(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provid
 		pool := cfg.Cluster.Pools[poolName]
 		fields := []hclObjectField{
 			identField("template", str(poolName)),
-			identField("size", num(pool.Size)),
+			identField("size", expr("var.pool_sizes["+quote(poolName)+"]")),
 			identField("subnet_pool", str(poolName)),
-			identField("instance_type", str(pool.InstanceType)),
+			identField("instance_type", expr("var.pool_instance_types["+quote(poolName)+"]")),
 			identField("vars", expr("local.mutable_env")),
 		}
 		if pool.DiskSize > 0 {
@@ -605,6 +662,15 @@ func groupsValue(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provid
 		poolFields = append(poolFields, field(poolName, object(fields...)))
 	}
 	return object(field("default", object(poolFields...)))
+}
+
+// addInputVariable appends a generated Terraform variable declaration.
+func addInputVariable(doc *hclDocument, name, typeExpr string, defaultVal hclValue, description string) {
+	variable := block("variable", name)
+	variable.Body.Attr("description", str(description))
+	variable.Body.Attr("type", expr(typeExpr))
+	variable.Body.Attr("default", defaultVal)
+	doc.AddBlock(variable)
 }
 
 // templatesValue converts cluster pools into Nstance instance templates.

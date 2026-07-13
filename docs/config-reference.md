@@ -144,7 +144,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.oidc.client_id` | OIDC client ID (defaults to `cluster.id` if not specified) |
 | `cluster.oidc.username_claim` | Token claim used as the username (default: `email`) |
 | `cluster.oidc.groups_claim` | Token claim used for group membership (default: `groups`) |
-| `cluster.oidc.signing_algs` | Allowed OIDC signing algorithms (default: `["ES256"]`) |
+| `cluster.oidc.signing_algs` | Allowed OIDC signing algorithms. Passed to kube-apiserver at runtime; vmconfig defaults to `["RS256"]` when omitted. |
 | `cluster.acme.server` | ACME directory URL used for production ingress certificates. When set with `cluster.acme.email`, Podplane configures cert-manager DNS-01 issuers. Omit `cluster.acme` for local/self-signed ingress certificates. |
 | `cluster.acme.email` | ACME account email address for expiry and account notices. |
 | `cluster.domains[]` | Array of domain configurations. The first domain is used as the default for ingress routing. |
