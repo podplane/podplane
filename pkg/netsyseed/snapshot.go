@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -23,6 +24,10 @@ import (
 const (
 	podplaneComponentsGitKey         = "/registry/source.toolkit.fluxcd.io/gitrepositories/platform-components/podplane-components"
 	platformComponentsHelmReleaseKey = "/registry/helm.toolkit.fluxcd.io/helmreleases/platform-components/platform-components"
+	apiServiceKey                    = "/registry/services/specs/default/kubernetes"
+	coreDNSServiceKey                = "/registry/services/specs/platform-coredns/platform-coredns"
+	serviceCIDRKey                   = "/registry/servicecidrs/kubernetes"
+	coreDNSHelmReleaseKey            = "/registry/helm.toolkit.fluxcd.io/helmreleases/platform-coredns/coredns"
 )
 
 type SnapshotOptions struct {
@@ -58,6 +63,19 @@ func WriteSnapshot(w io.Writer, opts SnapshotOptions) error {
 	if err != nil {
 		return fmt.Errorf("read Podplane seed file: %w", err)
 	}
+	if len(cluster.Cluster.Kubernetes.ServiceCIDR) > 0 {
+		network, err := clusterconfig.ServiceNetworkFromCIDRs(cluster.Cluster.Kubernetes.ServiceCIDR)
+		if err != nil {
+			return err
+		}
+		records, err = interpolateKubernetes(records, network)
+		if err != nil {
+			return err
+		}
+		if err := applyNetworkValues(values, network); err != nil {
+			return err
+		}
+	}
 	if err := interpolatePlatformComponents(records, values); err != nil {
 		return err
 	}
@@ -73,6 +91,265 @@ func WriteSnapshot(w io.Writer, opts SnapshotOptions) error {
 		return fmt.Errorf("write Netsy snapshot: %w", err)
 	}
 	return nil
+}
+
+// interpolateKubernetes rewrites Kubernetes service-network records.
+func interpolateKubernetes(records []*datafile.Record, network clusterconfig.ServiceNetwork) ([]*datafile.Record, error) {
+	out := records
+	desiredAllocations := map[string]map[string]netip.Addr{}
+	foundCIDR := false
+	for _, record := range out {
+		key := string(record.Key)
+		owned := key == serviceCIDRKey || strings.HasPrefix(key, "/registry/services/specs/") ||
+			key == coreDNSHelmReleaseKey
+		if !owned {
+			continue
+		}
+		var obj map[string]any
+		if err := json.Unmarshal(record.Value, &obj); err != nil {
+			return nil, fmt.Errorf("decode seed record %s: %w", key, err)
+		}
+		changed := false
+		switch {
+		case key == serviceCIDRKey:
+			if stringValue(obj["kind"]) != "ServiceCIDR" {
+				return nil, fmt.Errorf("record at %s is not a ServiceCIDR", key)
+			}
+			spec, err := mapField(obj, "spec", key)
+			if err != nil {
+				return nil, err
+			}
+			spec["cidrs"] = network.CIDRs
+			foundCIDR, changed = true, true
+		case strings.HasPrefix(key, "/registry/services/specs/"):
+			if stringValue(obj["kind"]) != "Service" {
+				return nil, fmt.Errorf("record at %s is not a Service", key)
+			}
+			spec, err := mapField(obj, "spec", key)
+			if err != nil {
+				return nil, err
+			}
+			var ips []netip.Addr
+			switch key {
+			case apiServiceKey:
+				ips = network.API
+			case coreDNSServiceKey:
+				ips = network.CoreDNS
+			default:
+				ips, err = remapSeededServiceIPs(spec, network, key)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if len(ips) > 0 {
+				policy := stringValue(spec["ipFamilyPolicy"])
+				if len(ips) == 1 {
+					policy = "SingleStack"
+				} else if policy == "" || policy == "SingleStack" {
+					policy = "PreferDualStack"
+				}
+				setServiceIPs(spec, ips, policy)
+				allocations := make(map[string]netip.Addr, len(ips))
+				for _, ip := range ips {
+					allocations[ipFamily(ip)] = ip
+				}
+				desiredAllocations[strings.TrimPrefix(key, "/registry/services/specs/")] = allocations
+				changed = true
+			}
+		case key == coreDNSHelmReleaseKey:
+			spec, err := mapField(obj, "spec", key)
+			if err != nil {
+				return nil, err
+			}
+			values, err := mapField(spec, "values", key+" spec")
+			if err != nil {
+				return nil, err
+			}
+			coredns, err := mapField(values, "coredns", key+" values")
+			if err != nil {
+				return nil, err
+			}
+			service, err := mapField(coredns, "service", key+" coredns values")
+			if err != nil {
+				return nil, err
+			}
+			setServiceIPs(service, network.CoreDNS, serviceFamilyPolicy(network.CoreDNS))
+			changed = true
+		}
+		if changed {
+			encoded, err := json.Marshal(obj)
+			if err != nil {
+				return nil, fmt.Errorf("encode %s: %w", key, err)
+			}
+			record.Value = encoded
+		}
+	}
+	if !foundCIDR {
+		return nil, fmt.Errorf("podplane seed file does not contain a ServiceCIDR record")
+	}
+	filtered := out[:0]
+	for _, record := range out {
+		if !strings.HasPrefix(string(record.Key), "/registry/ipaddresses/") {
+			filtered = append(filtered, record)
+			continue
+		}
+		var obj map[string]any
+		if err := json.Unmarshal(record.Value, &obj); err != nil {
+			return nil, fmt.Errorf("decode seed record %s: %w", record.Key, err)
+		}
+		parent, err := ipAddressParent(obj, string(record.Key))
+		if err != nil {
+			return nil, err
+		}
+		desired, managed := desiredAllocations[parent]
+		if !managed {
+			filtered = append(filtered, record)
+			continue
+		}
+		metadata, err := mapField(obj, "metadata", string(record.Key))
+		if err != nil {
+			return nil, err
+		}
+		labels, err := mapField(metadata, "labels", string(record.Key)+" metadata")
+		if err != nil {
+			return nil, err
+		}
+		family := stringValue(labels["ipaddress.kubernetes.io/ip-family"])
+		ip, keep := desired[family]
+		if !keep {
+			continue
+		}
+		delete(desired, family)
+		metadata["name"] = ip.String()
+		labels["ipaddress.kubernetes.io/ip-family"] = ipFamily(ip)
+		record.Key = []byte("/registry/ipaddresses/" + ip.String())
+		encoded, err := json.Marshal(obj)
+		if err != nil {
+			return nil, fmt.Errorf("encode %s: %w", record.Key, err)
+		}
+		record.Value = encoded
+		filtered = append(filtered, record)
+	}
+	for parent, desired := range desiredAllocations {
+		if len(desired) != 0 {
+			return nil, fmt.Errorf("seed Service %s has no matching IPAddress allocation for %v", parent, desired)
+		}
+	}
+	return filtered, nil
+}
+
+// remapSeededServiceIPs maps seeded service addresses to the same offsets in network.
+func remapSeededServiceIPs(spec map[string]any, network clusterconfig.ServiceNetwork, key string) ([]netip.Addr, error) {
+	values, ok := spec["clusterIPs"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("record at %s has malformed spec.clusterIPs", key)
+	}
+	var out []netip.Addr
+	for _, value := range values {
+		ip, err := netip.ParseAddr(stringValue(value))
+		if err != nil {
+			return nil, fmt.Errorf("record at %s has invalid cluster IP %q", key, value)
+		}
+		defaultCIDR := "fdc6::/108"
+		if ip.Is4() {
+			defaultCIDR = "198.18.0.0/15"
+		}
+		defaultPrefix := netip.MustParsePrefix(defaultCIDR)
+		if !defaultPrefix.Contains(ip) {
+			return nil, fmt.Errorf("seeded Service %s IP %s is outside the default service CIDR %s", key, ip, defaultCIDR)
+		}
+		offset := 0
+		for candidate := defaultPrefix.Addr(); candidate != ip; candidate = candidate.Next() {
+			offset++
+		}
+		for _, cidr := range network.CIDRs {
+			prefix := netip.MustParsePrefix(cidr)
+			if prefix.Addr().Is4() != ip.Is4() {
+				continue
+			}
+			mapped := prefix.Addr()
+			for range offset {
+				mapped = mapped.Next()
+			}
+			if !prefix.Contains(mapped) {
+				return nil, fmt.Errorf("seeded Service %s offset +%d does not fit service CIDR %s", key, offset, cidr)
+			}
+			out = append(out, mapped)
+		}
+	}
+	return out, nil
+}
+
+// setServiceIPs sets the Kubernetes Service address and family fields in spec.
+func setServiceIPs(spec map[string]any, ips []netip.Addr, policy string) {
+	values, families := make([]any, len(ips)), make([]any, len(ips))
+	for i, ip := range ips {
+		values[i] = ip.String()
+		families[i] = ipFamily(ip)
+	}
+	spec["clusterIP"] = values[0]
+	spec["clusterIPs"] = values
+	spec["ipFamilies"] = families
+	spec["ipFamilyPolicy"] = policy
+}
+
+// ipFamily returns the Kubernetes name for the address family of ip.
+func ipFamily(ip netip.Addr) string {
+	if ip.Is4() {
+		return "IPv4"
+	}
+	return "IPv6"
+}
+
+// ipAddressParent returns the namespace/name identity referenced by an IPAddress record.
+func ipAddressParent(obj map[string]any, key string) (string, error) {
+	spec, err := mapField(obj, "spec", key)
+	if err != nil {
+		return "", err
+	}
+	parent, err := mapField(spec, "parentRef", key+" spec")
+	if err != nil {
+		return "", err
+	}
+	return stringValue(parent["namespace"]) + "/" + stringValue(parent["name"]), nil
+}
+
+// applyNetworkValues updates network settings in platform-components values.
+func applyNetworkValues(values map[string]any, network clusterconfig.ServiceNetwork) error {
+	platform, err := mapField(values, "platform", "platform-components values")
+	if err != nil {
+		return err
+	}
+	components, err := mapField(platform, "components", "platform values")
+	if err != nil {
+		return err
+	}
+	componentValues, err := mapField(components, "values", "platform.components")
+	if err != nil {
+		return err
+	}
+	coredns, err := mapField(componentValues, "coredns", "platform.components.values")
+	if err != nil {
+		return err
+	}
+	corednsValues, err := mapField(coredns, "coredns", "coredns component values")
+	if err != nil {
+		return err
+	}
+	service, err := mapField(corednsValues, "service", "coredns values")
+	if err != nil {
+		return err
+	}
+	setServiceIPs(service, network.CoreDNS, serviceFamilyPolicy(network.CoreDNS))
+	return nil
+}
+
+// serviceFamilyPolicy returns the Kubernetes family policy appropriate for ips.
+func serviceFamilyPolicy(ips []netip.Addr) string {
+	if len(ips) == 1 {
+		return "SingleStack"
+	}
+	return "PreferDualStack"
 }
 
 // mergeValuesFile merges a YAML/JSON values file over dst.
@@ -292,6 +569,20 @@ func ensureMap(parent map[string]any, key string) map[string]any {
 	child := map[string]any{}
 	parent[key] = child
 	return child
+}
+
+// mapField returns a required object field with a contextual malformed-field error.
+func mapField(parent map[string]any, key, context string) (map[string]any, error) {
+	value, exists := parent[key]
+	if !exists {
+		value = map[string]any{}
+		parent[key] = value
+	}
+	child, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s has malformed %s", context, key)
+	}
+	return child, nil
 }
 
 // deepMerge recursively merges src into dst, preserving existing nested maps

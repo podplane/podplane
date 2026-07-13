@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/clusterspec"
@@ -41,6 +42,10 @@ func (t vmTarget) dataName() string {
 
 // GenerateCluster renders managed Terraform files for a cluster config path.
 func GenerateCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts ClusterOptions) ([]File, error) {
+	network, err := clusterconfig.ServiceNetworkFromCIDRs(cfg.Cluster.Kubernetes.ServiceCIDR)
+	if err != nil {
+		return nil, err
+	}
 	if err := clusterconfig.Validate(cfg); err != nil {
 		return nil, err
 	}
@@ -48,7 +53,7 @@ func GenerateCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts C
 	if provider.Kind != "aws" {
 		return nil, fmt.Errorf("cluster provider %q is not supported", provider.Kind)
 	}
-	return renderAWSCluster(configPath, cfg, provider, opts), nil
+	return renderAWSCluster(configPath, cfg, provider, opts, network), nil
 }
 
 // WriteCluster writes managed Terraform files for a cluster config path.
@@ -65,7 +70,7 @@ func WriteCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts Clus
 }
 
 // renderAWSCluster renders the AWS cluster Terraform files.
-func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provider, opts ClusterOptions) []File {
+func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provider, opts ClusterOptions, serviceNetwork clusterconfig.ServiceNetwork) []File {
 	var mainDoc hclDocument
 	var bucketsDoc hclDocument
 	var rolesDoc hclDocument
@@ -156,11 +161,11 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		{"oidc_issuer_url", "OIDC issuer; existing VMs are reconfigured.", "string", str(cfg.Cluster.OIDC.IssuerURL)},
 		{"oidc_signing_algs", "OIDC signing algorithms accepted by kube-apiserver; existing VMs are reconfigured. vmconfig defaults to RS256 when unset.", "list(string)", oidcSigningAlgsDefault},
 		{"kubernetes_api_hostname", "Kubernetes API hostname; existing VMs are reconfigured.", "string", str(resolvedAPIHostname(cfg))},
-		{"kubernetes_api_port", "Kubernetes API port; existing VMs are reconfigured.", "number", num(resolvedAPIPort(cfg))},
+		{"kubernetes_api_port", "External Kubernetes API port used by clients; kube-apiserver listens internally on 6443.", "number", num(resolvedAPIPort(cfg))},
 		{"kubernetes_cluster_cidr", "Pod CIDRs for control-plane services. Existing VMs are reconfigured, but Podplane does not migrate existing Pods, node CIDR allocations, CNI state, routes, or other networking state.", "list(string)", stringValueList(cfg.Cluster.Kubernetes.ClusterCIDR)},
-		{"kubernetes_service_cidr", "Default Service CIDRs for control-plane services. Existing VMs are reconfigured, but Podplane does not migrate existing Services or other networking state; additional ServiceCIDR resources are separate.", "list(string)", stringValueList(cfg.Cluster.Kubernetes.ServiceCIDR)},
 		{"kubernetes_node_cidr_mask_size_ipv4", "IPv4 Pod CIDR prefix for new node allocations. Existing Node.spec.podCIDRs and CNI state are not resized or migrated; old allocations consume corresponding blocks in the new allocation grid.", "number", expr("null")},
 		{"kubernetes_node_cidr_mask_size_ipv6", "IPv6 Pod CIDR prefix for new node allocations. Existing Node.spec.podCIDRs and CNI state are not resized or migrated; old allocations consume corresponding blocks in the new allocation grid.", "number", expr("null")},
+		{"kubernetes_service_cidr", "Default Service CIDRs for control-plane services. Existing VMs are reconfigured, but Podplane does not migrate existing Services or other networking state; additional ServiceCIDR resources are separate.", "list(string)", stringValueList(serviceNetwork.CIDRs)},
 		{"registry_hostname", "Registry hostname; existing VMs are reconfigured when set.", "string", registryHostnameDefault},
 		{"ssh_authorized_keys", "SSH login keys; existing VMs are reconfigured when set.", "string", expr("null")},
 		{"kube_api_etcd_servers", "etcd endpoints; existing VMs are reconfigured when set.", "string", expr("null")},
@@ -241,8 +246,12 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	locals.Body.Attr("aws_region", expr("data.aws_region.current.region"))
 	locals.Body.Attr("netsy_bucket_name", str("${local.cluster_id}-${local.aws_account_id}-netsy"))
 	locals.Body.Attr("registry_bucket_name", str("${local.cluster_id}-${local.aws_account_id}-registry"))
-	locals.Body.Attr("mutable_env", mutableEnvValue())
-	locals.Body.Attr("certificates", nstanceCertificatesValue())
+	locals.Body.Attr("mutable_env", mutableEnvValue(serviceNetwork))
+	apiServiceIPs := make([]string, len(serviceNetwork.API))
+	for i, ip := range serviceNetwork.API {
+		apiServiceIPs[i] = ip.String()
+	}
+	locals.Body.Attr("certificates", nstanceCertificatesValue(apiServiceIPs))
 	locals.Body.Attr("templates", templatesValue(cfg))
 	mainDoc.AddBlock(locals)
 
@@ -314,8 +323,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		if provider.Profile != "" {
 			seed.Body.Attr("profile", str(provider.Profile))
 		}
-		seed.Body.Attr("depends_on", list(expr("aws_s3_bucket.podplane_cluster[\"netsy\"]")))
-		bucketsDoc.AddBlock(seed)
+		mainDoc.AddBlock(seed)
 	}
 
 	bucket := block("output", "nstance_bucket")
@@ -487,15 +495,20 @@ func addPodplaneKNCPolicy(doc *hclDocument, accountName string) {
 
 // mutableEnvValue returns the Terraform expression for vmconfig mutable.env
 // values generated from Terraform-managed resources and generated variables.
-func mutableEnvValue() hclExpression {
+func mutableEnvValue(network clusterconfig.ServiceNetwork) hclExpression {
+	dns := make([]string, len(network.CoreDNS))
+	for i := range network.CoreDNS {
+		dns[i] = network.CoreDNS[i].String()
+	}
 	return expr(`{ for key, value in {
   TELEMETRY_S3_REGION = local.aws_region
   OIDC_ISSUER = var.oidc_issuer_url
   OIDC_SIGNING_ALGS = var.oidc_signing_algs == null ? null : join(",", var.oidc_signing_algs)
   KUBE_API_PUBLIC_HOSTNAME = var.kubernetes_api_hostname
-  KUBE_API_PORT = tostring(var.kubernetes_api_port)
+  KUBE_SERVICE_ACCOUNT_ISSUER = "https://${var.kubernetes_api_hostname}:${var.kubernetes_api_port}"
   KUBE_CLUSTER_CIDR = join(",", var.kubernetes_cluster_cidr)
   KUBE_SERVICE_CLUSTER_IP_RANGE = join(",", var.kubernetes_service_cidr)
+  KUBE_CLUSTER_DNS = ` + quote(strings.Join(dns, ",")) + `
   NETSY_BUCKET = aws_s3_bucket.podplane_cluster["netsy"].bucket
   NETSY_REGION = local.aws_region
   NETSY_ASSUME_ROLE = aws_iam_role.podplane_cluster["netsy"].arn
@@ -720,13 +733,17 @@ func requiredVMTargets(cfg *clusterconfig.ClusterConfig) []vmTarget {
 
 // nstanceCertificatesValue returns the certificate templates required by the
 // vmconfig runtime files generated for Nstance-managed Podplane VMs.
-func nstanceCertificatesValue() hclObject {
+func nstanceCertificatesValue(apiServiceIPs []string) hclObject {
 	fields := []hclObjectField{}
-	for _, cert := range clusterspec.Certificates("{{ .Cluster.ID }}") {
+	for _, cert := range clusterspec.Certificates("{{ .Cluster.ID }}", "", apiServiceIPs) {
+		dns := stringValueList(cert.DNS)
+		if cert.Name == "kube-apiserver.server" {
+			dns = append(dns, expr("var.kubernetes_api_hostname"))
+		}
 		certFields := []hclObjectField{
 			identField("kind", str(cert.Kind)),
 			identField("cn", str(cert.CN)),
-			identField("dns", stringValueList(cert.DNS)),
+			identField("dns", dns),
 			identField("ip", stringValueList(cert.IP)),
 			identField("ttl", num(cert.TTL)),
 		}

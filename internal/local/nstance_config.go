@@ -17,6 +17,7 @@ import (
 
 	"github.com/nstance-dev/nstance/pkg/fakeserver"
 
+	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/clusterspec"
 )
 
@@ -60,11 +61,21 @@ func configureLocalNstance(ctx context.Context, dataDir, clusterID, instanceID, 
 	}
 	nstanceCACert := base64.StdEncoding.EncodeToString(nstanceCACertPEM)
 
+	// Include the default Kubernetes API Service IPs in the API server certificate.
+	serviceNetwork, err := clusterconfig.ServiceNetworkFromCIDRs(nil)
+	if err != nil {
+		return nstanceAgentUserData{}, fmt.Errorf("derive local service network: %w", err)
+	}
+	apiServiceIPs := make([]string, len(serviceNetwork.API))
+	for i, ip := range serviceNetwork.API {
+		apiServiceIPs[i] = ip.String()
+	}
+
 	// Local maps each Podplane cluster to one fake Nstance tenant. Static files
 	// here use normal Nstance string-file semantics. Configure the tenant
 	// first so ConfigureInstance can embed the tenant's runtime config hash in
 	// the registration nonce, matching real Nstance server behavior.
-	tenantConfig := podplaneRuntimeConfig(clusterID, map[string]string{
+	tenantConfig := podplaneRuntimeConfig(clusterID, LocalKubernetesAPIHostname(clusterID), apiServiceIPs, map[string]string{
 		"mutable.env":          mutableEnv,
 		"ca.pub":               "",
 		"ca.crt":               string(nstanceCACertPEM),
@@ -185,13 +196,13 @@ func serviceAccountKeyPairPEM() (publicPEM, privatePEM string, err error) {
 // podplaneRuntimeConfig builds the Nstance runtime config for Podplane's local
 // VM profile, including the certificate files that nstance-agent must request
 // and the static files that nstance-agent should receive.
-func podplaneRuntimeConfig(clusterID string, staticFiles map[string]string) fakeserver.TenantConfig {
+func podplaneRuntimeConfig(clusterID, apiHostname string, apiServiceIPs []string, staticFiles map[string]string) fakeserver.TenantConfig {
 	files := map[string]fakeserver.FileConfig{}
 	for name, content := range staticFiles {
 		files[name] = fakeserver.FileConfig{Kind: "string", Template: content}
 	}
 	certs := map[string]fakeserver.CertificateConfig{}
-	for _, cert := range clusterspec.Certificates("{{ .Vars.NetsyClusterID }}") {
+	for _, cert := range clusterspec.Certificates("{{ .Vars.NetsyClusterID }}", apiHostname, apiServiceIPs) {
 		certCN := cert.CN
 		certs[cert.Name] = fakeserver.CertificateConfig{
 			Kind:         cert.Kind,

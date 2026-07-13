@@ -21,19 +21,13 @@ variable "kubernetes_api_hostname" {
 }
 
 variable "kubernetes_api_port" {
-  description = "Kubernetes API port; existing VMs are reconfigured."
+  description = "External Kubernetes API port used by clients; kube-apiserver listens internally on 6443."
   type = number
-  default = 6443
+  default = 7443
 }
 
 variable "kubernetes_cluster_cidr" {
   description = "Pod CIDRs for control-plane services. Existing VMs are reconfigured, but Podplane does not migrate existing Pods, node CIDR allocations, CNI state, routes, or other networking state."
-  type = list(string)
-  default = []
-}
-
-variable "kubernetes_service_cidr" {
-  description = "Default Service CIDRs for control-plane services. Existing VMs are reconfigured, but Podplane does not migrate existing Services or other networking state; additional ServiceCIDR resources are separate."
   type = list(string)
   default = []
 }
@@ -58,6 +52,12 @@ variable "kubernetes_node_cidr_mask_size_ipv6" {
     condition = var.kubernetes_node_cidr_mask_size_ipv6 == null ? true : (var.kubernetes_node_cidr_mask_size_ipv6 >= 0 && var.kubernetes_node_cidr_mask_size_ipv6 <= 128 && floor(var.kubernetes_node_cidr_mask_size_ipv6) == var.kubernetes_node_cidr_mask_size_ipv6)
     error_message = "kubernetes_node_cidr_mask_size_ipv6 must be a whole number between 0 and 128."
   }
+}
+
+variable "kubernetes_service_cidr" {
+  description = "Default Service CIDRs for control-plane services. Existing VMs are reconfigured, but Podplane does not migrate existing Services or other networking state; additional ServiceCIDR resources are separate."
+  type = list(string)
+  default = ["198.18.0.0/15", "fdc6::/108"]
 }
 
 variable "registry_hostname" {

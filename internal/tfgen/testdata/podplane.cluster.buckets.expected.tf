@@ -29,10 +29,3 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "podplane_cluster"
     }
   }
 }
-
-resource "podplane_netsy_seed_s3" "cluster" {
-  cluster_config_path = "${path.module}/podplane.cluster.jsonc"
-  bucket = aws_s3_bucket.podplane_cluster["netsy"].bucket
-  region = local.aws_region
-  depends_on = [aws_s3_bucket.podplane_cluster["netsy"]]
-}

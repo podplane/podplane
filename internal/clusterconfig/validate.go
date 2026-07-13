@@ -147,6 +147,9 @@ func Validate(cfg *ClusterConfig) error {
 	if cfg.Cluster.OIDC.IssuerURL == "" {
 		return fmt.Errorf("cluster.oidc.issuer_url is required")
 	}
+	if _, err := ServiceNetworkFromCIDRs(cfg.Cluster.Kubernetes.ServiceCIDR); err != nil {
+		return fmt.Errorf("cluster.kubernetes.service_cidr: %w", err)
+	}
 	if cfg.Cluster.Registry.Hostname == "" && cfg.Cluster.Components.Registry != nil && cfg.Cluster.Components.Registry.Mirror.Enabled && cfg.Cluster.Components.Registry.Mirror.Hostname == "" {
 		return fmt.Errorf("cluster.registry.hostname is required when components.registry.mirror.enabled is true without components.registry.mirror.hostname")
 	}

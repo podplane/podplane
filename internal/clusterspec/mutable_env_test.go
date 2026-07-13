@@ -36,6 +36,7 @@ func TestMutableEnvRejectsInvalidValues(t *testing.T) {
 		{"TELEMETRY_LOG_CLOUDINIT": "maybe", "REGISTRY_HOSTNAME": "registry.example.com"},
 		{"TELEMETRY_LOG_SERVICES": "kubelet,ssh.service", "REGISTRY_HOSTNAME": "registry.example.com"},
 		{"OIDC_CA_CERT": "line1\nline2", "REGISTRY_HOSTNAME": "registry.example.com"},
+		{"KUBE_CLUSTER_DNS": "198.19.255.254,not-an-ip", "REGISTRY_HOSTNAME": "registry.example.com"},
 		{"KUBE_NODE_CIDR_MASK_SIZE_IPV4": "33", "REGISTRY_HOSTNAME": "registry.example.com"},
 		{"KUBE_NODE_CIDR_MASK_SIZE_IPV6": "-1", "REGISTRY_HOSTNAME": "registry.example.com"},
 	}
@@ -70,6 +71,9 @@ func TestMutableEnvAppliesKubernetesCIDRDefaults(t *testing.T) {
 	}
 	if env["KUBE_SERVICE_CLUSTER_IP_RANGE"] != "198.18.0.0/15,fdc6::/108" {
 		t.Fatalf("KUBE_SERVICE_CLUSTER_IP_RANGE = %q", env["KUBE_SERVICE_CLUSTER_IP_RANGE"])
+	}
+	if env["KUBE_CLUSTER_DNS"] != "198.19.255.254,fdc6::ffff" {
+		t.Fatalf("KUBE_CLUSTER_DNS = %q", env["KUBE_CLUSTER_DNS"])
 	}
 	if env["KUBE_NODE_CIDR_MASK_SIZE_IPV4"] != "24" || env["KUBE_NODE_CIDR_MASK_SIZE_IPV6"] != "64" {
 		t.Fatalf("node CIDR mask defaults = %q/%q", env["KUBE_NODE_CIDR_MASK_SIZE_IPV4"], env["KUBE_NODE_CIDR_MASK_SIZE_IPV6"])

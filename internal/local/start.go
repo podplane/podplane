@@ -333,7 +333,8 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 		"OIDC_ISSUER":                    oidcIssuerURL,
 		"OIDC_CA_CERT":                   encodedCACert,
 		"KUBE_LOG_LEVEL":                 "5",
-		"KUBE_API_PUBLIC_HOSTNAME":       "localhost",
+		"KUBE_API_PUBLIC_HOSTNAME":       LocalKubernetesAPIHostname(clusterID),
+		"KUBE_SERVICE_ACCOUNT_ISSUER":    fmt.Sprintf("https://%s:%d", LocalKubernetesAPIHostname(clusterID), apiPort),
 		"KUBE_API_ETCD_SERVERS":          "https://127.0.0.1:2378",
 		"KUBE_CLUSTER_CIDR":              "100.64.0.0/10,fd64::/48",
 		"KUBE_SERVICE_CLUSTER_IP_RANGE":  "198.18.0.0/15,fdc6::/108",
@@ -602,8 +603,7 @@ func (m *Local) SeedConfig() (clusterconfig.Seed, error) {
 
 // WriteLocalClusterConfig writes a JSONC cluster config to
 // <dataDir>/local/<clusterID>/cluster.jsonc and returns its absolute path. It
-// describes how the host CLI can reach the local cluster's OIDC issuer and
-// (eventually) Kubernetes API.
+// records the local cluster's externally reachable OIDC and Kubernetes endpoints.
 func (m *Local) WriteLocalClusterConfig(clusterID, oidcIssuerURL, oidcCACertPath, apiHostname string, apiPort int, seed clusterconfig.Seed, componentsSource *clusterconfig.ComponentsSource) (string, error) {
 	dir := ClusterDataDir(m.dataDir, clusterID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

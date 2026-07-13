@@ -49,6 +49,77 @@ func TestInterpolatePlatformComponentsMergesValues(t *testing.T) {
 	}
 }
 
+// TestInterpolateKubernetesIPv4Only verifies conversion of a dual-stack seed to IPv4.
+func TestInterpolateKubernetesIPv4Only(t *testing.T) {
+	network, err := clusterconfig.ServiceNetworkFromCIDRs([]string{"10.96.0.0/12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := []*datafile.Record{
+		{Key: []byte(serviceCIDRKey), Value: []byte(`{"kind":"ServiceCIDR","spec":{"cidrs":["198.18.0.0/15","fdc6::/108"]}}`)},
+		{Key: []byte(apiServiceKey), Value: []byte(`{"kind":"Service","metadata":{"name":"kubernetes","namespace":"default"},"spec":{"clusterIP":"198.18.0.1","clusterIPs":["198.18.0.1","fdc6::1"],"ipFamilies":["IPv4","IPv6"],"ipFamilyPolicy":"PreferDualStack","ports":[{"port":443,"targetPort":6443}]}}`)},
+		{Key: []byte(coreDNSServiceKey), Value: []byte(`{"kind":"Service","metadata":{"name":"platform-coredns","namespace":"platform-coredns"},"spec":{"clusterIP":"198.19.255.254","clusterIPs":["198.19.255.254","fdc6::ffff"],"ipFamilies":["IPv4","IPv6"],"ipFamilyPolicy":"PreferDualStack"}}`)},
+		{Key: []byte("/registry/ipaddresses/198.18.0.15"), Value: []byte(`{"kind":"IPAddress","metadata":{"name":"198.18.0.15","labels":{"ipaddress.kubernetes.io/ip-family":"IPv4"}},"spec":{"parentRef":{"namespace":"platform-example","name":"example"}}}`)},
+		{Key: []byte("/registry/services/specs/platform-example/example"), Value: []byte(`{"kind":"Service","metadata":{"name":"example","namespace":"platform-example"},"spec":{"clusterIP":"198.18.0.15","clusterIPs":["198.18.0.15"],"ipFamilies":["IPv4","IPv6"],"ipFamilyPolicy":"PreferDualStack"}}`)},
+		{Key: []byte("/registry/ipaddresses/198.18.0.1"), Value: []byte(`{"kind":"IPAddress","metadata":{"name":"198.18.0.1","labels":{"ipaddress.kubernetes.io/ip-family":"IPv4"}},"spec":{"parentRef":{"namespace":"default","name":"kubernetes"}}}`)},
+		{Key: []byte("/registry/ipaddresses/198.19.255.254"), Value: []byte(`{"kind":"IPAddress","metadata":{"name":"198.19.255.254","labels":{"ipaddress.kubernetes.io/ip-family":"IPv4"}},"spec":{"parentRef":{"namespace":"platform-coredns","name":"platform-coredns"}}}`)},
+		{Key: []byte("/registry/ipaddresses/fdc6::ffff"), Value: []byte(`{"kind":"IPAddress","metadata":{"name":"fdc6::ffff","labels":{"ipaddress.kubernetes.io/ip-family":"IPv6"}},"spec":{"parentRef":{"namespace":"platform-coredns","name":"platform-coredns"}}}`)},
+		{Key: []byte(coreDNSHelmReleaseKey), Value: []byte(`{"kind":"HelmRelease","spec":{"values":{"coredns":{}}}}`)},
+	}
+	records, err = interpolateKubernetes(records, network)
+	if err != nil {
+		t.Fatalf("interpolateKubernetes error = %v", err)
+	}
+
+	objects := map[string]map[string]any{}
+	for _, record := range records {
+		var obj map[string]any
+		if err := json.Unmarshal(record.Value, &obj); err != nil {
+			t.Fatal(err)
+		}
+		objects[string(record.Key)] = obj
+	}
+	serviceCIDRs := objects[serviceCIDRKey]["spec"].(map[string]any)["cidrs"].([]any)
+	if len(serviceCIDRs) != 1 || serviceCIDRs[0] != "10.96.0.0/12" {
+		t.Fatalf("ServiceCIDR cidrs = %#v", serviceCIDRs)
+	}
+	apiSpec := objects[apiServiceKey]["spec"].(map[string]any)
+	if apiSpec["clusterIP"] != "10.96.0.1" || apiSpec["ipFamilyPolicy"] != "SingleStack" {
+		t.Fatalf("API Service spec = %#v", apiSpec)
+	}
+	dnsSpec := objects[coreDNSServiceKey]["spec"].(map[string]any)
+	if dnsSpec["clusterIP"] != "10.111.255.254" || len(dnsSpec["clusterIPs"].([]any)) != 1 {
+		t.Fatalf("CoreDNS Service spec = %#v", dnsSpec)
+	}
+	exampleSpec := objects["/registry/services/specs/platform-example/example"]["spec"].(map[string]any)
+	if exampleSpec["clusterIP"] != "10.96.0.15" || len(exampleSpec["ipFamilies"].([]any)) != 1 {
+		t.Fatalf("example Service spec = %#v", exampleSpec)
+	}
+	for _, key := range []string{"/registry/ipaddresses/10.96.0.1", "/registry/ipaddresses/10.111.255.254", "/registry/ipaddresses/10.96.0.15"} {
+		if objects[key] == nil {
+			t.Fatalf("missing allocation record %s", key)
+		}
+	}
+	if len(records) != 8 {
+		t.Fatalf("len(records) = %d, want 8 after stale IPv6 allocation removal", len(records))
+	}
+}
+
+// TestInterpolateKubernetesRejectsInvalidServiceIP verifies invalid snapshots fail loudly.
+func TestInterpolateKubernetesRejectsInvalidServiceIP(t *testing.T) {
+	network, err := clusterconfig.ServiceNetworkFromCIDRs([]string{"10.96.0.0/12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := []*datafile.Record{
+		{Key: []byte(serviceCIDRKey), Value: []byte(`{"kind":"ServiceCIDR","spec":{"cidrs":["198.18.0.0/15"]}}`)},
+		{Key: []byte("/registry/services/specs/platform-example/example"), Value: []byte(`{"kind":"Service","metadata":{"name":"example","namespace":"platform-example"},"spec":{"clusterIPs":["10.0.0.1"]}}`)},
+	}
+	if _, err := interpolateKubernetes(records, network); err == nil {
+		t.Fatal("interpolateKubernetes succeeded with a Service IP outside the default service CIDR")
+	}
+}
+
 func TestInterpolateComponentsSourceUpdatesGitRepository(t *testing.T) {
 	records := []*datafile.Record{
 		{Key: []byte(platformComponentsHelmReleaseKey), Value: []byte(`{"kind":"HelmRelease","metadata":{"name":"ignored"}}`)},

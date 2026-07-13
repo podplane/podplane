@@ -167,7 +167,7 @@ The Podplane `.tf` configuration derives the following variables which can also 
 | `OIDC_ISSUER` | `var.oidc_issuer_url` |
 | `KUBE_API_PUBLIC_HOSTNAME` | `var.kubernetes_api_hostname` |
 | `KUBE_API_INTERNAL_LB_HOSTNAME` | Internal Kubernetes API load balancer hostname, when generated for worker nodes |
-| `KUBE_API_PORT` | `tostring(var.kubernetes_api_port)` |
+| `KUBE_SERVICE_ACCOUNT_ISSUER` | `https://<var.kubernetes_api_hostname>:<var.kubernetes_api_port>` |
 | `NETSY_BUCKET` | `aws_s3_bucket.podplane_cluster["netsy"].bucket` |
 | `NETSY_REGION` | `local.aws_region` |
 | `NETSY_ASSUME_ROLE` | `aws_iam_role.podplane_cluster["netsy"].arn` |

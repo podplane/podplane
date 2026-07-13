@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -155,13 +156,18 @@ func readFakeNstanceTenantState(t *testing.T, dataDir, tenantID string) map[stri
 	return tenant
 }
 
-func TestPodplaneRuntimeConfigIncludesInternalKubeAPISAN(t *testing.T) {
-	cfg := podplaneRuntimeConfig("cluster-a", nil)
+// TestPodplaneRuntimeConfigIncludesKubeAPISANs verifies public, internal, and Service addresses.
+func TestPodplaneRuntimeConfigIncludesKubeAPISANs(t *testing.T) {
+	cfg := podplaneRuntimeConfig("cluster-a", "cluster-a.k8s.localhost", []string{"198.18.0.1", "fdc6::1"}, nil)
 	cert := cfg.Certificates["kube-apiserver.server"]
-	for _, name := range cert.DNS {
-		if name == "kube-apiserver.podplane.internal" {
-			return
+	for _, want := range []string{"cluster-a.k8s.localhost", "kube-apiserver.podplane.internal"} {
+		if !slices.Contains(cert.DNS, want) {
+			t.Fatalf("kube-apiserver.server DNS SANs = %v, want %s", cert.DNS, want)
 		}
 	}
-	t.Fatalf("kube-apiserver.server DNS SANs = %v, want kube-apiserver.podplane.internal", cert.DNS)
+	for _, want := range []string{"198.18.0.1", "fdc6::1"} {
+		if !slices.Contains(cert.IP, want) {
+			t.Fatalf("kube-apiserver.server IP SANs = %v, want %s", cert.IP, want)
+		}
+	}
 }

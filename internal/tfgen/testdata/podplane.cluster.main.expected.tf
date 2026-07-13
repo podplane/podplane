@@ -43,9 +43,10 @@ locals {
     OIDC_ISSUER = var.oidc_issuer_url
     OIDC_SIGNING_ALGS = var.oidc_signing_algs == null ? null : join(",", var.oidc_signing_algs)
     KUBE_API_PUBLIC_HOSTNAME = var.kubernetes_api_hostname
-    KUBE_API_PORT = tostring(var.kubernetes_api_port)
+    KUBE_SERVICE_ACCOUNT_ISSUER = "https://${var.kubernetes_api_hostname}:${var.kubernetes_api_port}"
     KUBE_CLUSTER_CIDR = join(",", var.kubernetes_cluster_cidr)
     KUBE_SERVICE_CLUSTER_IP_RANGE = join(",", var.kubernetes_service_cidr)
+    KUBE_CLUSTER_DNS = "198.19.255.254,fdc6::ffff"
     NETSY_BUCKET = aws_s3_bucket.podplane_cluster["netsy"].bucket
     NETSY_REGION = local.aws_region
     NETSY_ASSUME_ROLE = aws_iam_role.podplane_cluster["netsy"].arn
@@ -81,7 +82,7 @@ locals {
     "containerd.client" = { kind = "client", cn = "containerd.client", dns = ["{{ .Instance.Hostname }}", "localhost"], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1"], ttl = 8760 }
     "front-proxy.client" = { kind = "client", cn = "front-proxy-client", dns = ["{{ .Instance.Hostname }}", "localhost"], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1"], ttl = 8760 }
     "kube-apiserver.client" = { kind = "client", cn = "kube-apiserver.client", dns = ["{{ .Instance.Hostname }}", "localhost"], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1"], ttl = 8760, organization = ["system:masters"], uri = ["netsy://{{ .Cluster.ID }}/client/kube-apiserver"] }
-    "kube-apiserver.server" = { kind = "server", cn = "kube-apiserver.server", dns = ["{{ .Instance.Hostname }}", "localhost", "kube-apiserver.podplane.internal"], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1", "198.18.0.1", "fdc6::1"], ttl = 8760 }
+    "kube-apiserver.server" = { kind = "server", cn = "kube-apiserver.server", dns = ["{{ .Instance.Hostname }}", "localhost", "kube-apiserver.podplane.internal", var.kubernetes_api_hostname], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1", "198.18.0.1", "fdc6::1"], ttl = 8760 }
     "kube-controller-manager.client" = { kind = "client", cn = "system:kube-controller-manager", dns = ["{{ .Instance.Hostname }}", "localhost"], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1"], ttl = 8760 }
     "kube-scheduler.client" = { kind = "client", cn = "system:kube-scheduler", dns = ["{{ .Instance.Hostname }}", "localhost"], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1"], ttl = 8760 }
     "kube2iam.client" = { kind = "client", cn = "kube2iam.client", dns = ["{{ .Instance.Hostname }}", "localhost"], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1"], ttl = 8760 }
@@ -148,4 +149,10 @@ module "shard_us_east_1a" {
       }
     }
   }
+}
+
+resource "podplane_netsy_seed_s3" "cluster" {
+  cluster_config_path = "${path.module}/podplane.cluster.jsonc"
+  bucket = aws_s3_bucket.podplane_cluster["netsy"].bucket
+  region = local.aws_region
 }

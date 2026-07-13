@@ -6,6 +6,7 @@ package clusterspec
 
 import (
 	"fmt"
+	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
@@ -13,6 +14,9 @@ import (
 
 // MutableEnv contains the variables delivered to vmconfig through mutable.env.
 type MutableEnv map[string]string
+
+// KubernetesAPISecurePort is the kube-apiserver port inside Podplane VMs.
+const KubernetesAPISecurePort = 6443
 
 // mutableEnvKeys defines the vmconfig mutable.env contract. Keep this in sync
 // with vmconfig's default mutable.env file.
@@ -34,11 +38,12 @@ var mutableEnvKeys = []string{
 	"KUBE_API_ETCD_SERVERS",
 	"KUBE_API_PUBLIC_HOSTNAME",
 	"KUBE_API_INTERNAL_LB_HOSTNAME",
-	"KUBE_API_PORT",
+	"KUBE_SERVICE_ACCOUNT_ISSUER",
 	"KUBE_CLUSTER_CIDR",
 	"KUBE_NODE_CIDR_MASK_SIZE_IPV4",
 	"KUBE_NODE_CIDR_MASK_SIZE_IPV6",
 	"KUBE_SERVICE_CLUSTER_IP_RANGE",
+	"KUBE_CLUSTER_DNS",
 	"KUBE_LOG_LEVEL",
 	"AWS_S3_USE_PATH_STYLE",
 	"NETSY_BUCKET",
@@ -91,11 +96,11 @@ func (e MutableEnv) Render() (string, error) {
 func (e MutableEnv) ApplyDefaults(clusterID string) {
 	defaults := map[string]string{
 		"KUBE_LOG_LEVEL":                "2",
-		"KUBE_API_PORT":                 "6443",
 		"KUBE_CLUSTER_CIDR":             "100.64.0.0/10,fd64::/48",
 		"KUBE_NODE_CIDR_MASK_SIZE_IPV4": "24",
 		"KUBE_NODE_CIDR_MASK_SIZE_IPV6": "64",
 		"KUBE_SERVICE_CLUSTER_IP_RANGE": "198.18.0.0/15,fdc6::/108",
+		"KUBE_CLUSTER_DNS":              "198.19.255.254,fdc6::ffff",
 		"OIDC_SIGNING_ALGS":             "RS256",
 		"TELEMETRY_ENABLED":             "false",
 		"TELEMETRY_LOG_CLOUDINIT":       "true",
@@ -130,9 +135,13 @@ func (e MutableEnv) Validate() error {
 	if _, err := strconv.ParseUint(e["KUBE_LOG_LEVEL"], 10, 64); err != nil {
 		return fmt.Errorf("KUBE_LOG_LEVEL must be a non-negative integer")
 	}
-	port, err := strconv.ParseUint(e["KUBE_API_PORT"], 10, 16)
-	if err != nil || port == 0 {
-		return fmt.Errorf("KUBE_API_PORT must be an integer between 1 and 65535")
+	for _, value := range strings.Split(e["KUBE_CLUSTER_DNS"], ",") {
+		if value == "" {
+			return fmt.Errorf("KUBE_CLUSTER_DNS must be a comma-separated list of IP addresses")
+		}
+		if _, err := netip.ParseAddr(value); err != nil {
+			return fmt.Errorf("KUBE_CLUSTER_DNS must be a comma-separated list of IP addresses")
+		}
 	}
 	for key, max := range map[string]uint64{
 		"KUBE_NODE_CIDR_MASK_SIZE_IPV4": 32,

@@ -301,7 +301,11 @@ func configureLocalKubectl(stashPath string, manager *local.Local, progress tui.
 	if err != nil {
 		return nil, fmt.Errorf("prepare local kubernetes api CA cert: %w", err)
 	}
-	if err := kubectl.ConfigureClusterAccess(stdout, cluster.Cluster.ID, cluster.ResolvedKubernetesAPIURL(), oidcserver.LocalSub, kubeAPICAPath, true); err != nil {
+	kubernetesAPIURL, err := manager.LocalKubernetesAPIURL()
+	if err != nil {
+		return nil, fmt.Errorf("derive local kubernetes api URL: %w", err)
+	}
+	if err := kubectl.ConfigureClusterAccess(stdout, cluster.Cluster.ID, kubernetesAPIURL, oidcserver.LocalSub, kubeAPICAPath, true); err != nil {
 		return nil, fmt.Errorf("configure kubectl: %w", err)
 	}
 	if progress != nil {

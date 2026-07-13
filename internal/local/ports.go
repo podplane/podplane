@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/podplane/podplane/internal/clusterspec"
 	"github.com/podplane/podplane/internal/vm"
 )
 
@@ -21,7 +22,7 @@ type localVMPortForward struct {
 // localVMPortForwards lists the host-to-guest TCP forwards used by local VMs.
 var localVMPortForwards = []localVMPortForward{
 	{SetPort: func(ports *portState, port int) { ports.SSH = port }, HostBindAddress: "127.0.0.1", DefaultHostPort: 2222, GuestPort: 22},
-	{SetPort: func(ports *portState, port int) { ports.KubernetesAPI = port }, HostBindAddress: "127.0.0.1", DefaultHostPort: 6443, GuestPort: 6443},
+	{SetPort: func(ports *portState, port int) { ports.KubernetesAPI = port }, HostBindAddress: "127.0.0.1", DefaultHostPort: clusterspec.KubernetesAPISecurePort, GuestPort: clusterspec.KubernetesAPISecurePort},
 	{SetPort: func(ports *portState, port int) { ports.TraefikDashboard = port }, HostBindAddress: "127.0.0.1", DefaultHostPort: 8081, GuestPort: 8080},
 	{SetPort: func(ports *portState, port int) { ports.Registry = port }, HostBindAddress: "127.0.0.1", DefaultHostPort: 5001, GuestPort: 5000},
 	{SetPort: func(ports *portState, port int) { ports.TraefikHTTPS = port }, HostBindAddress: "127.0.0.1", DefaultHostPort: 8443, GuestPort: 443},

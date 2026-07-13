@@ -116,7 +116,7 @@ func TestRender_Local_HasDebianPasswordLine(t *testing.T) {
 	if strings.Contains(out, "TELEMETRY_S3_ACCESS_KEY_ID=") || strings.Contains(out, "TELEMETRY_LOG_SERVICES=") || strings.Contains(out, "TELEMETRY_LOG_CLOUDINIT=") {
 		t.Errorf("did not expect telemetry vars in user-data.env; got:\n%s", out)
 	}
-	if strings.Contains(out, "OIDC_ISSUER='") || strings.Contains(out, "KUBE_API_PUBLIC_HOSTNAME='") || strings.Contains(out, "KUBE_API_PORT='") || strings.Contains(out, "NETSY_ENDPOINT='") || strings.Contains(out, "REGISTRY_SECRET_ACCESS_KEY='") || strings.Contains(out, "REGISTRY_ENABLED='") {
+	if strings.Contains(out, "OIDC_ISSUER='") || strings.Contains(out, "KUBE_API_PUBLIC_HOSTNAME='") || strings.Contains(out, "KUBE_SERVICE_ACCOUNT_ISSUER='") || strings.Contains(out, "NETSY_ENDPOINT='") || strings.Contains(out, "REGISTRY_SECRET_ACCESS_KEY='") || strings.Contains(out, "REGISTRY_ENABLED='") {
 		t.Errorf("did not expect oidc/kube/netsy/registry config in user-data.env; got:\n%s", out)
 	}
 	if strings.Contains(out, "NSTANCE_REGISTRATION_NONCE_JWT=") {

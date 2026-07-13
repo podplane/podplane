@@ -17,7 +17,12 @@ type Certificate struct {
 }
 
 // Certificates returns the certificate templates required by Podplane VMs.
-func Certificates(netsyClusterIDTemplate string) []Certificate {
+func Certificates(netsyClusterIDTemplate, apiHostname string, apiServiceIPs []string) []Certificate {
+	apiServerIPs := append(defaultIP(), apiServiceIPs...)
+	apiServerDNS := append(defaultDNS(), "kube-apiserver.podplane.internal")
+	if apiHostname != "" {
+		apiServerDNS = append(apiServerDNS, apiHostname)
+	}
 	return []Certificate{
 		clientCertificate("containerd.client"),
 		clientCertificateWithCN("front-proxy.client", "front-proxy-client"),
@@ -35,8 +40,8 @@ func Certificates(netsyClusterIDTemplate string) []Certificate {
 			Name: "kube-apiserver.server",
 			Kind: "server",
 			CN:   "kube-apiserver.server",
-			DNS:  []string{"{{ .Instance.Hostname }}", "localhost", "kube-apiserver.podplane.internal"},
-			IP:   []string{"{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1", "198.18.0.1", "fdc6::1"},
+			DNS:  apiServerDNS,
+			IP:   apiServerIPs,
 			TTL:  8760,
 		},
 		clientCertificateWithCN("kube-controller-manager.client", "system:kube-controller-manager"),
