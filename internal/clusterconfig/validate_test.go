@@ -6,6 +6,7 @@ package clusterconfig
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -33,6 +34,18 @@ func TestValidateComponentsRejectsEmptySourceSecretRefName(t *testing.T) {
 	err := ValidateComponents(Components{Source: &ComponentsSource{URL: "https://github.com/example/components.git", SecretRef: &ComponentsSourceSecretRef{}}})
 	if err == nil {
 		t.Fatal("ValidateComponents returned nil, want error")
+	}
+}
+
+func TestValidateSeedDigest(t *testing.T) {
+	if err := ValidateSeed(Seed{Name: "recommended", Digest: "sha512:" + strings.Repeat("a", 128)}); err != nil {
+		t.Fatalf("ValidateSeed returned error for valid digest: %v", err)
+	}
+	if err := ValidateSeed(Seed{Name: "recommended"}); err == nil {
+		t.Fatal("ValidateSeed returned nil without required digest")
+	}
+	if err := ValidateSeed(Seed{Name: "recommended", Digest: "sha512:invalid"}); err == nil {
+		t.Fatal("ValidateSeed returned nil for invalid digest")
 	}
 }
 

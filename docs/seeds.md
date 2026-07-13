@@ -23,7 +23,8 @@ The selected seed is recorded in `cluster.seed` in the cluster configuration fil
   "cluster": {
     "seed": {
       "name": "recommended", // recommended or minimal
-      "version": "v1.2.3-1"
+      "version": "v1.2.3-1",
+      "digest": "sha512:..."
     }
   }
 }
@@ -54,7 +55,7 @@ Published Podplane seed files live in the [podplane/seeds](https://github.com/po
 - a seeds manifest consumed by [podplane deps download](./cli-reference/deps-download.md) and the Terraform provider, referencing:
 - seed snapshot files such as `recommended.netsy` and `minimal.netsy` stored in the git repository for the given tag.
 
-The manifest records the available seed version and the seed files' locations, sizes, and digests. This lets generated cluster configs pin `cluster.seed.version`, and lets consumers fetch and verify the exact seed file intended for that cluster.
+The manifest records the available seed version and the seed files' locations, sizes, and digests. Generated cluster configs pin `cluster.seed.version` and `cluster.seed.digest`, and consumers verify the exact seed file before generating the Netsy bootstrap snapshot.
 
 ## Podplane Seed Generator
 

@@ -4,7 +4,13 @@
 
 package seeds
 
-import "testing"
+import (
+	"crypto/sha512"
+	"encoding/hex"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestParseNameDefaultsAndValidates(t *testing.T) {
 	cases := map[string]string{
@@ -34,5 +40,21 @@ func TestResolveSeedPathNoneSkips(t *testing.T) {
 	}
 	if path != "" {
 		t.Fatalf("ResolveSeedPath path = %q, want empty", path)
+	}
+}
+
+func TestVerifySeedFile(t *testing.T) {
+	contents := []byte("seed snapshot")
+	path := filepath.Join(t.TempDir(), "seed.netsy")
+	if err := os.WriteFile(path, contents, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	sum := sha512.Sum512(contents)
+	digest := "sha512:" + hex.EncodeToString(sum[:])
+	if err := VerifySeedFile(path, digest); err != nil {
+		t.Fatalf("VerifySeedFile returned error: %v", err)
+	}
+	if err := VerifySeedFile(path, "sha512:"+string(make([]byte, 128))); err == nil {
+		t.Fatal("VerifySeedFile returned nil for invalid digest")
 	}
 }

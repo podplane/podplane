@@ -24,7 +24,7 @@ func TestLocalStartSeedNameUsesExistingClusterSeed(t *testing.T) {
   "cluster": {
     "id": "default",
     "oidc": { "issuer_url": "https://oidc.localhost:4433/oidc" },
-    "seed": { "name": "minimal", "version": "v1" }
+    "seed": { "name": "minimal", "version": "v1", "digest": "sha512:00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" }
   }
 }`
 

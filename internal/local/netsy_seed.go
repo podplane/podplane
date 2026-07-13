@@ -45,6 +45,7 @@ func (m *Local) ensureInitialNetsySnapshot(clusterConfigPath, depsBaseURL, zotRe
 	seedPath, err := seeds.ResolveSeedPath(seeds.ResolveOptions{
 		Name:     seedName,
 		Version:  seed.Version,
+		Digest:   seed.Digest,
 		BaseURL:  depsBaseURL,
 		CacheDir: m.depsCacheDir,
 	})

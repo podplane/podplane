@@ -137,7 +137,7 @@ func TestEnsureInitialNetsySnapshotWritesSnapshot(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if err := m.ensureInitialNetsySnapshot(cfgPath, server.URL, "https://10.0.2.15:19443/s3/cache", clusterconfig.Seed{Name: seeds.Recommended, Version: testSeedVersion}); err != nil {
+	if err := m.ensureInitialNetsySnapshot(cfgPath, server.URL, "https://10.0.2.15:19443/s3/cache", clusterconfig.Seed{Name: seeds.Recommended, Version: testSeedVersion, Digest: fmt.Sprintf("sha512:%x", digest)}); err != nil {
 		t.Fatalf("ensureInitialNetsySnapshot: %v", err)
 	}
 	want := filepath.Join(localS3BucketDir(dir, localNetsyBucketName("dev")), "bootstrap.netsy")
@@ -212,7 +212,7 @@ func TestSeedConfigRejectsMissingConfig(t *testing.T) {
 func writeMinimalLocalClusterConfig(t *testing.T, dataDir, clusterID string) string {
 	t.Helper()
 	manager := newTestLocalManager(dataDir, clusterID)
-	path, err := manager.WriteLocalClusterConfig(clusterID, "https://oidc.localhost:1/oidc", "/tmp/ca.pem", LocalKubernetesAPIHostname(clusterID), 4433, clusterconfig.Seed{Name: seeds.Recommended, Version: testSeedVersion}, nil)
+	path, err := manager.WriteLocalClusterConfig(clusterID, "https://oidc.localhost:1/oidc", "/tmp/ca.pem", LocalKubernetesAPIHostname(clusterID), 4433, clusterconfig.Seed{Name: seeds.Recommended, Version: testSeedVersion, Digest: "sha512:" + strings.Repeat("0", 128)}, nil)
 	if err != nil {
 		t.Fatalf("WriteLocalClusterConfig: %v", err)
 	}

@@ -186,7 +186,7 @@ func TestWriteLocalClusterConfigUsesReservedKubernetesAPIHost(t *testing.T) {
 		URL: "https://github.com/podplane/components.git",
 		Ref: clusterconfig.ComponentsSourceRef{Tag: "v1.2.3"},
 	}
-	path, err := manager.WriteLocalClusterConfig("dev", "https://oidc.localhost:1234/oidc", "/tmp/oidc-ca.pem", LocalKubernetesAPIHostname("dev"), 4433, clusterconfig.Seed{Name: seeds.Recommended, Version: testSeedVersion}, componentsSource)
+	path, err := manager.WriteLocalClusterConfig("dev", "https://oidc.localhost:1234/oidc", "/tmp/oidc-ca.pem", LocalKubernetesAPIHostname("dev"), 4433, clusterconfig.Seed{Name: seeds.Recommended, Version: testSeedVersion, Digest: "sha512:" + strings.Repeat("0", 128)}, componentsSource)
 	if err != nil {
 		t.Fatalf("WriteLocalClusterConfig: %v", err)
 	}

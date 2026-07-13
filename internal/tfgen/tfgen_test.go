@@ -66,7 +66,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		Kubernetes: clusterconfig.Kubernetes{
 			APIPort: 7443,
 		},
-		Seed: clusterconfig.Seed{Name: "recommended", Version: "v1.0.0-1"},
+		Seed: clusterconfig.Seed{Name: "recommended", Version: "v1.0.0-1", Digest: "sha512:" + strings.Repeat("0", 128)},
 		Pools: map[string]clusterconfig.Pool{
 			"control-plane": {Arch: "arm64", InstanceType: "t4g.medium", Size: 1},
 		},

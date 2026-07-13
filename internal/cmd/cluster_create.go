@@ -70,6 +70,13 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				if cfg.Cluster.Seed.Name != "" && cfg.Cluster.Seed.Name != seeds.None {
+					snapshot, ok := seedManifest.Seeds.Snapshots[cfg.Cluster.Seed.Name]
+					if !ok {
+						return fmt.Errorf("seed snapshot %q was not found in seeds manifest", cfg.Cluster.Seed.Name)
+					}
+					cfg.Cluster.Seed.Digest = snapshot.Digest
+				}
 				path, err = infrafiles.ConfirmConfigPath(path, originDir, "cluster config and OpenTofu/Terraform", cfg.Cluster.ID)
 				if err != nil {
 					return err

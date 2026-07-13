@@ -82,6 +82,7 @@ type SecretsProvider struct {
 type Seed struct {
 	Name    string `json:"name,omitempty"`
 	Version string `json:"version,omitempty"`
+	Digest  string `json:"digest,omitempty"`
 }
 
 // Components describes optional platform-components configuration.

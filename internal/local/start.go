@@ -207,10 +207,19 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 		}
 		seed = clusterconfig.Seed{Name: seedName}
 		if seed.Name != seeds.None {
-			seed.Version, err = depsManager.CachedSeedsVersion()
-			if err != nil {
-				return "", fmt.Errorf("determine Podplane seed version: %w", err)
+			manifest, _, manifestErr := depsManager.ReadCachedSeedsManifest()
+			if manifestErr != nil {
+				return "", fmt.Errorf("read Podplane seeds manifest: %w", manifestErr)
 			}
+			if manifest == nil {
+				return "", fmt.Errorf("seeds manifest is not cached; run `podplane deps download`")
+			}
+			seed.Version = manifest.Seeds.Version
+			snapshot, ok := manifest.Seeds.Snapshots[seed.Name]
+			if !ok {
+				return "", fmt.Errorf("seed snapshot %q was not found in cached seeds manifest", seed.Name)
+			}
+			seed.Digest = snapshot.Digest
 		}
 	}
 	if m.instanceID == "" {
@@ -616,17 +625,25 @@ func (m *Local) WriteLocalClusterConfig(clusterID, oidcIssuerURL, oidcCACertPath
 	}
 	if seed.Name == seeds.None {
 		seed.Version = ""
+		seed.Digest = ""
 	} else if seed.Version == "" {
 		return "", fmt.Errorf("invalid cluster.seed.version: is required")
+	}
+	if err := clusterconfig.ValidateSeed(seed); err != nil {
+		return "", fmt.Errorf("invalid cluster.seed: %w", err)
 	}
 	seedBlock := `    "seed": {},
 `
 	if seed.Name != seeds.None {
+		digestField := ""
+		if seed.Digest != "" {
+			digestField = fmt.Sprintf(",\n      \"digest\": %q", seed.Digest)
+		}
 		seedBlock = fmt.Sprintf(`    "seed": {
       "name": %q,
-      "version": %q
+      "version": %q%s
     },
-`, seed.Name, seed.Version)
+`, seed.Name, seed.Version, digestField)
 	}
 	componentsSourceBlock := ""
 	if componentsSource != nil {

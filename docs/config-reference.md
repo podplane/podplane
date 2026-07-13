@@ -205,6 +205,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.registry.ingress.enabled` | Enables optional Docker-push-compatible registry ingress/token-service routing. Disabled by default; `podplane push` does not require ingress. |
 | `cluster.seed.name` | Podplane seed file to use when creating the Netsy bootstrap file - `recommended`, `minimal`, or `none`. Leave `cluster.seed` as an empty object to seed no platform-components state, leaving a bare cluster that must be bootstrapped manually. |
 | `cluster.seed.version` | Podplane seeds release version used for the selected seed file, e.g. `v1.2.3-1`. Generated configs pin this to the known available seed version. Omit inside an empty `cluster.seed` object. |
+| `cluster.seed.digest` | Expected SHA-512 digest of the selected seed snapshot. Generated configs pin this from the seeds manifest; seed resolution verifies the downloaded file before interpolation. |
 | `cluster.components.registry.mirror.enabled` | Render platform component image references through the configured registry mirror. Local clusters enable this automatically so seeded components pull from the VM-hosted registry backed by the local dependency cache. |
 | `cluster.components.registry.mirror.hostname` | Advanced shared-mirror hostname override. Defaults to `cluster.registry.hostname`. |
 | `cluster.components.registry.mirror.prefix` | Advanced mirror path-prefix override. Defaults to `mirror`; `/mirror/` cleans to `mirror`, and `/` or an empty string means no prefix. |

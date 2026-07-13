@@ -336,13 +336,23 @@
     "seed": {
       "type": "object",
       "additionalProperties": false,
+      "if": {
+        "properties": { "name": { "enum": ["recommended", "minimal"] } },
+        "required": ["name"]
+      },
+      "then": { "required": ["version", "digest"] },
       "properties": {
         "name": {
           "type": "string",
           "description": "Podplane seed to use when creating the initial Netsy snapshot.",
           "enum": ["", "recommended", "minimal", "none"]
         },
-        "version": { "type": "string", "description": "Seed version recorded when the cluster was created." }
+        "version": { "type": "string", "description": "Seed version recorded when the cluster was created." },
+        "digest": {
+          "type": "string",
+          "description": "Expected SHA-512 digest of the seed snapshot.",
+          "pattern": "^sha512:[0-9a-f]{128}$"
+        }
       }
     },
     "components": {

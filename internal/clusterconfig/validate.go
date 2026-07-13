@@ -40,6 +40,20 @@ func ValidateSeed(seed Seed) error {
 	default:
 		return fmt.Errorf("seed.name must be recommended, minimal, or none")
 	}
+	if seed.Name == "recommended" || seed.Name == "minimal" {
+		if seed.Digest == "" {
+			return fmt.Errorf("seed.digest is required")
+		}
+		algorithm, encoded, ok := strings.Cut(seed.Digest, ":")
+		if !ok || algorithm != "sha512" || len(encoded) != 128 {
+			return fmt.Errorf("seed.digest must be a sha512 digest in sha512:<hex> format")
+		}
+		for _, char := range encoded {
+			if !strings.ContainsRune("0123456789abcdef", char) {
+				return fmt.Errorf("seed.digest must be a sha512 digest in sha512:<hex> format")
+			}
+		}
+	}
 	return nil
 }
 
