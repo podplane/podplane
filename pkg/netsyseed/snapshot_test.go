@@ -309,6 +309,9 @@ func TestWriteSnapshotWritesBytes(t *testing.T) {
 		Components: clusterconfig.Components{Registry: &clusterconfig.ComponentsRegistry{
 			Mirror: clusterconfig.ComponentsRegistryMirror{Enabled: true, Hostname: "dev-registry.local"},
 		}},
+		Secrets: clusterconfig.Secrets{Providers: map[string]clusterconfig.SecretsProvider{
+			"local-fakevault": {Kind: "openbao", Address: "https://10.0.2.15:19443/vault/localdev"},
+		}},
 	}}
 	// Patch validation by re-marshalling and using a non-reserved ID for Load().
 	cfg.Cluster.ID = "localdev"
@@ -325,7 +328,7 @@ func TestWriteSnapshotWritesBytes(t *testing.T) {
 	// platform-components HelmRelease record at the expected key. Serve it
 	// over HTTP so loadSeedFile's URL path is exercised.
 	records := []*datafile.Record{
-		{Revision: 5, Key: []byte(platformComponentsHelmReleaseKey), Value: []byte(`{"apiVersion":"helm.toolkit.fluxcd.io/v2","kind":"HelmRelease","metadata":{"name":"platform-components","namespace":"platform-components"},"spec":{"values":{}}}`)},
+		{Revision: 5, Key: []byte(platformComponentsHelmReleaseKey), Value: []byte(`{"apiVersion":"helm.toolkit.fluxcd.io/v2","kind":"HelmRelease","metadata":{"name":"platform-components","namespace":"platform-components"},"spec":{"values":{"platform":{"components":{"values":{"podplane-operator":{"podplane":{"operator":{"config":{"cluster":{"oidc":{"issuerURL":"https://stale.example.com"}}}}}}}}}}}}`)},
 		{Revision: 6, Key: []byte("/registry/deployments/platform-flux/source-controller"), Value: []byte(`{"apiVersion":"apps/v1","kind":"Deployment","spec":{"template":{"spec":{"containers":[{"image":"ghcr.io/fluxcd/source-controller:v1.5.0"}]}}}}`)},
 	}
 	var buf bytes.Buffer
@@ -375,6 +378,11 @@ func TestWriteSnapshotWritesBytes(t *testing.T) {
 			mirror := components["imageMirror"].(map[string]any)
 			if mirror["enabled"] != true || mirror["hostname"] != "dev-registry.local" {
 				t.Fatalf("imageMirror = %#v, want enabled dev-registry.local", mirror)
+			}
+			operator := components["values"].(map[string]any)["podplane-operator"].(map[string]any)["podplane"].(map[string]any)["operator"].(map[string]any)
+			oidc := operator["config"].(map[string]any)["cluster"].(map[string]any)["oidc"].(map[string]any)
+			if got, want := oidc["issuerURL"], "https://oidc.localhost/oidc"; got != want {
+				t.Fatalf("seeded operator OIDC issuerURL = %v, want %v", got, want)
 			}
 			found = true
 		case "/registry/deployments/platform-flux/source-controller":

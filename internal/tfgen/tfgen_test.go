@@ -64,7 +64,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		Name: "Test Cluster",
 		OIDC: clusterconfig.OIDC{IssuerURL: "https://auth.example.com", SigningAlgs: []string{"RS256", "ES256"}},
 		Kubernetes: clusterconfig.Kubernetes{
-			APIPort: 7443,
+			APIPort: 6443,
 		},
 		Seed: clusterconfig.Seed{Name: "recommended", Version: "v1.0.0-1", Digest: "sha512:" + strings.Repeat("0", 128)},
 		Pools: map[string]clusterconfig.Pool{
@@ -84,7 +84,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 			},
 			LoadBalancer: clusterconfig.LoadBalancer{
 				Public:    true,
-				Listeners: []clusterconfig.Listener{{Port: 7443, Pool: "control-plane"}},
+				Listeners: []clusterconfig.Listener{{Port: 6443, Pool: "control-plane"}},
 			},
 		}},
 	}}
@@ -134,7 +134,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		`enable_ssm = var.enable_ssm`,
 		`content = base64encode(data.podplane_userdata.knc_arm64.content)`,
 		`vars = local.mutable_env`,
-		`"public-control-plane" = { ports = [7443], subnets = "public", public = true }`,
+		`"public-control-plane" = { ports = [6443], subnets = "public", public = true }`,
 		`load_balancers = ["public-control-plane"]`,
 		`REGISTRY_ASSUME_ROLE = aws_iam_role.podplane_cluster["registry-read-only"].arn`,
 		`output "registry_read_write_role_arn"`,

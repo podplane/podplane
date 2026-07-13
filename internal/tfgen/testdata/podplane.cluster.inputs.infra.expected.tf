@@ -37,7 +37,7 @@ locals {
     }
   }
   load_balancers = {
-    "public-control-plane" = { ports = [7443], subnets = "public", public = true }
+    "public-control-plane" = { ports = [6443], subnets = "public", public = true }
   }
 }
 

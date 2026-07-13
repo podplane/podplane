@@ -52,6 +52,12 @@ func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *tes
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ID:      "test-cluster",
 		Domains: []clusterconfig.Domain{{Zone: "internaltools.localhost", Provider: clusterconfig.DomainProvider{Kind: "local"}}},
+		OIDC: clusterconfig.OIDC{
+			IssuerURL:     "https://auth.example.com",
+			ClientID:      "operator-client",
+			UsernameClaim: "preferred_username",
+			GroupsClaim:   "roles",
+		},
 		Secrets: clusterconfig.Secrets{Providers: map[string]clusterconfig.SecretsProvider{
 			"aws-secrets-manager": {Kind: "aws", KeyPrefix: "shared-secrets", ObjectType: "secretsmanager"},
 			"hashicorp-vault":     {Kind: "vault", CACert: "-----BEGIN CERTIFICATE-----\nvault\n-----END CERTIFICATE-----"},
@@ -97,6 +103,17 @@ func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *tes
 	cluster := config["cluster"].(map[string]any)
 	if got, want := cluster["id"], "test-cluster"; got != want {
 		t.Fatalf("podplane-operator cluster id = %v, want %v", got, want)
+	}
+	oidc := cluster["oidc"].(map[string]any)
+	for key, want := range map[string]any{
+		"issuerURL":     "https://auth.example.com",
+		"clientID":      "operator-client",
+		"usernameClaim": "preferred_username",
+		"groupsClaim":   "roles",
+	} {
+		if got := oidc[key]; got != want {
+			t.Fatalf("podplane-operator oidc.%s = %v, want %v", key, got, want)
+		}
 	}
 	secrets := config["secrets"].(map[string]any)
 	providers := secrets["providers"].(map[string]any)

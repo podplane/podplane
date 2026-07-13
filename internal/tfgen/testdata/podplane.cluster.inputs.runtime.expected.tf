@@ -97,7 +97,7 @@ variable "kubernetes_api_hostname" {
 variable "kubernetes_api_port" {
   description = "External Kubernetes API port used by clients; kube-apiserver listens internally on 6443."
   type = number
-  default = 7443
+  default = 6443
 }
 
 variable "kubernetes_cluster_cidr" {

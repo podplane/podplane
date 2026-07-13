@@ -96,7 +96,7 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, opts buildP
 		componentValues["zot-registry"] = entry
 	}
 	applyProviderComponents(components, cfg.Cluster.Providers)
-	applySecretsComponents(components, cfg.Cluster.ID, cfg.Cluster.Secrets)
+	applySecretsComponents(components, cfg)
 	if len(cfg.Cluster.Domains) == 0 {
 		return values, nil
 	}
@@ -209,7 +209,8 @@ func applyProviderComponents(components map[string]any, providers []clusterconfi
 // applySecretsComponents enables Secrets Store CSI Driver, provider components,
 // and Podplane operator provider configuration required by configured Podplane
 // Secrets providers.
-func applySecretsComponents(components map[string]any, clusterID string, secrets clusterconfig.Secrets) {
+func applySecretsComponents(components map[string]any, cfg *clusterconfig.ClusterConfig) {
+	secrets := cfg.Cluster.Secrets
 	if len(secrets.Providers) == 0 {
 		return
 	}
@@ -224,7 +225,15 @@ func applySecretsComponents(components map[string]any, clusterID string, secrets
 		"podplane": map[string]any{
 			"operator": map[string]any{
 				"config": map[string]any{
-					"cluster": map[string]any{"id": clusterID},
+					"cluster": map[string]any{
+						"id": cfg.Cluster.ID,
+						"oidc": map[string]any{
+							"issuerURL":     cfg.Cluster.OIDC.IssuerURL,
+							"clientID":      cfg.ResolvedClientID(),
+							"usernameClaim": cfg.ResolvedUsernameClaim(),
+							"groupsClaim":   cfg.ResolvedGroupsClaim(),
+						},
+					},
 					"secrets": secretsValues(secrets),
 				},
 			},
