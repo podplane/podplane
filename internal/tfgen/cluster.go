@@ -810,27 +810,32 @@ func mutableEnvValue(network clusterconfig.ServiceNetwork) hclExpression {
 // subnetsValue converts provider zones into the network module subnets object.
 func subnetsValue(provider clusterconfig.Provider) hclObject {
 	type entry struct {
-		zone   string
-		subnet clusterconfig.Subnet
+		zone      string
+		subnet    clusterconfig.Subnet
+		v6CIDRNum int
 	}
 	roles := map[string][]entry{}
+	v6CIDRNum := 0
 	for _, zone := range sortedKeys(provider.Zones) {
 		for _, subnet := range provider.Zones[zone] {
 			role := subnet.ResolvedRole()
-			roles[role] = append(roles[role], entry{zone: zone, subnet: subnet})
+			roles[role] = append(roles[role], entry{zone: zone, subnet: subnet, v6CIDRNum: v6CIDRNum})
+			if subnet.V6CIDR == "auto" {
+				v6CIDRNum++
+			}
 		}
 	}
 	roleFields := []hclObjectField{}
 	for _, role := range sortedKeys(roles) {
-		byZone := map[string][]clusterconfig.Subnet{}
+		byZone := map[string][]entry{}
 		for _, e := range roles[role] {
-			byZone[e.zone] = append(byZone[e.zone], e.subnet)
+			byZone[e.zone] = append(byZone[e.zone], e)
 		}
 		zoneFields := []hclObjectField{}
 		for _, zone := range sortedKeys(byZone) {
 			subnets := make(hclList, 0, len(byZone[zone]))
-			for i, subnet := range byZone[zone] {
-				subnets = append(subnets, subnetValue(subnet, i))
+			for _, entry := range byZone[zone] {
+				subnets = append(subnets, subnetValue(entry.subnet, entry.v6CIDRNum))
 			}
 			zoneFields = append(zoneFields, field(zone, subnets))
 		}
@@ -840,7 +845,7 @@ func subnetsValue(provider clusterconfig.Provider) hclObject {
 }
 
 // subnetValue converts one subnet config into the network module subnet object.
-func subnetValue(subnet clusterconfig.Subnet, index int) hclInlineObject {
+func subnetValue(subnet clusterconfig.Subnet, v6CIDRNum int) hclInlineObject {
 	fields := []hclObjectField{}
 	if subnet.ID != "" {
 		fields = append(fields, identField("existing", str(subnet.ID)))
@@ -848,7 +853,7 @@ func subnetValue(subnet clusterconfig.Subnet, index int) hclInlineObject {
 		fields = append(fields, identField("ipv4_cidr", str(subnet.V4CIDR)))
 	}
 	if subnet.V6CIDR == "auto" {
-		fields = append(fields, identField("ipv6_netnum", num(index)))
+		fields = append(fields, identField("ipv6_netnum", num(v6CIDRNum)))
 	}
 	if subnet.Public {
 		fields = append(fields, identField("public", boolean(true)))

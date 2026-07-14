@@ -120,6 +120,36 @@ func TestInterpolateKubernetesRejectsInvalidServiceIP(t *testing.T) {
 	}
 }
 
+// TestInterpolateKubernetesAcceptsStrippedIPAddress verifies interpolation
+// accepts Services whose generated IPAddress state was stripped by seedgen;
+// kube-apiserver's startup allocator repair reconstructs those records.
+func TestInterpolateKubernetesAcceptsStrippedIPAddress(t *testing.T) {
+	network, err := clusterconfig.ServiceNetworkFromCIDRs([]string{"10.96.0.0/12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := []*datafile.Record{
+		{Key: []byte(serviceCIDRKey), Value: []byte(`{"kind":"ServiceCIDR","spec":{"cidrs":["198.18.0.0/15"]}}`)},
+		{Key: []byte("/registry/services/specs/platform-example/example"), Value: []byte(`{"kind":"Service","metadata":{"name":"example","namespace":"platform-example"},"spec":{"clusterIP":"198.18.0.2","clusterIPs":["198.18.0.2"],"ipFamilies":["IPv4"],"ipFamilyPolicy":"SingleStack"}}`)},
+	}
+
+	got, err := interpolateKubernetes(records, network)
+	if err != nil {
+		t.Fatalf("interpolateKubernetes error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(records) = %d, want 2", len(got))
+	}
+	var service map[string]any
+	if err := json.Unmarshal(got[1].Value, &service); err != nil {
+		t.Fatal(err)
+	}
+	spec := service["spec"].(map[string]any)
+	if gotIP, wantIP := spec["clusterIP"], "10.96.0.2"; gotIP != wantIP {
+		t.Fatalf("clusterIP = %v, want %s", gotIP, wantIP)
+	}
+}
+
 func TestInterpolateComponentsSourceUpdatesGitRepository(t *testing.T) {
 	records := []*datafile.Record{
 		{Key: []byte(platformComponentsHelmReleaseKey), Value: []byte(`{"kind":"HelmRelease","metadata":{"name":"ignored"}}`)},

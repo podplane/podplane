@@ -235,11 +235,6 @@ func interpolateKubernetes(records []*datafile.Record, network clusterconfig.Ser
 		record.Value = encoded
 		filtered = append(filtered, record)
 	}
-	for parent, desired := range desiredAllocations {
-		if len(desired) != 0 {
-			return nil, fmt.Errorf("seed Service %s has no matching IPAddress allocation for %v", parent, desired)
-		}
-	}
 	return filtered, nil
 }
 

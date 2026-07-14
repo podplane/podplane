@@ -299,6 +299,28 @@ func TestLoadBalancersValuePreservesTargetPorts(t *testing.T) {
 	}
 }
 
+// TestSubnetsValueAssignsUniqueIPv6Netnums verifies auto-generated IPv6
+// subnet numbers are unique across roles and availability zones.
+func TestSubnetsValueAssignsUniqueIPv6Netnums(t *testing.T) {
+	provider := clusterconfig.Provider{Zones: map[string][]clusterconfig.Subnet{
+		"us-east-1a": {
+			{V4CIDR: "172.18.10.0/28", V6CIDR: "auto", Services: []string{"nat"}, Public: true},
+			{V4CIDR: "172.18.20.0/28", V6CIDR: "auto", Services: []string{"nstance"}},
+			{V4CIDR: "172.18.1.0/24", V6CIDR: "auto", Pool: "control-plane"},
+		},
+		"us-east-1b": {
+			{V4CIDR: "172.18.2.0/24", V6CIDR: "auto", Pool: "control-plane"},
+		},
+	}}
+
+	got := subnetsValue(provider).renderHCL(0)
+	for _, want := range []string{"ipv6_netnum = 0", "ipv6_netnum = 1", "ipv6_netnum = 2", "ipv6_netnum = 3"} {
+		if count := strings.Count(got, want); count != 1 {
+			t.Fatalf("generated subnets contain %q %d times, want once:\n%s", want, count, got)
+		}
+	}
+}
+
 // TestValidateDNSProvidersRejectsUnsupportedTerraformProviders verifies that
 // recognizing provider metadata does not advertise Terraform generation.
 func TestValidateDNSProvidersRejectsUnsupportedTerraformProviders(t *testing.T) {
