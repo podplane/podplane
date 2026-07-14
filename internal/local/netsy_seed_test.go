@@ -7,6 +7,7 @@ package local
 import (
 	"bytes"
 	"crypto/sha512"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -147,6 +148,37 @@ func TestEnsureInitialNetsySnapshotWritesSnapshot(t *testing.T) {
 	}
 	if info.Size() == 0 {
 		t.Fatalf("snapshot is empty")
+	}
+	snapshot, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	records, err := datafile.ReadSnapshot(bytes.NewReader(snapshot))
+	if err != nil {
+		t.Fatalf("read snapshot records: %v", err)
+	}
+	var release map[string]any
+	for _, record := range records {
+		if string(record.Key) == componentsHelmReleaseKey {
+			if err := json.Unmarshal(record.Value, &release); err != nil {
+				t.Fatalf("decode platform-components HelmRelease: %v", err)
+			}
+			break
+		}
+	}
+	if release == nil {
+		t.Fatal("platform-components HelmRelease not found")
+	}
+	values := release["spec"].(map[string]any)["values"].(map[string]any)
+	zot := values["platform"].(map[string]any)["components"].(map[string]any)["values"].(map[string]any)["zot-registry"].(map[string]any)
+	storage := zot["platform"].(map[string]any)["zotRegistry"].(map[string]any)["storage"].(map[string]any)
+	if got, want := storage["endpoint"], "https://10.0.2.15:19443/s3/cache"; got != want {
+		t.Fatalf("Zot storage endpoint = %v, want %v", got, want)
+	}
+	hostAliases := zot["zot"].(map[string]any)["hostAliases"].([]any)
+	hostAlias := hostAliases[0].(map[string]any)
+	if got, want := hostAlias["ip"], "10.0.2.15"; got != want {
+		t.Fatalf("Zot host alias IP = %v, want %v", got, want)
 	}
 	metadataDir := localS3MetadataDir(dir, localNetsyBucketName("dev"))
 	metadataEntries, err := os.ReadDir(metadataDir)

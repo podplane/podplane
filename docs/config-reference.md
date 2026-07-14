@@ -33,12 +33,11 @@ New cluster configs include a relative `$schema` reference to `./podplane.cluste
       {
         "zone": "internaltools.example.com",
         "provider": {
-          "kind": "aws",
+          "kind": "aws-route53",
           "account": "123456789012",
           "profile": "default",
           "region": "us-east-1",
-          "hosted_zone_id": "Z0123456789",
-          "role_arn": "arn:aws:iam::123456789012:role/podplane-cert-manager-dns01"
+          "hosted_zone_id": "Z0123456789"
         }
       }
     ],
@@ -155,21 +154,20 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.oidc.username_claim` | Token claim used as the username (default: `email`) |
 | `cluster.oidc.groups_claim` | Token claim used for group membership (default: `groups`) |
 | `cluster.oidc.signing_algs` | Allowed OIDC signing algorithms. Passed to kube-apiserver at runtime; vmconfig defaults to `["RS256"]` when omitted. |
-| `cluster.acme.server` | ACME directory URL used for production ingress certificates. When set with `cluster.acme.email`, Podplane configures cert-manager DNS-01 issuers. Omit `cluster.acme` for local/self-signed ingress certificates. |
-| `cluster.acme.email` | ACME account email address for expiry and account notices. |
+| `cluster.acme.server` | Optional ACME directory override. Defaults to the Let's Encrypt production directory. |
+| `cluster.acme.email` | ACME account email address for expiry and account notices. Configuring it enables ACME for domains using a supported DNS provider; currently only AWS Route53 is enabled. Omit `cluster.acme` to use self-signed ingress certificates. |
 | `cluster.domains[]` | Array of domain configurations. The first domain is used as the default for ingress routing. |
 | `cluster.domains[].zone` | Exact ingress apex (e.g. `staging.example.com`); Podplane creates apex and wildcard DNS records. |
 | `cluster.domains[].load_balancer` | Named provider load balancer targeted by the apex and wildcard records. Defaults to `main`. |
 | `cluster.domains[].provider` | Optional DNS provider. Omit it for manual DNS management. |
-| `cluster.domains[].provider.kind` | Managed DNS provider. Cluster Terraform generation currently supports `aws`. |
+| `cluster.domains[].provider.kind` | DNS provider: `aws-route53`, `cloudflare`, `google-cloud-dns`, or `local`. Cluster Terraform generation currently supports `aws-route53`. |
 | `cluster.domains[].provider.region` | AWS Route53 region for DNS-01. If omitted, Podplane can infer it when exactly one matching AWS provider exists. |
-| `cluster.domains[].provider.hosted_zone_id` | AWS Route53 hosted zone ID for the domain (optional but recommended when using AWS DNS-01). |
-| `cluster.domains[].provider.role_arn` | AWS IAM role ARN cert-manager should assume for Route53 DNS-01 changes. |
+| `cluster.domains[].provider.hosted_zone_id` | Optional explicit Route53 hosted zone ID. Use it to disambiguate or pin the exact hosted zone; otherwise, generated Terraform looks up the public hosted zone by domain name. |
 | `cluster.domains[].provider.secret_provider_class_name` | Existing Secrets Store CSI `SecretProviderClass` to mount so external secret material can be synced before cert-manager uses it. |
-| `cluster.domains[].provider.secret_name` | Kubernetes Secret name containing DNS provider credentials. Required for Cloudflare DNS-01 and optional for Google CloudDNS when using a service account key. |
-| `cluster.domains[].provider.secret_key` | Key inside `secret_name`. Defaults to `api-token` for Cloudflare and `service-account.json` for Google CloudDNS. |
-| `cluster.domains[].provider.project` | Google Cloud project ID for CloudDNS DNS-01. |
-| `cluster.domains[].provider.hosted_zone_name` | Google CloudDNS managed zone name for the domain (optional). |
+| `cluster.domains[].provider.secret_name` | Kubernetes Secret name containing DNS provider credentials. Used by DNS providers that authenticate with Kubernetes Secrets. |
+| `cluster.domains[].provider.secret_key` | Key inside `secret_name`. Defaults to `api-token` for Cloudflare and `service-account.json` for Google Cloud DNS. |
+| `cluster.domains[].provider.project` | Google Cloud project ID for Cloud DNS. |
+| `cluster.domains[].provider.hosted_zone_name` | Google Cloud DNS managed zone name for the domain (optional). |
 | `cluster.pools.<name>.arch` | CPU architecture for the pool's nodes. `amd64` or `arm64` |
 | `cluster.pools.<name>.instance_type` | Cloud provider instance type (e.g. `t4g.medium` for AWS, `n2-standard-2` for Google Cloud) |
 | `cluster.pools.<name>.size` | Minimum number of instances in the pool |

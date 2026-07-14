@@ -117,7 +117,8 @@ func TestConfigFormCanSelectBareSeed(t *testing.T) {
 func TestConfigFormBuildsManagedDomainDefaults(t *testing.T) {
 	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
 	form.fields[indexForField(t, form, "Cluster domain (optional)")].value = "staging.example.com"
-	form.fields[indexForField(t, form, "DNS provider (aws or blank for manual)")].value = "aws"
+	form.fields[indexForField(t, form, "DNS provider (aws-route53 or blank for manual)")].value = "aws-route53"
+	form.fields[indexForField(t, form, "ACME account email (optional)")].value = "ops@example.com"
 
 	cfg, err := form.config()
 	if err != nil {
@@ -133,8 +134,26 @@ func TestConfigFormBuildsManagedDomainDefaults(t *testing.T) {
 	if cfg.Cluster.Kubernetes.APILoadBalancer != "main" || len(listeners) != 2 || listeners[0].Pool != "control-plane" || listeners[1].Pool != "control-plane" {
 		t.Fatalf("managed load balancer defaults = %#v, %#v", cfg.Cluster.Kubernetes, cfg.Cluster.Providers[0].LoadBalancers)
 	}
-	if cfg.Cluster.Domains[0].Provider == nil || cfg.Cluster.Domains[0].Provider.Kind != "aws" {
-		t.Fatalf("domain provider = %#v, want aws", cfg.Cluster.Domains[0].Provider)
+	if cfg.Cluster.Domains[0].Provider == nil || cfg.Cluster.Domains[0].Provider.Kind != "aws-route53" {
+		t.Fatalf("domain provider = %#v, want aws-route53", cfg.Cluster.Domains[0].Provider)
+	}
+	if cfg.Cluster.ACME == nil || cfg.Cluster.ACME.Email != "ops@example.com" || cfg.Cluster.ACME.Server != "" {
+		t.Fatalf("ACME config = %#v, want email with default server", cfg.Cluster.ACME)
+	}
+}
+
+// TestConfigFormOnlyShowsACMEEmailForSupportedDNS verifies that the ACME email
+// field is visible only after selecting a DNS provider with ACME support.
+func TestConfigFormOnlyShowsACMEEmailForSupportedDNS(t *testing.T) {
+	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	field := form.fields[indexForField(t, form, "ACME account email (optional)")]
+	form.domain = "example.com"
+	if form.fieldVisible(field) {
+		t.Fatal("ACME email shown before a supported DNS provider is selected")
+	}
+	form.dnsProvider = "aws-route53"
+	if !form.fieldVisible(field) {
+		t.Fatal("ACME email hidden for a supported DNS provider")
 	}
 }
 

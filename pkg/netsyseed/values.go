@@ -6,7 +6,6 @@ package netsyseed
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -19,15 +18,9 @@ const (
 	selfsignedIssuerName = "platform-ingress-selfsigned-clusterissuer"
 )
 
-// buildPlatformComponentsValuesOptions carries runtime-only inputs that should
-// not be persisted in cluster config.
-type buildPlatformComponentsValuesOptions struct {
-	ZotRegistryEndpoint string
-}
-
 // buildPlatformComponentsValues derives platform-components Helm values from
 // user-facing cluster config. The returned structure is JSON/YAML marshalable.
-func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, opts buildPlatformComponentsValuesOptions) (map[string]any, error) {
+func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig) (map[string]any, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("cluster config is required")
 	}
@@ -47,21 +40,9 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, opts buildP
 	}
 	if registryHostname != "" {
 		componentValues = ensureChildMap(components, "values")
-		isLocal := len(cfg.Cluster.Providers) == 0
 		zotStorage := map[string]any{
 			"bucket": registryBucketName(cfg.Cluster),
 			"region": registryRegion(cfg.Cluster),
-		}
-		if isLocal {
-			if opts.ZotRegistryEndpoint == "" {
-				return nil, fmt.Errorf("zot registry endpoint is required for local registry seed values")
-			}
-			zotStorage["endpoint"] = opts.ZotRegistryEndpoint
-			zotStorage["secure"] = true
-			zotStorage["skipVerify"] = true
-			zotStorage["forcePathStyle"] = true
-			zotStorage["accessKeyID"] = "test"
-			zotStorage["secretAccessKey"] = "test"
 		}
 		zotOIDC := map[string]any{
 			"issuer":        cfg.Cluster.OIDC.IssuerURL,
@@ -85,18 +66,6 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, opts buildP
 				},
 			},
 		}
-		if isLocal {
-			endpoint, err := url.Parse(opts.ZotRegistryEndpoint)
-			if err != nil || endpoint.Hostname() == "" {
-				return nil, fmt.Errorf("invalid zot registry endpoint %q", opts.ZotRegistryEndpoint)
-			}
-			entry["zot"] = map[string]any{
-				"hostAliases": []map[string]any{{
-					"ip":        endpoint.Hostname(),
-					"hostnames": []string{"oidc.localhost"},
-				}},
-			}
-		}
 		componentValues["zot-registry"] = entry
 	}
 	applyProviderComponents(components, cfg.Cluster.Providers)
@@ -105,21 +74,21 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, opts buildP
 		return values, nil
 	}
 
-	issuerName := selfsignedIssuerName
 	platformCerts := map[string]any{
 		"platform": map[string]any{
-			"certs": map[string]any{},
+			"certs": map[string]any{
+				"ingress": map[string]any{
+					"dnsNames": ingressDNSNames(cfg.Cluster.Domains),
+				},
+			},
 		},
 	}
 	if cfg.Cluster.ACME != nil {
-		issuerName = acmeIssuerName
 		acme, err := acmeValues(cfg)
 		if err != nil {
 			return nil, err
 		}
-		platformCerts["platform"].(map[string]any)["certs"].(map[string]any)["ingress"] = map[string]any{
-			"acme": acme,
-		}
+		platformCerts["platform"].(map[string]any)["certs"].(map[string]any)["ingress"].(map[string]any)["acme"] = acme
 	}
 
 	crds := ensureChildMap(components, "crds")
@@ -141,9 +110,9 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, opts buildP
 					"enabled": true,
 					"issuerRef": map[string]any{
 						"kind": "ClusterIssuer",
-						"name": issuerName,
+						"name": selfsignedIssuerName,
 					},
-					"domains": ingressDomains(cfg.Cluster.Domains),
+					"domains": ingressDomains(cfg.Cluster.Domains, cfg.Cluster.ACME != nil),
 				},
 			},
 		},
@@ -341,35 +310,51 @@ func ensureChildMap(parent map[string]any, key string) map[string]any {
 
 // ingressDomains converts configured cluster domains into Traefik ingress
 // domain values and marks the first domain as the default.
-func ingressDomains(domains []clusterconfig.Domain) []map[string]any {
+func ingressDomains(domains []clusterconfig.Domain, acmeEnabled bool) []map[string]any {
 	items := make([]map[string]any, 0, len(domains))
 	for i, domain := range domains {
 		item := map[string]any{"zone": domain.Zone}
 		if i == 0 {
 			item["default"] = true
 		}
+		if acmeEnabled && domain.Provider.SupportsACME() {
+			item["issuerRef"] = map[string]any{"kind": "ClusterIssuer", "name": acmeIssuerName}
+		}
 		items = append(items, item)
 	}
 	return items
 }
 
+// ingressDNSNames returns the exact apex and wildcard names Traefik may request.
+func ingressDNSNames(domains []clusterconfig.Domain) []string {
+	names := make([]string, 0, len(domains)*2)
+	for _, domain := range domains {
+		names = append(names, domain.Zone, "*."+domain.Zone)
+	}
+	return names
+}
+
 // acmeValues derives platform-certs ACME values from the cluster ACME and
 // domain provider configuration.
 func acmeValues(cfg *clusterconfig.ClusterConfig) (map[string]any, error) {
-	if cfg.Cluster.ACME.Server == "" {
-		return nil, fmt.Errorf("cluster.acme.server is required when cluster.acme is configured")
-	}
 	if cfg.Cluster.ACME.Email == "" {
 		return nil, fmt.Errorf("cluster.acme.email is required when cluster.acme is configured")
+	}
+	server := cfg.Cluster.ACME.Server
+	if server == "" {
+		server = clusterconfig.DefaultACMEServer
 	}
 	solvers, err := acmeSolvers(cfg)
 	if err != nil {
 		return nil, err
 	}
+	if len(solvers) == 0 {
+		return nil, fmt.Errorf("cluster.acme requires at least one domain with a supported ACME DNS provider")
+	}
 	return map[string]any{
 		"enabled":    true,
 		"issuerName": acmeIssuerName,
-		"server":     cfg.Cluster.ACME.Server,
+		"server":     server,
 		"email":      cfg.Cluster.ACME.Email,
 		"solvers":    solvers,
 	}, nil
@@ -385,10 +370,10 @@ func acmeSolvers(cfg *clusterconfig.ClusterConfig) ([]map[string]any, error) {
 	groups := map[string]*solverGroup{}
 	for _, domain := range cfg.Cluster.Domains {
 		provider := domain.Provider
-		if provider == nil || provider.Kind == "" {
-			return nil, fmt.Errorf("cluster.domains[] provider.kind is required for %s", domain.Zone)
+		if !provider.SupportsACME() {
+			continue
 		}
-		providerValue, key, err := dnsProviderSolver(cfg, *provider)
+		providerValue, key, err := dnsProviderSolver(cfg, *provider, provider.HostedZoneID)
 		if err != nil {
 			return nil, fmt.Errorf("domain %s: %w", domain.Zone, err)
 		}
@@ -419,24 +404,21 @@ func acmeSolvers(cfg *clusterconfig.ClusterConfig) ([]map[string]any, error) {
 
 // dnsProviderSolver converts one domain provider into a cert-manager DNS-01
 // solver value and a stable grouping key.
-func dnsProviderSolver(cfg *clusterconfig.ClusterConfig, provider clusterconfig.DomainProvider) (map[string]any, string, error) {
+func dnsProviderSolver(cfg *clusterconfig.ClusterConfig, provider clusterconfig.DomainProvider, hostedZoneID string) (map[string]any, string, error) {
 	switch provider.Kind {
-	case "aws":
+	case "aws-route53":
 		region, err := awsRegion(cfg, provider)
 		if err != nil {
 			return nil, "", err
 		}
 		route53 := map[string]any{}
+		if hostedZoneID != "" {
+			route53["hostedZoneID"] = hostedZoneID
+		}
 		if region != "" {
 			route53["region"] = region
 		}
-		if provider.HostedZoneID != "" {
-			route53["hostedZoneID"] = provider.HostedZoneID
-		}
-		if provider.RoleARN != "" {
-			route53["roleArn"] = provider.RoleARN
-		}
-		return map[string]any{"route53": route53}, "aws|" + region + "|" + provider.HostedZoneID + "|" + provider.RoleARN, nil
+		return map[string]any{"route53": route53}, "aws|" + region + "|" + hostedZoneID, nil
 	case "cloudflare":
 		if provider.SecretName == "" {
 			return nil, "", fmt.Errorf("provider.secret_name is required for cloudflare DNS-01")
@@ -447,9 +429,9 @@ func dnsProviderSolver(cfg *clusterconfig.ClusterConfig, provider clusterconfig.
 		}
 		cloudflare := map[string]any{"apiTokenSecretRef": map[string]any{"name": provider.SecretName, "key": key}}
 		return map[string]any{"cloudflare": cloudflare}, "cloudflare|" + provider.SecretName + "|" + key, nil
-	case "google":
+	case "google-cloud-dns":
 		if provider.Project == "" {
-			return nil, "", fmt.Errorf("provider.project is required for google DNS-01")
+			return nil, "", fmt.Errorf("provider.project is required for Google Cloud DNS-01")
 		}
 		cloudDNS := map[string]any{"project": provider.Project}
 		if provider.HostedZoneName != "" {
@@ -462,7 +444,7 @@ func dnsProviderSolver(cfg *clusterconfig.ClusterConfig, provider clusterconfig.
 			}
 			cloudDNS["serviceAccountSecretRef"] = map[string]any{"name": provider.SecretName, "key": key}
 		}
-		return map[string]any{"cloudDNS": cloudDNS}, "google|" + provider.Project + "|" + provider.HostedZoneName + "|" + provider.SecretName + "|" + provider.SecretKey, nil
+		return map[string]any{"cloudDNS": cloudDNS}, "google-cloud-dns|" + provider.Project + "|" + provider.HostedZoneName + "|" + provider.SecretName + "|" + provider.SecretKey, nil
 	default:
 		return nil, "", fmt.Errorf("unsupported DNS provider kind %q", provider.Kind)
 	}

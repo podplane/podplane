@@ -70,7 +70,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		OIDC: clusterconfig.OIDC{IssuerURL: "https://auth.example.com", SigningAlgs: []string{"RS256", "ES256"}},
 		Domains: []clusterconfig.Domain{{
 			Zone:     "example.com",
-			Provider: &clusterconfig.DomainProvider{Kind: "aws"},
+			Provider: &clusterconfig.DomainProvider{Kind: "aws-route53"},
 		}},
 		Registry: clusterconfig.Registry{Hostname: "registry.example.com"},
 		Kubernetes: clusterconfig.Kubernetes{
@@ -189,6 +189,42 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	if strings.Contains(got, "pool_disk_sizes") {
 		t.Fatalf("generated Terraform must not advertise disk sizing as an independent override:\n%s", got)
 	}
+
+	// ACME adds a dedicated Route53 role and passes runtime-generated values
+	// through the generic Netsy seed values overlay.
+	cfg.Cluster.ACME = &clusterconfig.ACME{Email: "ops@example.com"}
+	acmeFiles, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions())
+	if err != nil {
+		t.Fatalf("GenerateCluster with ACME returned error: %v", err)
+	}
+	acme := fileContents(acmeFiles)
+	for _, want := range []string{
+		`resource "aws_iam_role" "cert_manager_route53"`,
+		`"route53:ChangeResourceRecordSets"`,
+		`variable = "route53:ChangeResourceRecordSetsRecordTypes"`,
+		`values = ["TXT"]`,
+		`resources = [for zone in data.aws_route53_zone.managed : zone.arn]`,
+		`values_content = yamlencode({`,
+		`"iam.amazonaws.com/allowed-roles" = jsonencode([aws_iam_role.cert_manager_route53[0].arn])`,
+		`"iam.amazonaws.com/role" = aws_iam_role.cert_manager_route53[0].arn`,
+		`solvers = [for name, zone in data.aws_route53_zone.managed : {`,
+		`dnsZones = [name]`,
+		`hostedZoneID = zone.zone_id`,
+		`region = local.aws_region`,
+	} {
+		if !strings.Contains(acme["podplane.cluster.roles.tf"]+acme["podplane.cluster.main.tf"], want) {
+			t.Fatalf("generated ACME Terraform missing %q", want)
+		}
+	}
+	for _, obsolete := range []string{"route53_role_arn", "route53_hosted_zones", "\n  values = yamlencode("} {
+		if strings.Contains(acme["podplane.cluster.main.tf"], obsolete) {
+			t.Fatalf("generated seed resource contains provider-specific attribute %q", obsolete)
+		}
+	}
+	if strings.Contains(acme["podplane.cluster.roles.tf"], "route53:ListResourceRecordSets") {
+		t.Fatal("generated cert-manager policy permits unnecessary Route53 record listing")
+	}
+	cfg.Cluster.ACME = nil
 	infra := contents["podplane.cluster.inputs.infra.tf"]
 	for _, want := range []string{`default = ""`, `default = "172.18.0.0/16"`, `subnets = {`} {
 		if !strings.Contains(infra, want) {
@@ -274,7 +310,7 @@ func TestValidateDNSProvidersRejectsUnsupportedTerraformProviders(t *testing.T) 
 		t.Fatalf("validateDNSProviders error = %v, want unsupported Terraform provider error", err)
 	}
 
-	cfg.Cluster.Domains[0].Provider.Kind = "aws"
+	cfg.Cluster.Domains[0].Provider.Kind = "aws-route53"
 	if err := validateDNSProviders(cfg); err != nil {
 		t.Fatalf("validateDNSProviders rejected Route53: %v", err)
 	}
@@ -302,7 +338,7 @@ func TestDNSOutputValues(t *testing.T) {
 		}
 	}
 
-	cfg.Cluster.Domains[0].Provider = &clusterconfig.DomainProvider{Kind: "aws"}
+	cfg.Cluster.Domains[0].Provider = &clusterconfig.DomainProvider{Kind: "aws-route53"}
 	if got := manualDNSRecordsValue(cfg, "network").renderHCL(0); got != "{}" {
 		t.Fatalf("managed DNS output = %s, want empty", got)
 	}

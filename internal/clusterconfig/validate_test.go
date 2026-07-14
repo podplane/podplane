@@ -37,6 +37,20 @@ func TestValidateComponentsRejectsEmptySourceSecretRefName(t *testing.T) {
 	}
 }
 
+// TestValidateACME verifies ACME account fields and supported DNS-provider requirements.
+func TestValidateACME(t *testing.T) {
+	awsDomain := []Domain{{Zone: "example.com", Provider: &DomainProvider{Kind: "aws-route53"}}}
+	if err := ValidateACME(&ACME{Email: "ops@example.com"}, awsDomain); err != nil {
+		t.Fatalf("ValidateACME returned error: %v", err)
+	}
+	if err := ValidateACME(&ACME{Email: "invalid"}, awsDomain); err == nil {
+		t.Fatal("ValidateACME accepted invalid email")
+	}
+	if err := ValidateACME(&ACME{Email: "ops@example.com"}, []Domain{{Zone: "example.com"}}); err == nil {
+		t.Fatal("ValidateACME accepted config without a supported ACME DNS provider")
+	}
+}
+
 func TestValidateSeedDigest(t *testing.T) {
 	if err := ValidateSeed(Seed{Name: "recommended", Digest: "sha512:" + strings.Repeat("a", 128)}); err != nil {
 		t.Fatalf("ValidateSeed returned error for valid digest: %v", err)
@@ -160,7 +174,7 @@ func TestValidateDomainsAndListeners(t *testing.T) {
 // TestValidateDNSProviderKinds preserves provider metadata used by seeded
 // DNS-01 configuration independently of Terraform DNS support.
 func TestValidateDNSProviderKinds(t *testing.T) {
-	for _, kind := range []string{"aws", "cloudflare", "google", "local"} {
+	for _, kind := range []string{"aws-route53", "cloudflare", "google-cloud-dns", "local"} {
 		t.Run(kind, func(t *testing.T) {
 			cfg := validManagedConfig()
 			cfg.Cluster.Domains[0].Provider.Kind = kind
@@ -172,7 +186,7 @@ func TestValidateDNSProviderKinds(t *testing.T) {
 
 	cfg := validManagedConfig()
 	cfg.Cluster.Domains[0].Provider.Kind = "other"
-	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "must be aws, cloudflare, google, or local") {
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "must be aws-route53, cloudflare, google-cloud-dns, or local") {
 		t.Fatalf("Validate unknown DNS provider error = %v, want supported-kind error", err)
 	}
 }
@@ -219,7 +233,7 @@ func validManagedConfig() *ClusterConfig {
 	return &ClusterConfig{Cluster: Cluster{
 		ID:       "example",
 		OIDC:     OIDC{IssuerURL: "https://auth.example.com"},
-		Domains:  []Domain{{Zone: "example.com", Provider: &DomainProvider{Kind: "aws"}}},
+		Domains:  []Domain{{Zone: "example.com", Provider: &DomainProvider{Kind: "aws-route53"}}},
 		Registry: Registry{Hostname: "registry.example.com"},
 		Kubernetes: Kubernetes{
 			APIHostname:     "k8s.example.com",

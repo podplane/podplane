@@ -99,12 +99,12 @@
     "acme": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["server", "email"],
+      "required": ["email"],
       "properties": {
         "server": {
           "type": "string",
           "format": "uri",
-          "description": "ACME directory URL used for ingress certificates."
+          "description": "ACME directory URL used for ingress certificates. Defaults to the Let's Encrypt production directory."
         },
         "email": {
           "type": "string",
@@ -136,12 +136,12 @@
         "kind": {
           "type": "string",
           "description": "DNS provider kind.",
-          "enum": ["aws", "cloudflare", "google", "local"]
+          "enum": ["aws-route53", "cloudflare", "google-cloud-dns", "local"]
         },
         "account": { "type": "string", "description": "Cloud account identifier for this DNS provider." },
         "profile": { "type": "string", "description": "Local cloud credentials profile name." },
         "region": { "type": "string", "description": "Cloud region for DNS provider API calls when applicable." },
-        "hosted_zone_id": { "type": "string", "description": "Provider-specific hosted zone ID." },
+        "hosted_zone_id": { "type": "string", "description": "Optional explicit Route53 hosted zone ID. Use it to disambiguate or pin the exact hosted zone; otherwise, generated Terraform looks up the public hosted zone by domain name." },
         "role_arn": { "type": "string", "description": "IAM role ARN used for DNS automation." },
         "secret_provider_class_name": { "type": "string", "description": "Kubernetes SecretProviderClass name for DNS credentials." },
         "secret_name": { "type": "string", "description": "Kubernetes Secret name for DNS credentials." },

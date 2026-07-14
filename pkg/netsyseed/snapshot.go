@@ -31,11 +31,13 @@ const (
 )
 
 type SnapshotOptions struct {
-	Context             context.Context
-	ClusterConfigPath   string
-	SeedPath            string
-	ValuesFile          string
-	ZotRegistryEndpoint string
+	Context           context.Context
+	ClusterConfigPath string
+	SeedPath          string
+	// ValuesContent is YAML or JSON that overrides derived defaults before ValuesFile.
+	ValuesContent []byte
+	// ValuesFile is a YAML or JSON file applied last.
+	ValuesFile string
 }
 
 // WriteSnapshot seeds a Netsy snapshot with platform-components values derived
@@ -48,8 +50,11 @@ func WriteSnapshot(w io.Writer, opts SnapshotOptions) error {
 	if err != nil {
 		return err
 	}
-	values, err := buildPlatformComponentsValues(cluster, buildPlatformComponentsValuesOptions{ZotRegistryEndpoint: opts.ZotRegistryEndpoint})
+	values, err := buildPlatformComponentsValues(cluster)
 	if err != nil {
+		return err
+	}
+	if err := mergeValuesContent(values, opts.ValuesContent, "values content"); err != nil {
 		return err
 	}
 	if err := mergeValuesFile(values, opts.ValuesFile); err != nil {
@@ -361,9 +366,17 @@ func mergeValuesFile(dst map[string]any, path string) error {
 	if err != nil {
 		return fmt.Errorf("read values file %s: %w", path, err)
 	}
+	return mergeValuesContent(dst, data, "values file "+path)
+}
+
+// mergeValuesContent decodes YAML or JSON values and merges them over dst.
+func mergeValuesContent(dst map[string]any, data []byte, source string) error {
+	if len(data) == 0 {
+		return nil
+	}
 	var values map[string]any
 	if err := yaml.Unmarshal(data, &values); err != nil {
-		return fmt.Errorf("decode values file %s: %w", path, err)
+		return fmt.Errorf("decode %s: %w", source, err)
 	}
 	if values != nil {
 		deepMerge(dst, values)

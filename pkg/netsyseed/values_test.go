@@ -14,7 +14,7 @@ import (
 
 func TestBuildPlatformComponentsValuesLocalDomain(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{Domains: []clusterconfig.Domain{{Zone: "internaltools.localhost", Provider: &clusterconfig.DomainProvider{Kind: "local"}}}}}
-	values, err := buildPlatformComponentsValues(cfg, buildPlatformComponentsValuesOptions{})
+	values, err := buildPlatformComponentsValues(cfg)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -36,7 +36,7 @@ func TestBuildPlatformComponentsValuesAWSProviderEnablesEBSCSI(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		Providers: []clusterconfig.Provider{{Kind: "aws"}},
 	}}
-	values, err := buildPlatformComponentsValues(cfg, buildPlatformComponentsValuesOptions{})
+	values, err := buildPlatformComponentsValues(cfg)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -64,7 +64,7 @@ func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *tes
 			"local-fakevault":     {Kind: "openbao", CACert: "-----BEGIN CERTIFICATE-----\nlocal\n-----END CERTIFICATE-----", AuthPath: "auth/podplane", OperatorRole: "podplane-operator"},
 		}},
 	}}
-	values, err := buildPlatformComponentsValues(cfg, buildPlatformComponentsValuesOptions{})
+	values, err := buildPlatformComponentsValues(cfg)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -176,7 +176,7 @@ func TestBuildPlatformComponentsValuesRegistryMirror(t *testing.T) {
 			},
 		},
 	}}
-	values, err := buildPlatformComponentsValues(cfg, buildPlatformComponentsValuesOptions{})
+	values, err := buildPlatformComponentsValues(cfg)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -209,7 +209,7 @@ func TestBuildPlatformComponentsValuesZotRegistry(t *testing.T) {
 			Region:  "us-east-1",
 		}},
 	}}
-	values, err := buildPlatformComponentsValues(cfg, buildPlatformComponentsValuesOptions{})
+	values, err := buildPlatformComponentsValues(cfg)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -252,7 +252,7 @@ func TestBuildPlatformComponentsValuesZotRegistryLocalBucket(t *testing.T) {
 		OIDC:     clusterconfig.OIDC{IssuerURL: "https://oidc.localhost", CACert: caPath},
 		Registry: clusterconfig.Registry{Hostname: "dev-registry.local"},
 	}}
-	values, err := buildPlatformComponentsValues(cfg, buildPlatformComponentsValuesOptions{ZotRegistryEndpoint: "https://10.0.2.99:19443/s3/cache"})
+	values, err := buildPlatformComponentsValues(cfg)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -264,23 +264,17 @@ func TestBuildPlatformComponentsValuesZotRegistryLocalBucket(t *testing.T) {
 	if got, want := storage["region"], "local"; got != want {
 		t.Fatalf("storage.region = %v, want %v", got, want)
 	}
-	if got, want := storage["endpoint"], "https://10.0.2.99:19443/s3/cache"; got != want {
-		t.Fatalf("storage.endpoint = %v, want %v", got, want)
-	}
-	if got, want := storage["secure"], true; got != want {
-		t.Fatalf("storage.secure = %v, want %v", got, want)
-	}
-	if got, want := storage["skipVerify"], true; got != want {
-		t.Fatalf("storage.skipVerify = %v, want %v", got, want)
+	for _, key := range []string{"endpoint", "secure", "skipVerify", "forcePathStyle", "accessKeyID", "secretAccessKey"} {
+		if _, ok := storage[key]; ok {
+			t.Fatalf("storage.%s must be supplied by a runtime values overlay", key)
+		}
 	}
 	oidc := zotRegistry["oidc"].(map[string]any)
 	if got := oidc["certificateAuthority"]; got == "" {
 		t.Fatal("oidc.certificateAuthority is empty, want local CA contents")
 	}
-	zot := componentValues(values, "zot-registry")["zot"].(map[string]any)
-	hostAliases := zot["hostAliases"].([]map[string]any)
-	if got, want := hostAliases[0]["ip"], "10.0.2.99"; got != want {
-		t.Fatalf("hostAliases[0].ip = %v, want %v", got, want)
+	if _, ok := componentValues(values, "zot-registry")["zot"]; ok {
+		t.Fatal("zot.hostAliases must be supplied by a runtime values overlay")
 	}
 }
 
@@ -289,11 +283,11 @@ func TestBuildPlatformComponentsValuesGroupsAWSSolvers(t *testing.T) {
 		ACME:      &clusterconfig.ACME{Server: "https://acme.example/directory", Email: "ops@example.com"},
 		Providers: []clusterconfig.Provider{{Kind: "aws", Account: "123", Region: "us-east-1"}},
 		Domains: []clusterconfig.Domain{
-			{Zone: "example.com", Provider: &clusterconfig.DomainProvider{Kind: "aws", Account: "123", HostedZoneID: "Z123", RoleARN: "arn:aws:iam::123:role/cert-manager"}},
-			{Zone: "example.net", Provider: &clusterconfig.DomainProvider{Kind: "aws", Account: "123", HostedZoneID: "Z123", RoleARN: "arn:aws:iam::123:role/cert-manager"}},
+			{Zone: "example.com", Provider: &clusterconfig.DomainProvider{Kind: "aws-route53", Account: "123", HostedZoneID: "Z123", RoleARN: "arn:aws:iam::123:role/cert-manager"}},
+			{Zone: "example.net", Provider: &clusterconfig.DomainProvider{Kind: "aws-route53", Account: "123", HostedZoneID: "Z123", RoleARN: "arn:aws:iam::123:role/cert-manager"}},
 		},
 	}}
-	values, err := buildPlatformComponentsValues(cfg, buildPlatformComponentsValuesOptions{})
+	values, err := buildPlatformComponentsValues(cfg)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -314,27 +308,61 @@ func TestBuildPlatformComponentsValuesGroupsAWSSolvers(t *testing.T) {
 	if got, want := route53["hostedZoneID"], "Z123"; got != want {
 		t.Fatalf("route53.hostedZoneID = %v, want %v", got, want)
 	}
+	if _, exists := route53["roleArn"]; exists {
+		t.Fatalf("route53 solver must use AWS credentials supplied by kube2iam instead of roleArn: %#v", route53)
+	}
+	apps := values["platform"].(map[string]any)["components"].(map[string]any)["apps"].(map[string]any)
+	if _, ok := apps["cert-manager"].(map[string]any)["namespaceAnnotations"]; ok {
+		t.Fatal("base values must not generate Route53 role annotations")
+	}
 }
 
-func TestBuildPlatformComponentsValuesCloudflareSecretSync(t *testing.T) {
+// TestBuildPlatformComponentsValuesUsesSelfSignedForUnsupportedDomain verifies
+// ACME is selected per domain while unsupported domains remain self-signed.
+func TestBuildPlatformComponentsValuesUsesSelfSignedForUnsupportedDomain(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
-		ACME: &clusterconfig.ACME{Server: "https://acme.example/directory", Email: "ops@example.com"},
-		Domains: []clusterconfig.Domain{{Zone: "example.com", Provider: &clusterconfig.DomainProvider{
-			Kind: "cloudflare", SecretName: "cloudflare-dns01", SecretProviderClassName: "cloudflare-dns01",
-		}}},
+		ACME:      &clusterconfig.ACME{Email: "ops@example.com"},
+		Providers: []clusterconfig.Provider{{Kind: "aws", Region: "us-east-1"}},
+		Domains: []clusterconfig.Domain{
+			{Zone: "managed.example.com", Provider: &clusterconfig.DomainProvider{Kind: "aws-route53", HostedZoneID: "Z123"}},
+			{Zone: "manual.example.com"},
+			{Zone: "cloudflare.example.com", Provider: &clusterconfig.DomainProvider{Kind: "cloudflare"}},
+		},
 	}}
-	values, err := buildPlatformComponentsValues(cfg, buildPlatformComponentsValuesOptions{})
+	values, err := buildPlatformComponentsValues(cfg)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
-	certs := componentValues(values, "platform-certs")["platform"].(map[string]any)["certs"].(map[string]any)
-	if certs["secretSync"] == nil {
-		t.Fatalf("expected secretSync values")
+	ingress := componentValues(values, "traefik")["platform"].(map[string]any)["traefik"].(map[string]any)["ingress"].(map[string]any)
+	domains := ingress["domains"].([]map[string]any)
+	if _, ok := domains[0]["issuerRef"]; !ok {
+		t.Fatalf("supported domain does not select ACME: %#v", domains[0])
 	}
-	solver := certs["ingress"].(map[string]any)["acme"].(map[string]any)["solvers"].([]map[string]any)[0]
-	ref := solver["cloudflare"].(map[string]any)["apiTokenSecretRef"].(map[string]any)
-	if got, want := ref["name"], "cloudflare-dns01"; got != want {
-		t.Fatalf("cloudflare secret name = %v, want %v", got, want)
+	for _, domain := range domains[1:] {
+		if _, ok := domain["issuerRef"]; ok {
+			t.Fatalf("unsupported domain unexpectedly selects ACME: %#v", domain)
+		}
+	}
+	acme := componentValues(values, "platform-certs")["platform"].(map[string]any)["certs"].(map[string]any)["ingress"].(map[string]any)["acme"].(map[string]any)
+	if got, want := acme["server"], clusterconfig.DefaultACMEServer; got != want {
+		t.Fatalf("default ACME server = %v, want %v", got, want)
+	}
+}
+
+// TestDNSProviderSolverRetainsFutureProviderRendering verifies dormant solver
+// rendering remains available for DNS providers not yet enabled for ACME.
+func TestDNSProviderSolverRetainsFutureProviderRendering(t *testing.T) {
+	cloudflare, _, err := dnsProviderSolver(&clusterconfig.ClusterConfig{}, clusterconfig.DomainProvider{
+		Kind: "cloudflare", SecretName: "cloudflare-dns01",
+	}, "")
+	if err != nil || cloudflare["cloudflare"] == nil {
+		t.Fatalf("Cloudflare solver = %#v, error = %v", cloudflare, err)
+	}
+	google, _, err := dnsProviderSolver(&clusterconfig.ClusterConfig{}, clusterconfig.DomainProvider{
+		Kind: "google-cloud-dns", Project: "example-project",
+	}, "")
+	if err != nil || google["cloudDNS"] == nil {
+		t.Fatalf("Google CloudDNS solver = %#v, error = %v", google, err)
 	}
 }
 
@@ -342,9 +370,9 @@ func TestBuildPlatformComponentsValuesAmbiguousAWSRegion(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ACME:      &clusterconfig.ACME{Server: "https://acme.example/directory", Email: "ops@example.com"},
 		Providers: []clusterconfig.Provider{{Kind: "aws", Region: "us-east-1"}, {Kind: "aws", Region: "us-west-2"}},
-		Domains:   []clusterconfig.Domain{{Zone: "example.com", Provider: &clusterconfig.DomainProvider{Kind: "aws"}}},
+		Domains:   []clusterconfig.Domain{{Zone: "example.com", Provider: &clusterconfig.DomainProvider{Kind: "aws-route53"}}},
 	}}
-	if _, err := buildPlatformComponentsValues(cfg, buildPlatformComponentsValuesOptions{}); err == nil {
+	if _, err := buildPlatformComponentsValues(cfg); err == nil {
 		t.Fatalf("expected ambiguous AWS provider error")
 	}
 }

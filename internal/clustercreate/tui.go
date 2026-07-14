@@ -34,12 +34,13 @@ func cloudProviderItems() []list.Item {
 }
 
 type configField struct {
-	label      string
-	value      string
-	validate   func(string) error
-	advanced   bool
-	domainOnly bool
-	noDomain   bool
+	label       string
+	value       string
+	validate    func(string) error
+	advanced    bool
+	domainOnly  bool
+	noDomain    bool
+	acmeDNSOnly bool
 }
 
 type configForm struct {
@@ -51,6 +52,7 @@ type configForm struct {
 	err            error
 	showNetworking bool
 	domain         string
+	dnsProvider    string
 	cancel         bool
 	complete       bool
 }
@@ -92,7 +94,8 @@ func newConfigForm(oidcIssuerURL, seedVersion string) configForm {
 		{label: "Cluster name", value: draft.Cluster.Name, validate: tui.Required("cluster name")},
 		{label: "Cluster ID / slug", value: draft.Cluster.ID, validate: validateClusterID},
 		{label: "Cluster domain (optional)", validate: validateOptionalDomain},
-		{label: "DNS provider (aws or blank for manual)", validate: validateDNSProvider, domainOnly: true},
+		{label: "DNS provider (aws-route53 or blank for manual)", validate: validateDNSProvider, domainOnly: true},
+		{label: "ACME account email (optional)", acmeDNSOnly: true},
 		{label: "Kubernetes API hostname", validate: validateDomain, noDomain: true},
 		{label: "AWS region", value: provider.Region, validate: tui.Required("AWS region")},
 		{label: "AWS profile (optional)", value: provider.Profile},
@@ -178,6 +181,9 @@ func (m configForm) moveNext() (tea.Model, tea.Cmd) {
 	if field.label == "Cluster domain (optional)" {
 		m.domain = value
 	}
+	if field.label == "DNS provider (aws-route53 or blank for manual)" {
+		m.dnsProvider = value
+	}
 	m.err = nil
 	m.index = m.nextIndex(m.index + 1)
 	if m.index >= len(m.fields) {
@@ -220,6 +226,9 @@ func (m *configForm) storeCurrentValue() {
 	if m.fields[m.index].label == "Cluster domain (optional)" {
 		m.domain = value
 	}
+	if m.fields[m.index].label == "DNS provider (aws-route53 or blank for manual)" {
+		m.dnsProvider = value
+	}
 }
 
 // nextIndex returns the next visible field index, skipping advanced networking
@@ -249,6 +258,9 @@ func (m configForm) fieldVisible(field configField) bool {
 		return false
 	}
 	if field.noDomain && m.domain != "" {
+		return false
+	}
+	if field.acmeDNSOnly && !(&clusterconfig.DomainProvider{Kind: m.dnsProvider}).SupportsACME() {
 		return false
 	}
 	return true
@@ -305,8 +317,11 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 		provider.LoadBalancers = nil
 	} else {
 		configuredDomain := clusterconfig.Domain{Zone: domain}
-		if values["DNS provider (aws or blank for manual)"] == "aws" {
-			configuredDomain.Provider = &clusterconfig.DomainProvider{Kind: "aws"}
+		if values["DNS provider (aws-route53 or blank for manual)"] == "aws-route53" {
+			configuredDomain.Provider = &clusterconfig.DomainProvider{Kind: "aws-route53"}
+			if email := values["ACME account email (optional)"]; email != "" {
+				cfg.Cluster.ACME = &clusterconfig.ACME{Email: email}
+			}
 		}
 		cfg.Cluster.Domains = []clusterconfig.Domain{configuredDomain}
 		cfg.Cluster.Kubernetes.APIHostname = "k8s." + domain
@@ -353,10 +368,10 @@ func validateDomain(value string) error {
 
 // validateDNSProvider validates the DNS providers supported by cluster create.
 func validateDNSProvider(value string) error {
-	if value == "" || value == "aws" {
+	if value == "" || value == "aws-route53" {
 		return nil
 	}
-	return fmt.Errorf("DNS provider must be aws or blank for manual DNS")
+	return fmt.Errorf("DNS provider must be aws-route53 or blank for manual DNS")
 }
 
 // validateArch validates the supported control-plane CPU architectures.

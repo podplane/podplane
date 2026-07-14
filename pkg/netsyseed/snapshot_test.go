@@ -254,7 +254,9 @@ func containerImage(t *testing.T, podSpec map[string]any, field string, index in
 	return container["image"].(string)
 }
 
-func TestMergeValuesFile(t *testing.T) {
+// TestMergeValuesPrecedence verifies JSON content is accepted, files win on
+// conflicts, and nested non-conflicting content values survive.
+func TestMergeValuesPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "values.yaml")
 	if err := os.WriteFile(path, []byte(`
@@ -279,6 +281,10 @@ platform:
 		},
 	}
 
+	content := []byte(`{"platform":{"components":{"imageMirror":{"enabled":false,"prefix":"content"},"apps":{"coredns":{"enabled":true}}}}}`)
+	if err := mergeValuesContent(values, content, "test content"); err != nil {
+		t.Fatalf("mergeValuesContent error = %v", err)
+	}
 	if err := mergeValuesFile(values, path); err != nil {
 		t.Fatalf("mergeValuesFile error = %v", err)
 	}
@@ -287,11 +293,14 @@ platform:
 	if got, want := mirror["enabled"], true; got != want {
 		t.Fatalf("mirror.enabled = %v, want %v", got, want)
 	}
+	if got, want := mirror["prefix"], "content"; got != want {
+		t.Fatalf("mirror.prefix = %v, want %v", got, want)
+	}
 	if got, want := mirror["hostname"], "first.example.com"; got != want {
 		t.Fatalf("mirror.hostname = %v, want %v", got, want)
 	}
 	apps := components["apps"].(map[string]any)
-	if apps["cilium"] == nil || apps["traefik"] == nil {
+	if apps["cilium"] == nil || apps["coredns"] == nil || apps["traefik"] == nil {
 		t.Fatalf("apps were not merged: %v", apps)
 	}
 }

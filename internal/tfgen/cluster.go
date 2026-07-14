@@ -63,7 +63,7 @@ func GenerateCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts C
 // does not implement.
 func validateDNSProviders(cfg *clusterconfig.ClusterConfig) error {
 	for i, domain := range cfg.Cluster.Domains {
-		if domain.Provider != nil && domain.Provider.Kind != "aws" {
+		if domain.Provider != nil && domain.Provider.Kind != "aws-route53" {
 			return fmt.Errorf("cluster.domains[%d].provider.kind %q is not supported by Terraform generation", i, domain.Provider.Kind)
 		}
 	}
@@ -114,7 +114,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	))
 	requiredProviders.Body.Attr("podplane", object(
 		identField("source", str("podplane/podplane")),
-		identField("version", str(">= 1.1.0")),
+		identField("version", str(">= 1.2.0")),
 	))
 	terraform.Body.Block(requiredProviders)
 	mainDoc.AddBlock(terraform)
@@ -352,13 +352,16 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	}
 
 	addPodplaneAWSBuckets(&bucketsDoc)
-	addPodplaneAWSRoles(&rolesDoc, accountName)
+	addPodplaneAWSRoles(&rolesDoc, cfg, accountName)
 
 	if cfg.Cluster.Seed.Name != "" && cfg.Cluster.Seed.Name != seeds.None {
 		seed := block("resource", "podplane_netsy_seed_s3", "cluster")
 		seed.Body.Attr("cluster_config_path", str("${path.module}/"+filepath.Base(configPath)))
 		seed.Body.Attr("bucket", expr("aws_s3_bucket.podplane_cluster[\"netsy\"].bucket"))
 		seed.Body.Attr("region", expr("local.aws_region"))
+		if route53ACMEEnabled(cfg) {
+			seed.Body.Attr("values_content", route53SeedValues())
+		}
 		if provider.Profile != "" {
 			seed.Body.Attr("profile", str(provider.Profile))
 		}
@@ -384,6 +387,11 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	netsyRole := block("output", "netsy_role_arn")
 	netsyRole.Body.Attr("value", expr("aws_iam_role.podplane_cluster[\"netsy\"].arn"))
 	outputsDoc.AddBlock(netsyRole)
+	if route53ACMEEnabled(cfg) {
+		certManagerRole := block("output", "cert_manager_route53_role_arn")
+		certManagerRole.Body.Attr("value", expr("aws_iam_role.cert_manager_route53[0].arn"))
+		outputsDoc.AddBlock(certManagerRole)
+	}
 	files := []File{
 		{Name: "podplane.cluster.main.tf", Content: mainDoc.String(), Type: FileTypeTerraform},
 		{Name: "podplane.cluster.buckets.tf", Content: bucketsDoc.String(), Type: FileTypeTerraform},
@@ -403,6 +411,29 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		})
 	}
 	return files
+}
+
+// route53SeedValues returns the values overlay containing
+// tf-resolved cert-manager identity and Route53 solver settings.
+func route53SeedValues() hclValue {
+	return expr(`yamlencode({
+  platform = { components = {
+    apps = { cert-manager = { namespaceAnnotations = {
+      "iam.amazonaws.com/allowed-roles" = jsonencode([aws_iam_role.cert_manager_route53[0].arn])
+    } } }
+    values = {
+      cert-manager = { cert-manager = { podAnnotations = {
+        "iam.amazonaws.com/role" = aws_iam_role.cert_manager_route53[0].arn
+      } } }
+      platform-certs = { platform = { certs = { ingress = { acme = {
+        solvers = [for name, zone in data.aws_route53_zone.managed : {
+          dnsZones = [name]
+          route53 = { hostedZoneID = zone.zone_id, region = local.aws_region }
+        }]
+      } } } } }
+    }
+  } }
+})`)
 }
 
 // addAWSDNS adds Route53 aliases for managed domains and the managed
@@ -578,7 +609,7 @@ func addPodplaneAWSBuckets(doc *hclDocument) {
 
 // addPodplaneAWSRoles adds Podplane workload roles that are intentionally
 // outside the Nstance account/network/shard modules.
-func addPodplaneAWSRoles(doc *hclDocument, accountName string) {
+func addPodplaneAWSRoles(doc *hclDocument, cfg *clusterconfig.ClusterConfig, accountName string) {
 	roleLocals := block("locals")
 	roleLocals.Body.Attr("roles", object(
 		field("netsy", object(
@@ -634,22 +665,69 @@ func addPodplaneAWSRoles(doc *hclDocument, accountName string) {
 	policy.Body.Attr("policy", expr("data.aws_iam_policy_document.podplane_cluster[each.key].json"))
 	doc.AddBlock(policy)
 
-	addPodplaneKNCPolicy(doc, accountName)
+	if route53ACMEEnabled(cfg) {
+		addCertManagerRoute53Role(doc)
+	}
+	addPodplaneKNCPolicy(doc, cfg, accountName)
+}
+
+// addCertManagerRoute53Role adds the least-privilege role assumed by the
+// cert-manager controller through kube2iam.
+func addCertManagerRoute53Role(doc *hclDocument) {
+	role := block("resource", "aws_iam_role", "cert_manager_route53")
+	role.Body.Attr("count", num(1))
+	role.Body.Attr("name", str("${local.name_prefix}-cert-manager-route53"))
+	role.Body.Attr("assume_role_policy", expr("data.aws_iam_policy_document.assume_from_knc.json"))
+	doc.AddBlock(role)
+
+	policyDocument := block("data", "aws_iam_policy_document", "cert_manager_route53")
+	changeRecords := block("statement")
+	changeRecords.Body.Attr("sid", str("ChangeDNS01Records"))
+	changeRecords.Body.Attr("actions", stringValueList([]string{"route53:ChangeResourceRecordSets"}))
+	changeRecords.Body.Attr("resources", expr("[for zone in data.aws_route53_zone.managed : zone.arn]"))
+	recordTypes := block("condition")
+	recordTypes.Body.Attr("test", str("ForAllValues:StringEquals"))
+	recordTypes.Body.Attr("variable", str("route53:ChangeResourceRecordSetsRecordTypes"))
+	recordTypes.Body.Attr("values", stringValueList([]string{"TXT"}))
+	changeRecords.Body.Block(recordTypes)
+	recordActions := block("condition")
+	recordActions.Body.Attr("test", str("ForAllValues:StringEquals"))
+	recordActions.Body.Attr("variable", str("route53:ChangeResourceRecordSetsActions"))
+	recordActions.Body.Attr("values", stringValueList([]string{"UPSERT", "DELETE"}))
+	changeRecords.Body.Block(recordActions)
+	policyDocument.Body.Block(changeRecords)
+	getChange := block("statement")
+	getChange.Body.Attr("sid", str("ReadDNS01Changes"))
+	getChange.Body.Attr("actions", stringValueList([]string{"route53:GetChange"}))
+	getChange.Body.Attr("resources", stringValueList([]string{"arn:aws:route53:::change/*"}))
+	policyDocument.Body.Block(getChange)
+	doc.AddBlock(policyDocument)
+
+	policy := block("resource", "aws_iam_role_policy", "cert_manager_route53")
+	policy.Body.Attr("count", num(1))
+	policy.Body.Attr("name", str("${local.name_prefix}-cert-manager-route53-policy"))
+	policy.Body.Attr("role", expr("aws_iam_role.cert_manager_route53[0].id"))
+	policy.Body.Attr("policy", expr("data.aws_iam_policy_document.cert_manager_route53.json"))
+	doc.AddBlock(policy)
 }
 
 // addPodplaneKNCPolicy allows Podplane worker nodes to assume only the
 // Podplane-generated workload roles they need.
-func addPodplaneKNCPolicy(doc *hclDocument, accountName string) {
+func addPodplaneKNCPolicy(doc *hclDocument, cfg *clusterconfig.ClusterConfig, accountName string) {
 	policy := block("data", "aws_iam_policy_document", "podplane_knc")
 
 	assumeWorkloadRoles := block("statement")
 	assumeWorkloadRoles.Body.Attr("sid", str("AssumePodplaneWorkloadRoles"))
 	assumeWorkloadRoles.Body.Attr("actions", stringValueList([]string{"sts:AssumeRole"}))
-	assumeWorkloadRoles.Body.Attr("resources", list(
+	resources := []hclValue{
 		expr("aws_iam_role.podplane_cluster[\"netsy\"].arn"),
 		expr("aws_iam_role.podplane_cluster[\"registry-read-only\"].arn"),
 		expr("aws_iam_role.podplane_cluster[\"registry-read-write\"].arn"),
-	))
+	}
+	if route53ACMEEnabled(cfg) {
+		resources = append(resources, expr("aws_iam_role.cert_manager_route53[0].arn"))
+	}
+	assumeWorkloadRoles.Body.Attr("resources", list(resources...))
 	policy.Body.Block(assumeWorkloadRoles)
 
 	describeRegions := block("statement")
@@ -664,6 +742,20 @@ func addPodplaneKNCPolicy(doc *hclDocument, accountName string) {
 	rolePolicy.Body.Attr("role", expr("module."+accountName+".agent_iam_role_name"))
 	rolePolicy.Body.Attr("policy", expr("data.aws_iam_policy_document.podplane_knc.json"))
 	doc.AddBlock(rolePolicy)
+}
+
+// route53ACMEEnabled reports whether generated infrastructure must provision
+// the cert-manager Route53 identity.
+func route53ACMEEnabled(cfg *clusterconfig.ClusterConfig) bool {
+	if cfg.Cluster.ACME == nil {
+		return false
+	}
+	for _, domain := range cfg.Cluster.Domains {
+		if domain.Provider != nil && domain.Provider.Kind == "aws-route53" {
+			return true
+		}
+	}
+	return false
 }
 
 // mutableEnvValue returns the Terraform expression for vmconfig mutable.env

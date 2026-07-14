@@ -9,6 +9,10 @@ import (
 	"slices"
 )
 
+// DefaultACMEServer is the public ACME directory used when cluster.acme.server
+// is omitted.
+const DefaultACMEServer = "https://acme-v02.api.letsencrypt.org/directory"
+
 // ClusterConfig represents a cluster configuration file
 // Typically files are named podplane.cluster.jsonc or have
 // a .cluster.jsonc suffix.
@@ -132,7 +136,7 @@ type ComponentsSourceSecretRef struct {
 
 // ACME describes cluster-level ACME account configuration for ingress certs.
 type ACME struct {
-	Server string `json:"server"`
+	Server string `json:"server,omitempty"`
 	Email  string `json:"email"`
 }
 
@@ -168,6 +172,12 @@ type DomainProvider struct {
 	SecretKey               string `json:"secret_key,omitempty"`
 	Project                 string `json:"project,omitempty"`
 	HostedZoneName          string `json:"hosted_zone_name,omitempty"`
+}
+
+// SupportsACME reports whether Podplane currently supports automated ACME
+// DNS-01 challenges for this domain provider.
+func (p *DomainProvider) SupportsACME() bool {
+	return p != nil && p.Kind == "aws-route53"
 }
 
 // Pool is one entry in cluster.pools.<name>.

@@ -6,7 +6,9 @@ package clusterconfig
 
 import (
 	"fmt"
+	"net/mail"
 	"net/netip"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -115,6 +117,29 @@ func ValidateComponents(components Components) error {
 	return nil
 }
 
+// ValidateACME validates the optional public certificate configuration.
+func ValidateACME(acme *ACME, domains []Domain) error {
+	if acme == nil {
+		return nil
+	}
+	address, err := mail.ParseAddress(acme.Email)
+	if err != nil || address.Address != acme.Email {
+		return fmt.Errorf("email must be a valid email address")
+	}
+	if acme.Server != "" {
+		server, err := url.ParseRequestURI(acme.Server)
+		if err != nil || server.Scheme != "https" || server.Host == "" {
+			return fmt.Errorf("server must be a valid HTTPS URL")
+		}
+	}
+	for _, domain := range domains {
+		if domain.Provider.SupportsACME() {
+			return nil
+		}
+	}
+	return fmt.Errorf("requires at least one domain with a supported ACME DNS provider")
+}
+
 // ValidateSecrets validates safe Podplane Secrets provider metadata.
 func ValidateSecrets(secrets Secrets) error {
 	if len(secrets.Providers) == 0 {
@@ -200,6 +225,9 @@ func Validate(cfg *ClusterConfig) error {
 	if len(cfg.Cluster.Domains) > 0 && cfg.Cluster.Registry.Hostname == "" {
 		return fmt.Errorf("cluster.registry.hostname is required when domains are configured")
 	}
+	if err := ValidateACME(cfg.Cluster.ACME, cfg.Cluster.Domains); err != nil {
+		return fmt.Errorf("cluster.acme: %w", err)
+	}
 	if _, err := ServiceNetworkFromCIDRs(cfg.Cluster.Kubernetes.ServiceCIDR); err != nil {
 		return fmt.Errorf("cluster.kubernetes.service_cidr: %w", err)
 	}
@@ -258,9 +286,9 @@ func validateDomains(cfg *ClusterConfig, provider Provider) error {
 		zones[domain.Zone] = true
 		if domain.Provider != nil {
 			switch domain.Provider.Kind {
-			case "aws", "cloudflare", "google", "local":
+			case "aws-route53", "cloudflare", "google-cloud-dns", "local":
 			default:
-				return fmt.Errorf("%s.provider.kind must be aws, cloudflare, google, or local", prefix)
+				return fmt.Errorf("%s.provider.kind must be aws-route53, cloudflare, google-cloud-dns, or local", prefix)
 			}
 		}
 		if err := requireListener(provider, domain.ResolvedDomainLoadBalancer(), 443, 443, ""); err != nil {
