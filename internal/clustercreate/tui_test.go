@@ -178,6 +178,84 @@ func TestConfigFormBuildsDomainlessCluster(t *testing.T) {
 	}
 }
 
+// TestConfigFormAdaptsSubnetsToCustomVPCAndRegion verifies generated subnet
+// CIDRs and availability zones follow the wizard's networking inputs.
+func TestConfigFormAdaptsSubnetsToCustomVPCAndRegion(t *testing.T) {
+	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form.showNetworking = true
+	form.fields[indexForField(t, form, "AWS region")].value = "us-west-2"
+	form.fields[indexForField(t, form, "VPC IPv4 CIDR")].value = "172.19.0.0/16"
+	form.fields[indexForField(t, form, "AWS availability zone")].value = "us-west-2a"
+
+	cfg, err := form.config()
+	if err != nil {
+		t.Fatalf("config returned error: %v", err)
+	}
+	provider := cfg.Cluster.Providers[0]
+	if _, ok := provider.Zones["us-west-2a"]; !ok {
+		t.Fatalf("provider zones = %#v, want us-west-2a", provider.Zones)
+	}
+	for _, subnet := range provider.Zones["us-west-2a"] {
+		if !strings.HasPrefix(subnet.V4CIDR, "172.19.") {
+			t.Fatalf("subnet CIDR = %q, want it within 172.19.0.0/16", subnet.V4CIDR)
+		}
+	}
+}
+
+// TestConfigFormRejectsAvailabilityZoneOutsideRegion preserves final config
+// validation as a fallback for the immediate field validation.
+func TestConfigFormRejectsAvailabilityZoneOutsideRegion(t *testing.T) {
+	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form.showNetworking = true
+	form.fields[indexForField(t, form, "AWS region")].value = "us-west-2"
+	form.fields[indexForField(t, form, "AWS availability zone")].value = "us-west-1a"
+
+	if _, err := form.config(); err == nil || !strings.Contains(err.Error(), "must be an availability zone in region us-west-2") {
+		t.Fatalf("config error = %v, want region mismatch error", err)
+	}
+}
+
+// TestConfigFormRejectsInvalidNetworkFieldsBeforeAdvancing verifies each
+// editable networking field keeps focus and displays its validation error.
+func TestConfigFormRejectsInvalidNetworkFieldsBeforeAdvancing(t *testing.T) {
+	tests := []struct {
+		field   string
+		value   string
+		prepare func(*configForm)
+		wantErr string
+	}{
+		{field: "AWS region", value: "us-west", wantErr: "valid AWS region"},
+		{field: "VPC IPv4 CIDR", value: "172.19.0.1/16", wantErr: "canonical IPv4 /16"},
+		{
+			field: "AWS availability zone", value: "us-west-1a", wantErr: "availability zone in region us-west-2",
+			prepare: func(form *configForm) {
+				form.fields[indexForField(t, *form, "AWS region")].value = "us-west-2"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.field, func(t *testing.T) {
+			form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+			form.showNetworking = true
+			if tt.prepare != nil {
+				tt.prepare(&form)
+			}
+			form.index = indexForField(t, form, tt.field)
+			form.input.SetValue(tt.value)
+
+			model, _ := form.moveNext()
+			form = model.(configForm)
+			if form.err == nil || !strings.Contains(form.err.Error(), tt.wantErr) {
+				t.Fatalf("field error = %v, want error containing %q", form.err, tt.wantErr)
+			}
+			if got := form.fields[form.index].label; got != tt.field {
+				t.Fatalf("active field = %q, want %q", got, tt.field)
+			}
+		})
+	}
+}
+
 func TestConfigFormCanNavigateBackWithoutLosingAnswers(t *testing.T) {
 	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
 	form.input.SetValue("production")

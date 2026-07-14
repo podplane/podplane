@@ -16,6 +16,7 @@ import (
 var clusterIDPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 var secretsProviderNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 var domainLabelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+var awsRegionPattern = regexp.MustCompile(`^[a-z]{2}(?:-[a-z0-9]+)+-[1-9][0-9]*$`)
 
 // ValidateDomainName validates a fully qualified DNS name without a trailing
 // dot or wildcard label.
@@ -56,6 +57,25 @@ func ValidateClusterID(id string) error {
 	}
 	if id == "local" || id == "k8s" || id == "oidc" {
 		return fmt.Errorf("%q is reserved", id)
+	}
+	return nil
+}
+
+// ValidateAWSRegion validates the syntax shared by standard and partition-specific AWS regions.
+func ValidateAWSRegion(region string) error {
+	if !awsRegionPattern.MatchString(region) {
+		return fmt.Errorf("must be a valid AWS region")
+	}
+	return nil
+}
+
+// ValidateAWSAvailabilityZone verifies that a standard or local AWS availability zone belongs to region.
+func ValidateAWSAvailabilityZone(region, zone string) error {
+	suffix, ok := strings.CutPrefix(zone, region)
+	standardZone := len(suffix) == 1 && suffix[0] >= 'a' && suffix[0] <= 'z'
+	localZone := strings.HasPrefix(suffix, "-") && len(suffix) > 1
+	if !ok || (!standardZone && !localZone) {
+		return fmt.Errorf("must be an availability zone in region %s", region)
 	}
 	return nil
 }
@@ -338,8 +358,8 @@ func validateProvider(cfg *ClusterConfig, index int, provider Provider) error {
 	prefix := fmt.Sprintf("cluster.providers[%d]", index)
 	switch provider.Kind {
 	case "aws":
-		if provider.Region == "" {
-			return fmt.Errorf("%s.region is required for aws", prefix)
+		if err := ValidateAWSRegion(provider.Region); err != nil {
+			return fmt.Errorf("%s.region %w", prefix, err)
 		}
 	case "google":
 		return fmt.Errorf("%s.kind google is not supported by cluster create yet", prefix)
@@ -354,6 +374,14 @@ func validateProvider(cfg *ClusterConfig, index int, provider Provider) error {
 	if provider.VPC.ID == "" && provider.VPC.V4CIDR == "" {
 		return fmt.Errorf("%s.vpc.id or vpc.v4cidr is required", prefix)
 	}
+	var vpcPrefix netip.Prefix
+	if provider.VPC.V4CIDR != "" {
+		var err error
+		vpcPrefix, err = netip.ParsePrefix(provider.VPC.V4CIDR)
+		if err != nil || !vpcPrefix.Addr().Is4() || vpcPrefix != vpcPrefix.Masked() {
+			return fmt.Errorf("%s.vpc.v4cidr must be a canonical IPv4 CIDR", prefix)
+		}
+	}
 	if provider.VPC.V6CIDR != "" && provider.VPC.V6CIDR != "auto" {
 		return fmt.Errorf("%s.vpc.v6cidr only supports \"auto\" for managed AWS generation", prefix)
 	}
@@ -365,12 +393,27 @@ func validateProvider(cfg *ClusterConfig, index int, provider Provider) error {
 		if zone == "" {
 			return fmt.Errorf("%s.zones contains an empty zone name", prefix)
 		}
+		if provider.Kind == "aws" {
+			if err := ValidateAWSAvailabilityZone(provider.Region, zone); err != nil {
+				return fmt.Errorf("%s.zones.%s %w", prefix, zone, err)
+			}
+		}
 		if len(subnets) == 0 {
 			return fmt.Errorf("%s.zones.%s must contain at least one subnet", prefix, zone)
 		}
 		for i, subnet := range subnets {
-			if err := validateSubnet(cfg, fmt.Sprintf("%s.zones.%s[%d]", prefix, zone, i), subnet); err != nil {
+			subnetPrefix := fmt.Sprintf("%s.zones.%s[%d]", prefix, zone, i)
+			if err := validateSubnet(cfg, subnetPrefix, subnet); err != nil {
 				return err
+			}
+			if subnet.V4CIDR != "" {
+				parsed, err := netip.ParsePrefix(subnet.V4CIDR)
+				if err != nil || !parsed.Addr().Is4() || parsed != parsed.Masked() {
+					return fmt.Errorf("%s.v4cidr must be a canonical IPv4 CIDR", subnetPrefix)
+				}
+				if vpcPrefix.IsValid() && (parsed.Bits() < vpcPrefix.Bits() || !vpcPrefix.Contains(parsed.Addr())) {
+					return fmt.Errorf("%s.v4cidr must be contained within VPC CIDR %s", subnetPrefix, provider.VPC.V4CIDR)
+				}
 			}
 			subnetRoles[subnet.ResolvedRole()] = true
 		}

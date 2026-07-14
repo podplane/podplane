@@ -98,6 +98,31 @@ func TestValidateClusterID(t *testing.T) {
 	}
 }
 
+// TestValidateAWSRegionAndAvailabilityZone covers standard, partition-specific,
+// local, malformed, and cross-region AWS location names.
+func TestValidateAWSRegionAndAvailabilityZone(t *testing.T) {
+	for _, region := range []string{"us-west-2", "us-gov-west-1", "cn-north-1"} {
+		if err := ValidateAWSRegion(region); err != nil {
+			t.Errorf("ValidateAWSRegion(%q) returned error: %v", region, err)
+		}
+	}
+	for _, region := range []string{"", "us-west", "us_west_2", "west-2"} {
+		if err := ValidateAWSRegion(region); err == nil {
+			t.Errorf("ValidateAWSRegion(%q) returned nil, want error", region)
+		}
+	}
+	for _, zone := range []string{"us-west-2a", "us-west-2-lax-1a"} {
+		if err := ValidateAWSAvailabilityZone("us-west-2", zone); err != nil {
+			t.Errorf("ValidateAWSAvailabilityZone(%q) returned error: %v", zone, err)
+		}
+	}
+	for _, zone := range []string{"us-west-1a", "us-west-20a", "us-west-2"} {
+		if err := ValidateAWSAvailabilityZone("us-west-2", zone); err == nil {
+			t.Errorf("ValidateAWSAvailabilityZone(%q) returned nil, want error", zone)
+		}
+	}
+}
+
 // TestValidateDomainsAndListeners covers domain uniqueness, references, and
 // required listener mappings.
 func TestValidateDomainsAndListeners(t *testing.T) {
@@ -188,6 +213,51 @@ func TestValidateDNSProviderKinds(t *testing.T) {
 	cfg.Cluster.Domains[0].Provider.Kind = "other"
 	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "must be aws-route53, cloudflare, google-cloud-dns, or local") {
 		t.Fatalf("Validate unknown DNS provider error = %v, want supported-kind error", err)
+	}
+}
+
+// TestValidateAWSNetworkPlacement rejects values that AWS would otherwise
+// reject only after Terraform has started creating unrelated resources.
+func TestValidateAWSNetworkPlacement(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*Provider)
+		wantErr string
+	}{
+		{
+			name: "zone outside region",
+			mutate: func(provider *Provider) {
+				provider.Zones["us-west-1a"] = provider.Zones["us-east-1a"]
+				delete(provider.Zones, "us-east-1a")
+			},
+			wantErr: "must be an availability zone in region us-east-1",
+		},
+		{
+			name: "subnet outside VPC",
+			mutate: func(provider *Provider) {
+				subnets := provider.Zones["us-east-1a"]
+				subnets[0].V4CIDR = "172.19.1.0/24"
+				provider.Zones["us-east-1a"] = subnets
+			},
+			wantErr: "must be contained within VPC CIDR 172.18.0.0/16",
+		},
+		{
+			name: "invalid VPC CIDR",
+			mutate: func(provider *Provider) {
+				provider.VPC.V4CIDR = "172.18.0.1/16"
+			},
+			wantErr: "must be a canonical IPv4 CIDR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validManagedConfig()
+			tt.mutate(&cfg.Cluster.Providers[0])
+			if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 

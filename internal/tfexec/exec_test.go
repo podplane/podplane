@@ -24,6 +24,7 @@ func TestCLIInvokesTofuWithExpectedArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(CommandEnvVar, "")
 	cli, err := NewCLI()
 	if err != nil {
 		t.Fatalf("NewCLI returned error: %v", err)

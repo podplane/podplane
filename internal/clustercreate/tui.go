@@ -6,6 +6,7 @@ package clustercreate
 
 import (
 	"fmt"
+	"net/netip"
 	"strconv"
 	"strings"
 
@@ -97,11 +98,11 @@ func newConfigForm(oidcIssuerURL, seedVersion string) configForm {
 		{label: "DNS provider (aws-route53 or blank for manual)", validate: validateDNSProvider, domainOnly: true},
 		{label: "ACME account email (optional)", acmeDNSOnly: true},
 		{label: "Kubernetes API hostname", validate: validateDomain, noDomain: true},
-		{label: "AWS region", value: provider.Region, validate: tui.Required("AWS region")},
+		{label: "AWS region", value: provider.Region, validate: clusterconfig.ValidateAWSRegion},
 		{label: "AWS profile (optional)", value: provider.Profile},
 		{label: "Initial platform components (recommended, minimal, none)", value: seeds.Recommended, validate: validateSeedName},
 		{label: "Configure networking options?", value: "no", validate: validateYesNo},
-		{label: "VPC IPv4 CIDR", value: provider.VPC.V4CIDR, validate: tui.Required("VPC IPv4 CIDR"), advanced: true},
+		{label: "VPC IPv4 CIDR", value: provider.VPC.V4CIDR, validate: validateVPCCIDR, advanced: true},
 		{label: "AWS availability zone", value: zone, validate: tui.Required("AWS availability zone"), advanced: true},
 		{label: "Control-plane architecture", value: pool.Arch, validate: validateArch},
 		{label: "Control-plane instance type", value: pool.InstanceType, validate: tui.Required("instance type")},
@@ -170,6 +171,13 @@ func (m configForm) moveNext() (tea.Model, tea.Cmd) {
 	field := m.fields[m.index]
 	if field.validate != nil {
 		if err := field.validate(value); err != nil {
+			m.err = err
+			return m, nil
+		}
+	}
+	if field.label == "AWS availability zone" {
+		region := m.fields[indexForLabel(m.fields, "AWS region")].value
+		if err := clusterconfig.ValidateAWSAvailabilityZone(region, value); err != nil {
 			m.err = err
 			return m, nil
 		}
@@ -307,8 +315,26 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 	if !m.showNetworking {
 		zone = provider.Region + "a"
 	}
+	if err := clusterconfig.ValidateAWSAvailabilityZone(provider.Region, zone); err != nil {
+		return nil, fmt.Errorf("AWS availability zone %q %w", zone, err)
+	}
+	vpcPrefix, err := netip.ParsePrefix(provider.VPC.V4CIDR)
+	if err != nil {
+		return nil, fmt.Errorf("parse VPC IPv4 CIDR: %w", err)
+	}
+	vpcAddr := vpcPrefix.Addr().As4()
+	subnets := provider.Zones["us-east-1a"]
+	for i := range subnets {
+		subnetPrefix, err := netip.ParsePrefix(subnets[i].V4CIDR)
+		if err != nil {
+			return nil, fmt.Errorf("parse default subnet IPv4 CIDR: %w", err)
+		}
+		subnetAddr := subnetPrefix.Addr().As4()
+		subnetAddr[0], subnetAddr[1] = vpcAddr[0], vpcAddr[1]
+		subnets[i].V4CIDR = netip.PrefixFrom(netip.AddrFrom4(subnetAddr), subnetPrefix.Bits()).String()
+	}
 	provider.Zones = map[string][]clusterconfig.Subnet{
-		zone: provider.Zones["us-east-1a"],
+		zone: subnets,
 	}
 	domain := values["Cluster domain (optional)"]
 	if domain == "" {
@@ -372,6 +398,26 @@ func validateDNSProvider(value string) error {
 		return nil
 	}
 	return fmt.Errorf("DNS provider must be aws-route53 or blank for manual DNS")
+}
+
+// validateVPCCIDR validates the /16 network shape used by the cluster wizard's
+// automatically allocated default subnets.
+func validateVPCCIDR(value string) error {
+	prefix, err := netip.ParsePrefix(value)
+	if err != nil || !prefix.Addr().Is4() || prefix.Bits() != 16 || prefix != prefix.Masked() {
+		return fmt.Errorf("VPC IPv4 CIDR must be a canonical IPv4 /16")
+	}
+	return nil
+}
+
+// indexForLabel returns the index of the field with label, or -1 if absent.
+func indexForLabel(fields []configField, label string) int {
+	for i := range fields {
+		if fields[i].label == label {
+			return i
+		}
+	}
+	return -1
 }
 
 // validateArch validates the supported control-plane CPU architectures.
