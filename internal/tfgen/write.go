@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/hashicorp/hcl/v2/hclwrite"
 )
 
 const header = `# Podplane managed OpenTofu/Terraform file.
@@ -40,7 +42,7 @@ func WriteFiles(dir string, files []File) error {
 		content := file.Content
 		switch file.Type {
 		case FileTypeTerraform:
-			content = header + content
+			content = string(hclwrite.Format([]byte(header + content)))
 		case FileTypeJSON:
 		default:
 			return fmt.Errorf("generated file %s has unsupported type %d", file.Name, file.Type)

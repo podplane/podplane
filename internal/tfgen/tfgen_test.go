@@ -5,11 +5,14 @@
 package tfgen
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hashicorp/hcl/v2/hclwrite"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/deps"
@@ -461,7 +464,7 @@ func TestWriteFilesPreservesCustomTF(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := WriteFiles(dir, []File{
-		{Name: "podplane.cluster.main.tf", Content: "locals {}\n", Type: FileTypeTerraform},
+		{Name: "podplane.cluster.main.tf", Content: "locals {\n  short = 1\n  longer = 2\n}\n", Type: FileTypeTerraform},
 		{Name: "podplane.cluster.vmconfig_knc_debian-13_arm64.json", Content: "{}\n", Type: FileTypeJSON},
 	}); err != nil {
 		t.Fatalf("WriteFiles returned error: %v", err)
@@ -472,6 +475,13 @@ func TestWriteFilesPreservesCustomTF(t *testing.T) {
 	}
 	if string(custom) != "custom" {
 		t.Fatalf("custom file changed: %q", custom)
+	}
+	terraformed, err := os.ReadFile(filepath.Join(dir, "podplane.cluster.main.tf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if formatted := hclwrite.Format(terraformed); !bytes.Equal(formatted, terraformed) {
+		t.Fatalf("generated Terraform is not canonically formatted:\n%s", terraformed)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "podplane.cluster.vmconfig_knc_debian-13_arm64.json"))
 	if err != nil {
