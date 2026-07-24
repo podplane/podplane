@@ -33,16 +33,22 @@ Components are deployed with an opinionated, tested configuration - not the full
 - `platform-components` for Podplane component management. This chart creates the Flux source, platform namespaces, and HelmReleases for enabled components.
 - `platform-rbac` for default Podplane platform [RBAC](rbac.md) and admission policies
 
+### Provider-Specific Components
+
+These components are installed as core components if the cluster infrastructure provider is a match:
+
+- `csi-aws-ebs` for persistent storage on AWS
+- `cluster-api` for the [Cluster API](https://cluster-api.sigs.k8s.io/) core controller on AWS and Google Cloud
+    - `cluster-api-crds`
+- `nstance-operator` for the [Nstance Operator](https://nstance.dev/docs/components/nstance-operator/) on AWS and Google Cloud (requires `cluster-api`)
+    - `nstance-operator-crds`
+
 ### Addon Components
 
 Recommended components which can also be installed via `podplane install` atop the Minimal set:
 
 - `agent-sandbox`: [Agent Sandbox](https://agent-sandbox.sigs.k8s.io/) controller for isolated, stateful singleton workloads such as AI agent runtimes
     - `agent-sandbox-crds`
-- `cluster-api` for the [Cluster API](https://cluster-api.sigs.k8s.io/) core controller
-    - `cluster-api-crds`
-- `nstance-operator` for the [Nstance Operator](https://nstance.dev/docs/components/nstance-operator/) (requires `cluster-api`)
-    - `nstance-operator-crds`
 - `cert-manager`: [cert-manager](https://cert-manager.io/docs/) and [cert-manager-csi-driver](https://cert-manager.io/docs/usage/csi-driver/)
     - `cert-manager-crds`
 - `platform-certs` for default self-signed and ACME certificate issuers, CA, certificates, etc. (requires `cert-manager`)
@@ -60,8 +66,6 @@ Addon components which can only be installed via `podplane install`:
 
 - `snapshot`: [Snapshot controller](https://kubernetes-csi.github.io/docs/snapshot-controller.html)
     - `snapshot-crds`
-- Cloud Provider CSI Drivers:
-    - `csi-aws-ebs`: [AWS EBS CSI Drivers](https://github.com/kubernetes-sigs/aws-ebs-csi-driver)
 - `metrics-server`: [Kubernetes Metrics Server](https://github.com/kubernetes-sigs/metrics-server)
 - `cluster-autoscaler`: [Kubernetes Cluster Autoscaler](https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler) for automatic node scaling via Cluster API
 - `node-problem-detector`: [Node Problem Detector](https://github.com/kubernetes/node-problem-detector) for surfacing node hardware/kernel/runtime issues
