@@ -74,9 +74,9 @@ func TestResolvedImageDropsTagAndAppendsDigest(t *testing.T) {
 
 func TestPopulateComponentsZotStoreRequiresImageSize(t *testing.T) {
 	manifest := &ComponentsManifest{Components: Components{Images: []ComponentImage{{
-		Component: "test",
-		Image:     "example.com/test/app:v1",
-		Digest:    "sha256:abc",
+		Components: []string{"test"},
+		Image:      "example.com/test/app:v1",
+		Digest:     "sha256:abc",
 	}}}}
 	err := PopulateComponentsZotStore(context.Background(), t.TempDir(), manifest, nil)
 	if err == nil {
@@ -128,10 +128,10 @@ func TestComponentImageCachedUsesLocalZotIndex(t *testing.T) {
 	sum := sha256.Sum256(body)
 	digest := "sha256:" + hex.EncodeToString(sum[:])
 	image := ComponentImage{
-		Component: "test",
-		Image:     "example.com/test/app:v1",
-		Digest:    digest,
-		Size:      int64(len(body)),
+		Components: []string{"test"},
+		Image:      "example.com/test/app:v1",
+		Digest:     digest,
+		Size:       int64(len(body)),
 	}
 	repoDir := filepath.Join(destDir, zotRootDirectory, filepath.FromSlash(mirrorRepoFromChartImage(defaultMirrorPrefix, image.Image)))
 	if err := os.MkdirAll(filepath.Join(repoDir, "blobs", "sha256"), 0o755); err != nil {
@@ -176,10 +176,10 @@ func TestComponentImageCachedRequiresPinnedChartDigest(t *testing.T) {
 	indexSum := sha256.Sum256(indexBody)
 	indexDigest := "sha256:" + hex.EncodeToString(indexSum[:])
 	image := ComponentImage{
-		Component: "test",
-		Image:     "example.com/test/app:v1@" + indexDigest,
-		Digest:    childDigest,
-		Size:      int64(len(childBody)),
+		Components: []string{"test"},
+		Image:      "example.com/test/app:v1@" + indexDigest,
+		Digest:     childDigest,
+		Size:       int64(len(childBody)),
 	}
 	repoDir := filepath.Join(destDir, zotRootDirectory, filepath.FromSlash(mirrorRepoFromChartImage(defaultMirrorPrefix, image.Image)))
 	if err := os.MkdirAll(filepath.Join(repoDir, "blobs", "sha256"), 0o755); err != nil {
@@ -223,10 +223,10 @@ func TestComponentImageCachedRequiresTopLevelChildManifest(t *testing.T) {
 	tagIndexSum := sha256.Sum256(tagIndexBody)
 	tagIndexDigest := "sha256:" + hex.EncodeToString(tagIndexSum[:])
 	image := ComponentImage{
-		Component: "test",
-		Image:     "example.com/test/app:v1",
-		Digest:    childDigest,
-		Size:      int64(len(childBody)),
+		Components: []string{"test"},
+		Image:      "example.com/test/app:v1",
+		Digest:     childDigest,
+		Size:       int64(len(childBody)),
 	}
 	repoDir := filepath.Join(destDir, zotRootDirectory, filepath.FromSlash(mirrorRepoFromChartImage(defaultMirrorPrefix, image.Image)))
 	if err := os.MkdirAll(filepath.Join(repoDir, "blobs", "sha256"), 0o755); err != nil {
@@ -278,11 +278,11 @@ func TestComponentImageCachedRejectsDuplicateSameArchManifest(t *testing.T) {
 	newSum := sha256.Sum256(newBody)
 	newDigest := "sha256:" + hex.EncodeToString(newSum[:])
 	image := ComponentImage{
-		Component: "test",
-		Image:     "example.com/test/app:v1",
-		Digest:    newDigest,
-		Size:      int64(len(newBody)),
-		Platform:  "linux/arm64/v8",
+		Components: []string{"test"},
+		Image:      "example.com/test/app:v1",
+		Digest:     newDigest,
+		Size:       int64(len(newBody)),
+		Platform:   "linux/arm64/v8",
 	}
 	repoDir := filepath.Join(destDir, zotRootDirectory, filepath.FromSlash(mirrorRepoFromChartImage(defaultMirrorPrefix, image.Image)))
 	if err := os.MkdirAll(filepath.Join(repoDir, "blobs", "sha256"), 0o755); err != nil {

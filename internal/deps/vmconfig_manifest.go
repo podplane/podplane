@@ -105,12 +105,12 @@ type VMConfigImage struct {
 // registry mirror writer's ComponentImage input type.
 func vmconfigComponentImage(image VMConfigImage) ComponentImage {
 	return ComponentImage{
-		Component: "vmconfig",
-		Image:     image.Image,
-		Digest:    image.Digest,
-		Size:      image.Size,
-		Platform:  image.Platform,
-		Index:     image.Index,
+		Components: []string{"vmconfig"},
+		Image:      image.Image,
+		Digest:     image.Digest,
+		Size:       image.Size,
+		Platform:   image.Platform,
+		Index:      image.Index,
 	}
 }
 

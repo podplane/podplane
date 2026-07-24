@@ -73,15 +73,20 @@ func validateComponentsSource(source *ComponentsSource) error {
 
 // ComponentImage describes one source image rendered by a component chart.
 type ComponentImage struct {
-	Component string   `json:"component"`
-	Image     string   `json:"image"`
-	Digest    string   `json:"digest"`
-	Size      int64    `json:"size"`
-	Platform  string   `json:"platform,omitempty"`
-	Index     string   `json:"index,omitempty"`
-	Providers []string `json:"providers,omitempty"`
-	Addon     bool     `json:"addon,omitempty"`
-	Cached    bool     `json:"cached,omitempty"`
+	Components []string `json:"components,omitempty"`
+	Image      string   `json:"image"`
+	Digest     string   `json:"digest"`
+	Size       int64    `json:"size"`
+	Platform   string   `json:"platform,omitempty"`
+	Index      string   `json:"index,omitempty"`
+	Providers  []string `json:"providers,omitempty"`
+	Addon      bool     `json:"addon,omitempty"`
+	Cached     bool     `json:"cached,omitempty"`
+}
+
+// componentLabel formats an image's component ownership for diagnostics.
+func (i ComponentImage) componentLabel() string {
+	return strings.Join(i.Components, ",")
 }
 
 // ResetCached clears local cache-state markers from all component images.
@@ -118,7 +123,7 @@ func (m *ComponentsManifest) DownloadImageIndexes(filter ComponentImageFilter) [
 		if !providers.includesAny(image.Providers) {
 			continue
 		}
-		if image.Addon && !addons.includes(image.Component) {
+		if image.Addon && !addons.includesAny(image.Components) {
 			continue
 		}
 		indexes = append(indexes, i)

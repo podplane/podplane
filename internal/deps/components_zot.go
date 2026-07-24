@@ -91,13 +91,13 @@ func PopulateComponentsZotStore(ctx context.Context, destDir string, manifest *C
 	}
 	for _, image := range manifest.Components.Images {
 		if image.Image == "" {
-			return fmt.Errorf("component %s has empty image", image.Component)
+			return fmt.Errorf("component %s has empty image", image.componentLabel())
 		}
 		if image.Digest == "" {
-			return fmt.Errorf("component %s image %s has empty digest", image.Component, image.Image)
+			return fmt.Errorf("component %s image %s has empty digest", image.componentLabel(), image.Image)
 		}
 		if image.Size <= 0 {
-			return fmt.Errorf("component %s image %s has missing size", image.Component, image.Image)
+			return fmt.Errorf("component %s image %s has missing size", image.componentLabel(), image.Image)
 		}
 		cached, err := componentImageCached(destDir, image)
 		if err != nil {

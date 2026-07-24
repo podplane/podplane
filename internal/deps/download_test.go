@@ -415,11 +415,11 @@ func TestVerifyRequiresCachedVMConfigImages(t *testing.T) {
 
 func TestFilterComponentsManifestExcludesAddonsAndProviderSpecificImagesByDefault(t *testing.T) {
 	manifest := &ComponentsManifest{Components: Components{Images: []ComponentImage{
-		{Component: "cilium", Image: "cilium"},
-		{Component: "traefik", Image: "traefik", Addon: true},
-		{Component: "csi-aws-ebs", Image: "aws-ebs", Providers: []string{"aws"}},
-		{Component: "aws-addon", Image: "aws-addon", Addon: true, Providers: []string{"aws"}},
-		{Component: "arm64", Image: "arm64", Platform: "linux/arm64/v8"},
+		{Components: []string{"cilium"}, Image: "cilium"},
+		{Components: []string{"traefik"}, Image: "traefik", Addon: true},
+		{Components: []string{"csi-aws-ebs"}, Image: "aws-ebs", Providers: []string{"aws"}},
+		{Components: []string{"aws-addon"}, Image: "aws-addon", Addon: true, Providers: []string{"aws"}},
+		{Components: []string{"arm64"}, Image: "arm64", Platform: "linux/arm64/v8"},
 	}}}
 	archs := []string{"amd64"}
 
@@ -433,10 +433,27 @@ func TestFilterComponentsManifestExcludesAddonsAndProviderSpecificImagesByDefaul
 		t.Fatalf("filtered images = %v, want cilium,traefik,aws-ebs", got)
 	}
 
-	manifest.Components.Images = []ComponentImage{{Component: "aws-addon", Image: "aws-addon", Addon: true, Providers: []string{"aws"}}}
+	manifest.Components.Images = []ComponentImage{{Components: []string{"aws-addon"}, Image: "aws-addon", Addon: true, Providers: []string{"aws"}}}
 	indexes = manifest.DownloadImageIndexes(ComponentImageFilter{Archs: archs, Providers: []string{"all"}, Addons: []string{"all"}})
 	if got := componentImageNamesAt(manifest.Components.Images, indexes); strings.Join(got, ",") != "aws-addon" {
 		t.Fatalf("filtered images = %v, want aws-addon", got)
+	}
+}
+
+func TestFilterComponentsManifestIncludesSharedImageForEitherAddon(t *testing.T) {
+	manifest := &ComponentsManifest{Components: Components{Images: []ComponentImage{
+		{
+			Components: []string{"cert-manager", "secrets-store-csi-driver"},
+			Image:      "shared-csi-sidecar",
+			Addon:      true,
+		},
+	}}}
+
+	for _, addon := range []string{"cert-manager", "secrets-store-csi-driver"} {
+		indexes := manifest.DownloadImageIndexes(ComponentImageFilter{Addons: []string{addon}})
+		if got := componentImageNamesAt(manifest.Components.Images, indexes); strings.Join(got, ",") != "shared-csi-sidecar" {
+			t.Fatalf("filtered images for %s = %v, want shared-csi-sidecar", addon, got)
+		}
 	}
 }
 

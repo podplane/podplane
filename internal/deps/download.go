@@ -239,13 +239,13 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 	for _, index := range componentIndexes {
 		image := componentsManifest.Components.Images[index]
 		if image.Image == "" {
-			return fmt.Errorf("component %s has empty image", image.Component)
+			return fmt.Errorf("component %s has empty image", image.componentLabel())
 		}
 		if image.Digest == "" {
-			return fmt.Errorf("component %s image %s has empty digest", image.Component, image.Image)
+			return fmt.Errorf("component %s image %s has empty digest", image.componentLabel(), image.Image)
 		}
 		if image.Size <= 0 {
-			return fmt.Errorf("component %s image %s has missing size", image.Component, image.Image)
+			return fmt.Errorf("component %s image %s has missing size", image.componentLabel(), image.Image)
 		}
 	}
 	for _, index := range templateImageIndexes {

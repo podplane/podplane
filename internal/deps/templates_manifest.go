@@ -99,12 +99,12 @@ func (m *TemplatesManifest) DownloadImageIndexes(archs []string) []int {
 // image mirror cache writer used for component images.
 func templateComponentImage(image TemplateImage) ComponentImage {
 	return ComponentImage{
-		Component: "template",
-		Image:     image.Image,
-		Digest:    image.Digest,
-		Size:      image.Size,
-		Platform:  image.Platform,
-		Index:     image.Index,
+		Components: []string{"template"},
+		Image:      image.Image,
+		Digest:     image.Digest,
+		Size:       image.Size,
+		Platform:   image.Platform,
+		Index:      image.Index,
 	}
 }
 
