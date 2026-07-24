@@ -41,8 +41,8 @@ Recommended components which can also be installed via `podplane install` atop t
     - `agent-sandbox-crds`
 - `cluster-api` for the [Cluster API](https://cluster-api.sigs.k8s.io/) core controller
     - `cluster-api-crds`
-- `nstance` for the [Nstance Operator](https://nstance.dev/docs/components/nstance-operator/) (requires `cluster-api`)
-    - `nstance-crds`
+- `nstance-operator` for the [Nstance Operator](https://nstance.dev/docs/components/nstance-operator/) (requires `cluster-api`)
+    - `nstance-operator-crds`
 - `cert-manager`: [cert-manager](https://cert-manager.io/docs/) and [cert-manager-csi-driver](https://cert-manager.io/docs/usage/csi-driver/)
     - `cert-manager-crds`
 - `platform-certs` for default self-signed and ACME certificate issuers, CA, certificates, etc. (requires `cert-manager`)
