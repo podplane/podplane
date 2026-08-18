@@ -303,12 +303,12 @@ func (c *ClusterConfig) ResolvedClientID() string {
 }
 
 // ResolvedUsernameClaim returns the configured username_claim, defaulting to
-// "email".
+// "sub".
 func (c *ClusterConfig) ResolvedUsernameClaim() string {
 	if c.Cluster.OIDC.UsernameClaim != "" {
 		return c.Cluster.OIDC.UsernameClaim
 	}
-	return "email"
+	return "sub"
 }
 
 // ResolvedGroupsClaim returns the configured groups_claim, defaulting to

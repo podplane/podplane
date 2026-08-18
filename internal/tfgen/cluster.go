@@ -768,6 +768,7 @@ func mutableEnvValue(network clusterconfig.ServiceNetwork) hclExpression {
 	return expr(`{ for key, value in {
   TELEMETRY_S3_REGION = local.aws_region
   OIDC_ISSUER = var.oidc_issuer_url
+  OIDC_USERNAME_CLAIM = local.oidc_username_claim
   OIDC_SIGNING_ALGS = var.oidc_signing_algs == null ? null : join(",", var.oidc_signing_algs)
   KUBE_API_PUBLIC_HOSTNAME = var.kubernetes_api_hostname
   KUBE_SERVICE_ACCOUNT_ISSUER = "https://${var.kubernetes_api_hostname}:${var.kubernetes_api_port}"

@@ -6,7 +6,8 @@ description: "Podplane Kubernetes access groups and default RBAC"
 
 # Role-based Access Control (RBAC)
 
-Podplane uses OIDC for Kubernetes authentication. The OIDC token issued to users includes a `groups` claim which Kubernetes uses to identify which group(s) the user is assigned to.
+Podplane uses OIDC for Kubernetes authentication. Tokens issued for users and
+services include a `groups` claim that Kubernetes uses for authorization.
 
 Kubernetes has multiple `ClusterRole` resources built-in, such as `cluster-admin`, `admin`, `edit`, and `view`. However, it does not define which external OIDC groups these roles map to.
 
@@ -26,7 +27,18 @@ Podplane provides default group bindings for these built-in roles. The `platform
 
 ## OIDC Requirements
 
-Your OIDC issuer must let you assign users or teams to the group names above and emit those names in the token groups claim consumed by Kubernetes. [Easy OIDC](https://easy-oidc.dev) can be used for this, or you can bring an existing OIDC provider which supports custom groups claim configuration.
+Your OIDC issuer must emit the group names above in the token `groups` claim.
+[Truster](https://truster.dev) can assign groups to users and trusted service
+identities. Its trust policies should give CI workloads dedicated,
+least-privilege groups rather than sharing a person's identity or granting
+`podplane:admins`. You can instead bring another OIDC provider that supports
+the same claims; Podplane service login additionally requires RFC 8693 token
+exchange support.
+
+Kubernetes usernames use the configured OIDC username claim without an issuer
+prefix. The claim defaults to `sub`; Truster user logins use normalized email
+subjects there, while trusted service identities use namespaced subjects
+beginning with `trusted:`.
 
 ## Implementation
 

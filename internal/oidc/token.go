@@ -31,10 +31,9 @@ func IsExpired(idToken string, skew time.Duration) bool {
 	return time.Now().Add(skew).After(time.Unix(expSec, 0))
 }
 
-// IdentityFromIDToken extracts the `sub` claim and the configured username
-// claim (defaulting to "email") from an id_token. It does not verify the
-// signature — verification already happened at the issuer when the token was
-// minted.
+// IdentityFromIDToken extracts the sub claim and the configured username claim
+// from an ID token. It does not verify the signature because the issuer already
+// verified the token when minting it.
 func IdentityFromIDToken(idToken, usernameClaim string) (sub, email string, err error) {
 	var raw map[string]any
 	if err := decodeClaims(idToken, &raw); err != nil {

@@ -79,7 +79,7 @@
         },
         "username_claim": {
           "type": "string",
-          "description": "Token claim used as the Kubernetes username. Defaults to email."
+          "description": "Token claim used as the Kubernetes username. Defaults to sub."
         },
         "groups_claim": {
           "type": "string",

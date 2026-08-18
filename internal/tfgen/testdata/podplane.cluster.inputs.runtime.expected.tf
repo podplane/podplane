@@ -200,6 +200,6 @@ variable "registry_hostname" {
 
 locals {
   oidc_client_id = "test-cluster"
-  oidc_username_claim = "email"
+  oidc_username_claim = "sub"
   oidc_groups_claim = "groups"
 }

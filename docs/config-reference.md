@@ -151,7 +151,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.name` | Cluster name, used as a human-readable identifier |
 | `cluster.oidc.issuer_url` | OIDC issuer URL for cluster authentication (e.g. `https://auth.example.com`) |
 | `cluster.oidc.client_id` | OIDC client ID (defaults to `cluster.id` if not specified) |
-| `cluster.oidc.username_claim` | Token claim used as the username (default: `email`) |
+| `cluster.oidc.username_claim` | Token claim used as the Kubernetes username (default: `sub`) |
 | `cluster.oidc.groups_claim` | Token claim used for group membership (default: `groups`) |
 | `cluster.oidc.signing_algs` | Allowed OIDC signing algorithms. Passed to kube-apiserver at runtime; vmconfig defaults to `["RS256"]` when omitted. |
 | `cluster.acme.server` | Optional ACME directory override. Defaults to the Let's Encrypt production directory. |
@@ -228,6 +228,12 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.components.source.ref.commit` | Git commit to use for component Helm charts. Mutually exclusive with other `source.ref` selectors. |
 | `cluster.components.source.secretRef.name` | Optional Flux Git credentials Secret name in the `platform-components` namespace. Use this for private/enterprise components repos; Podplane wires the reference but does not create the Secret. |
 
+Kubernetes usernames default to the token's `sub` claim without an issuer
+prefix. Truster places normalized email addresses in `sub` for user logins and
+namespaced `trusted:` identities in `sub` for service logins. Set
+`cluster.oidc.username_claim` when another OIDC provider requires a different
+claim.
+
 **Validation rules:**
 - `cluster.id` must be lowercase alphanumeric with hyphens only, no leading/trailing/consecutive hyphens, max 32 characters.
 - `vpc.id` and `vpc.v4cidr`/`vpc.v6cidr` are mutually exclusive - specify an existing VPC ID or CIDRs to create a new VPC, not both.
@@ -238,7 +244,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 
 ## `podplane.oidc.jsonc`
 
-This file stores configuration for an [Easy OIDC](https://easy-oidc.dev) server deployment. It is created in the current directory by `podplane oidc create` and is required by `podplane oidc delete`.
+This file stores configuration for a [Truster](https://truster.dev) server deployment. It is created in the current directory by `podplane oidc create` and is required by `podplane oidc delete`.
 
 New OIDC configs include a relative `$schema` reference to `./podplane.oidc.schema.json`. Podplane writes that schema file next to the config so editors such as VS Code can provide offline validation, completion, and hover documentation in shared infrastructure repositories. The source schema is checked into the Podplane repository at `schemas/podplane.oidc.schema.json`.
 

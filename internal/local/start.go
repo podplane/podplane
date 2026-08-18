@@ -694,7 +694,6 @@ func (m *Local) WriteLocalClusterConfig(clusterID, oidcIssuerURL, oidcCACertPath
     "oidc": {
       "issuer_url": %q,
       "client_id": %q,
-      "username_claim": "email",
       "ca_cert": %q,
       "signing_algs": ["RS256"]
     },
