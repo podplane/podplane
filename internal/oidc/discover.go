@@ -6,19 +6,18 @@ package oidc
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
 
 // Discovery is the subset of an OIDC discovery document that Podplane uses.
 type Discovery struct {
-	Issuer                string `json:"issuer"`
-	AuthorizationEndpoint string `json:"authorization_endpoint"`
-	TokenEndpoint         string `json:"token_endpoint"`
-	JWKSURI               string `json:"jwks_uri"`
+	Issuer                string   `json:"issuer"`
+	AuthorizationEndpoint string   `json:"authorization_endpoint"`
+	TokenEndpoint         string   `json:"token_endpoint"`
+	JWKSURI               string   `json:"jwks_uri"`
+	GrantTypesSupported   []string `json:"grant_types_supported"`
 }
 
 // Discover fetches and parses the issuer's /.well-known/openid-configuration
@@ -35,11 +34,10 @@ func Discover(ctx context.Context, client *http.Client, issuerURL string) (*Disc
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("discovery %s: HTTP %d: %s", url, resp.StatusCode, string(body))
+		return nil, fmt.Errorf("discovery %s: HTTP %d", url, resp.StatusCode)
 	}
 	d := &Discovery{}
-	if err := json.NewDecoder(resp.Body).Decode(d); err != nil {
+	if err := decodeResponse(resp.Body, d); err != nil {
 		return nil, fmt.Errorf("parse discovery: %w", err)
 	}
 	if d.AuthorizationEndpoint == "" || d.TokenEndpoint == "" {

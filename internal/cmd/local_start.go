@@ -280,14 +280,15 @@ func configureLocalKubectl(stashPath string, manager *local.Local, progress tui.
 		return nil, err
 	}
 	defer restoreKeyringPass()
-	if err := localAuthConfig.AuthSet(config.AuthMetadata{
+	meta := config.AuthMetadata{
 		Sub:         oidcserver.LocalSub,
 		ClusterID:   cluster.Cluster.ID,
 		ClusterName: cluster.Cluster.Name,
 		Issuer:      cluster.Cluster.OIDC.IssuerURL,
 		ClientID:    cluster.ResolvedClientID(),
 		UserEmail:   "test@localhost",
-	}, config.AuthSecrets{IDToken: idToken}, true); err != nil {
+	}
+	if err := localAuthConfig.AuthSet(meta, config.AuthSecrets{IDToken: idToken}, true); err != nil {
 		return nil, fmt.Errorf("cache local kubectl token: %w", err)
 	}
 	if err := localAuthConfig.SetClusterSummary(config.ClusterSummaryFromConfig(cluster), true); err != nil {

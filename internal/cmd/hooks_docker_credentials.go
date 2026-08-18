@@ -41,7 +41,8 @@ func newHooksDockerCredentialsCmd(c *config.Config) *cobra.Command {
 						if err != nil || summary.Registry.Hostname != serverURL || !summary.Registry.Ingress.Enabled {
 							continue
 						}
-						token, err := clusterauth.ResolveToken(c, meta.ClusterID, meta.Sub)
+						ref := config.AuthRef{Subject: meta.Sub, ClusterID: meta.ClusterID, Local: local}
+						token, err := clusterauth.ResolveToken(c, ref)
 						if err != nil {
 							return err
 						}

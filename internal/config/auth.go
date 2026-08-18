@@ -5,6 +5,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -13,12 +14,22 @@ import (
 // AuthMetadata is the per-(sub, cluster) metadata the CLI needs to refresh
 // tokens and emit kubectl ExecCredentials.
 type AuthMetadata struct {
-	Sub         string `mapstructure:"sub" json:"sub"`
-	ClusterID   string `mapstructure:"cluster_id" json:"cluster_id"`
-	ClusterName string `mapstructure:"cluster_name" json:"cluster_name"`
-	Issuer      string `mapstructure:"issuer" json:"issuer"`
-	ClientID    string `mapstructure:"client_id" json:"client_id"`
-	UserEmail   string `mapstructure:"user_email" json:"user_email"`
+	Sub              string `mapstructure:"sub" json:"sub"`
+	ClusterID        string `mapstructure:"cluster_id" json:"cluster_id"`
+	ClusterName      string `mapstructure:"cluster_name" json:"cluster_name"`
+	Issuer           string `mapstructure:"issuer" json:"issuer"`
+	ClientID         string `mapstructure:"client_id" json:"client_id"`
+	UserEmail        string `mapstructure:"user_email" json:"user_email"`
+	IdentityProvider string `mapstructure:"identity_provider" json:"identity_provider"`
+	IdentityFile     string `mapstructure:"identity_file" json:"identity_file"`
+	OIDCCAPath       string `mapstructure:"oidc_ca_path" json:"oidc_ca_path"`
+}
+
+// AuthRef uniquely identifies auth config for local or remote clusters.
+type AuthRef struct {
+	Subject   string
+	ClusterID string
+	Local     bool
 }
 
 // AuthSecrets holds the actual tokens. Stored in the OS keyring at
@@ -32,26 +43,28 @@ type AuthSecrets struct {
 // secrets. The full key is `<keyringPrefix><auth-key>`.
 const keyringPrefix = "dev.podplane.auth."
 
-// authKey returns the config and keyring key for a user's cluster auth state.
-func authKey(sub, clusterID string, local bool) string {
-	if local {
-		return "local:" + sub + ":" + clusterID
-	}
-	return sub + ":" + clusterID
+// authKey returns the config and keyring key for an auth reference.
+func authKey(ref AuthRef) string {
+	sum := sha256.Sum256([]byte(ref.Subject + "\x00" + ref.ClusterID))
+	return fmt.Sprintf("%s%x", authKeyPrefix(ref.Local), sum[:])
 }
 
-// AuthGet returns the metadata + secrets for a given (sub, clusterID) pair.
-// Returns zero values (and no error) if the entry does not exist.
-func (c *Config) AuthGet(sub, clusterID string, local bool) (AuthMetadata, AuthSecrets, error) {
-	key := authKey(sub, clusterID, local)
-	meta, secrets, err := c.authGetKey(key)
-	if err != nil || !local || meta.Sub != "" || secrets.IDToken != "" || secrets.RefreshToken != "" {
-		return meta, secrets, err
+// authKeyPrefix returns the storage prefix for an auth locality.
+func authKeyPrefix(local bool) string {
+	if local {
+		return "local:"
 	}
-	// Local auth used to be stored under the unscoped remote key. Keep reading
-	// that key so existing local clusters continue to work, but only write the
-	// scoped key going forward. TODO: remove this pre-1.0 legacy fallback.
-	return c.authGetKey(authKey(sub, clusterID, false))
+	return "remote:"
+}
+
+// AuthGet returns the metadata and secrets for ref.
+// Returns zero values (and no error) if the entry does not exist.
+func (c *Config) AuthGet(ref AuthRef) (AuthMetadata, AuthSecrets, error) {
+	meta, secrets, err := c.authGetKey(authKey(ref))
+	if err != nil {
+		return meta, secrets, fmt.Errorf("read auth for subject %q on cluster %q: %w", ref.Subject, ref.ClusterID, err)
+	}
+	return meta, secrets, nil
 }
 
 // authGetKey reads auth metadata and secrets by their fully-qualified auth key.
@@ -75,23 +88,24 @@ func (c *Config) authGetKey(key string) (AuthMetadata, AuthSecrets, error) {
 	return meta, secrets, nil
 }
 
-// AuthSet writes both metadata (to the viper config) and secrets (to the
-// keyring) for a given (sub, clusterID). The pair is taken from
-// meta.{Sub,ClusterID}.
+// AuthSet writes metadata to config and secrets to the keyring.
 func (c *Config) AuthSet(meta AuthMetadata, secrets AuthSecrets, local bool) error {
 	if meta.Sub == "" || meta.ClusterID == "" {
-		return fmt.Errorf("AuthSet: sub and cluster_id are required")
+		return fmt.Errorf("AuthSet: subject and cluster ID are required")
 	}
-	key := authKey(meta.Sub, meta.ClusterID, local)
+	key := authKey(AuthRef{Subject: meta.Sub, ClusterID: meta.ClusterID, Local: local})
 
 	// Write metadata to viper config.
 	c.viperFile.Set("auth."+key, map[string]any{
-		"sub":          meta.Sub,
-		"cluster_id":   meta.ClusterID,
-		"cluster_name": meta.ClusterName,
-		"issuer":       meta.Issuer,
-		"client_id":    meta.ClientID,
-		"user_email":   meta.UserEmail,
+		"sub":               meta.Sub,
+		"cluster_id":        meta.ClusterID,
+		"cluster_name":      meta.ClusterName,
+		"issuer":            meta.Issuer,
+		"client_id":         meta.ClientID,
+		"user_email":        meta.UserEmail,
+		"identity_provider": meta.IdentityProvider,
+		"identity_file":     meta.IdentityFile,
+		"oidc_ca_path":      meta.OIDCCAPath,
 	})
 	if err := c.SaveFile(); err != nil {
 		return fmt.Errorf("save config: %w", err)
@@ -103,22 +117,16 @@ func (c *Config) AuthSet(meta AuthMetadata, secrets AuthSecrets, local bool) err
 		return fmt.Errorf("marshal secrets: %w", err)
 	}
 	if err := c.KeyringWrite(keyringPrefix+key, secretsBytes); err != nil {
-		return fmt.Errorf("write keyring for %s: %w", key, err)
+		return fmt.Errorf("write auth secrets for subject %q on cluster %q: %w", meta.Sub, meta.ClusterID, err)
 	}
 	return nil
 }
 
-// AuthDelete removes both the metadata and the keyring secrets for the given
-// (sub, clusterID) pair. Missing entries are a no-op.
-func (c *Config) AuthDelete(sub, clusterID string, local bool) error {
-	key := authKey(sub, clusterID, local)
-	if err := c.authDeleteKey(key); err != nil {
-		return err
-	}
-	if local {
-		// Local auth used to be stored under the unscoped remote key. Delete it
-		// while legacy fallback exists. TODO: remove this pre-1.0 legacy cleanup.
-		return c.authDeleteKey(authKey(sub, clusterID, false))
+// AuthDelete removes metadata and keyring secrets for an auth identity.
+func (c *Config) AuthDelete(subject, clusterID string, local bool) error {
+	ref := AuthRef{Subject: subject, ClusterID: clusterID, Local: local}
+	if err := c.authDeleteKey(authKey(ref)); err != nil {
+		return fmt.Errorf("delete auth for subject %q on cluster %q: %w", subject, clusterID, err)
 	}
 	return nil
 }
@@ -149,16 +157,9 @@ func (c *Config) authDeleteKey(key string) error {
 func (c *Config) AuthListByCluster(clusterID string, local bool) ([]AuthMetadata, error) {
 	out := []AuthMetadata{}
 	all := c.viperFile.GetStringMap("auth")
+	prefix := authKeyPrefix(local)
 	for key, raw := range all {
-		if strings.HasPrefix(key, "local:") != local {
-			continue
-		}
-		if local {
-			key = strings.TrimPrefix(key, "local:")
-		}
-		// key is "<sub>:<clusterID>" after local scope removal.
-		parts := strings.SplitN(key, ":", 2)
-		if len(parts) != 2 || (clusterID != "" && parts[1] != clusterID) {
+		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
 		m, ok := raw.(map[string]any)
@@ -169,12 +170,8 @@ func (c *Config) AuthListByCluster(clusterID string, local bool) ([]AuthMetadata
 		if err := decodeMap(m, &meta); err != nil {
 			return nil, fmt.Errorf("decode auth metadata for %s: %w", key, err)
 		}
-		// Ensure sub/cluster_id are populated even if older config is missing them.
-		if meta.Sub == "" {
-			meta.Sub = parts[0]
-		}
-		if meta.ClusterID == "" {
-			meta.ClusterID = parts[1]
+		if clusterID != "" && meta.ClusterID != clusterID {
+			continue
 		}
 		out = append(out, meta)
 	}

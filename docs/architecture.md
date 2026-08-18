@@ -22,8 +22,6 @@ Podplane itself consists of three key components:
 2. [vmconfig](https://github.com/podplane/vmconfig): a minimal configuration system designed for Debian-based Linux VMs, written in Bash.
 3. [components](https://github.com/podplane/components): a collection of Helm charts used to seed the Kubernetes cluster state.
 
-Podplane, Netsy, Nstance, and Easy OIDC are Open Source projects created by [Nadrama](https://nadrama.com).
-
 ## Platform Layers
 
 A Podplane cluster consists of three platform layers:

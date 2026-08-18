@@ -30,8 +30,6 @@ Podplane is easy to use and operate because of three sibling projects which form
 - Auto-scaling & provisioning is faster with [Nstance](https://nstance.dev).
 - OIDC & RBAC is simplified with [Easy OIDC](https://easy-oidc.dev).
 
-Podplane, Netsy, Nstance, and Easy OIDC are Open Source projects created by [Nadrama](https://nadrama.com).
-
 ## Learn More
 
 Learn more about Podplane at the official project website: [podplane.dev](https://podplane.dev)

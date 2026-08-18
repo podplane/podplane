@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+const maxTokenSize = 128 << 10
+
 // IsExpired returns true if the JWT id_token is within `skew` of expiring (or
 // already expired). A malformed token is treated as expired.
 func IsExpired(idToken string, skew time.Duration) bool {
@@ -50,6 +52,47 @@ func IdentityFromIDToken(idToken, usernameClaim string) (sub, email string, err 
 		}
 	}
 	return sub, email, nil
+}
+
+// TrustedIdentity validates the identity constraints Truster must enforce
+// for an exchanged workload token.
+func TrustedIdentity(idToken, clientID string) (sub, email string, err error) {
+	var claims map[string]any
+	if err := decodeClaims(idToken, &claims); err != nil {
+		return "", "", err
+	}
+	sub, _ = claims["sub"].(string)
+	aud, audOK := claims["aud"].(string)
+	_, hasSID := claims["sid"]
+	if !strings.HasPrefix(sub, "trusted:") || !audOK || aud != clientID || hasSID {
+		return "", "", fmt.Errorf("downstream token does not contain the required trusted identity")
+	}
+	email, _ = claims["email"].(string)
+	return sub, email, nil
+}
+
+// validateCompactJWT checks the structural encoding of a compact JWT.
+func validateCompactJWT(token string) error {
+	if len(token) == 0 || len(token) > maxTokenSize {
+		return fmt.Errorf("invalid size")
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return fmt.Errorf("invalid compact JWT")
+	}
+	for i, part := range parts {
+		decoded, err := base64.RawURLEncoding.DecodeString(part)
+		if err != nil {
+			return fmt.Errorf("invalid base64url segment")
+		}
+		if i < 2 {
+			var object map[string]any
+			if err := json.Unmarshal(decoded, &object); err != nil || object == nil {
+				return fmt.Errorf("JWT header and payload must be JSON objects")
+			}
+		}
+	}
+	return nil
 }
 
 // decodeClaims base64url-decodes the JWT payload (claims segment) of token

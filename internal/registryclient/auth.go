@@ -40,5 +40,5 @@ func resolvePushToken(c *config.Config, clusterID string, local bool, kubeContex
 	if sub == "" {
 		return "", fmt.Errorf("could not resolve cached Podplane auth for cluster %q; run `podplane login`", clusterID)
 	}
-	return clusterauth.ResolveToken(authConfig, clusterID, sub)
+	return clusterauth.ResolveToken(authConfig, config.AuthRef{Subject: sub, ClusterID: clusterID, Local: local})
 }

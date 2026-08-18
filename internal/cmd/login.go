@@ -16,14 +16,17 @@ import (
 	"github.com/podplane/podplane/internal/config"
 	"github.com/podplane/podplane/internal/dockerconfig"
 	"github.com/podplane/podplane/internal/kubectl"
+	"github.com/podplane/podplane/internal/oidc"
 	"github.com/spf13/cobra"
 )
 
 var (
-	loginClusterConfig string
-	loginCACert        string
-	loginCallbackPort  int
-	loginHeadless      bool
+	loginClusterConfig    string
+	loginCACert           string
+	loginCallbackPort     int
+	loginHeadless         bool
+	loginIdentityProvider string
+	loginIdentityFile     string
 )
 
 // defaultClusterConfigName is the file looked up in the working directory
@@ -36,22 +39,22 @@ const defaultClusterConfigName = "podplane.cluster.jsonc"
 func newLoginCmd(c *config.Config) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
-		Short: "Authenticate to a Podplane cluster",
-		Long: `Authenticate to a Podplane cluster using OIDC auth-code + PKCE.
+		Short: "Log in to a Podplane cluster",
+		Long: `Log in to a Podplane cluster and configure kubectl.
 
-The cluster is described by a .cluster.jsonc file. By default the CLI
-looks for it at ./podplane.cluster.jsonc; pass -f to point at a different file.
-
-On success the resulting tokens are stored (id_token + refresh_token in the
-OS keyring; metadata in the config file) and kubectl is configured with a
-matching cluster, user and context.`,
+Podplane opens your browser for a user login, or uses a short-lived identity
+token when running as a service in GitHub Actions or Buildkite.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			source, err := oidc.SelectSource(oidc.SourceOptions{IdentityProvider: loginIdentityProvider, IdentityFile: loginIdentityFile})
+			if err != nil {
+				return err
+			}
 			cfgPath := loginClusterConfig
 			if cfgPath == "" {
 				cfgPath = defaultClusterConfigName
 			}
 			cfgPathInput := cfgPath
-			cfgPath, err := filepath.Abs(cfgPathInput)
+			cfgPath, err = filepath.Abs(cfgPathInput)
 			if err != nil {
 				return fmt.Errorf("resolve %s: %w", cfgPathInput, err)
 			}
@@ -73,12 +76,21 @@ matching cluster, user and context.`,
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
-			meta, _, err := clusterauth.Login(ctx, c, clusterauth.Options{
-				Cluster:      cluster,
-				HTTPClient:   httpClient,
-				CallbackPort: loginCallbackPort,
-				Headless:     loginHeadless,
-			})
+			var meta config.AuthMetadata
+			if source.IsUserLogin() {
+				meta, _, err = clusterauth.Login(ctx, c, clusterauth.Options{
+					Cluster:      cluster,
+					HTTPClient:   httpClient,
+					CallbackPort: loginCallbackPort,
+					Headless:     loginHeadless,
+				})
+			} else {
+				var identityToken string
+				identityToken, err = oidc.Acquire(ctx, httpClient, source, cluster.ResolvedClientID())
+				if err == nil {
+					meta, _, err = clusterauth.ServiceLogin(ctx, c, cluster, httpClient, source, identityToken)
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -109,5 +121,7 @@ matching cluster, user and context.`,
 	cmd.Flags().StringVar(&loginCACert, "ca-cert", "", "Path/URL/inline-PEM for the Kubernetes API server CA certificate")
 	cmd.Flags().IntVar(&loginCallbackPort, "callback-port", 8000, "Port for the local OIDC callback HTTP server")
 	cmd.Flags().BoolVar(&loginHeadless, "headless", false, "Skip opening a browser; follow the authorize redirect non-interactively")
+	cmd.Flags().StringVar(&loginIdentityProvider, "identity-provider", "", "Identity provider: github, buildkite, or none (default: detect automatically)")
+	cmd.Flags().StringVar(&loginIdentityFile, "identity-file", "", "Read an identity token from PATH")
 	return cmd
 }

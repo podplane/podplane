@@ -81,11 +81,9 @@ func Refresh(ctx context.Context, c *config.Config, opts Options, meta config.Au
 	return *tokens, nil
 }
 
-// ResolveToken implements the kubectl auth hook token waterfall: cached token,
-// refresh token, then fresh login.
-func ResolveToken(c *config.Config, clusterID, sub string) (string, error) {
-	isLocal := localClusterConfigExists(c, clusterID)
-	meta, secrets, err := c.AuthGet(sub, clusterID, isLocal)
+// ResolveToken reuses cached tokens and renews them when needed.
+func ResolveToken(c *config.Config, ref config.AuthRef) (string, error) {
+	meta, secrets, err := c.AuthGet(ref)
 	if err != nil {
 		return "", fmt.Errorf("read auth state: %w", err)
 	}
@@ -93,8 +91,14 @@ func ResolveToken(c *config.Config, clusterID, sub string) (string, error) {
 	if secrets.IDToken != "" && !oidc.IsExpired(secrets.IDToken, 60*time.Second) {
 		return secrets.IDToken, nil
 	}
+	if meta.IdentityProvider != "" || meta.IdentityFile != "" {
+		return renewServiceToken(c, ref, meta)
+	}
+	if strings.HasPrefix(meta.Sub, "trusted:") {
+		return "", fmt.Errorf("service login information is missing; run `podplane login` again")
+	}
 
-	cluster, isLocal, err := loadClusterForHook(c, clusterID, meta)
+	cluster, err := loadClusterForHook(c, ref, meta)
 	if err != nil {
 		return "", err
 	}
@@ -103,7 +107,7 @@ func ResolveToken(c *config.Config, clusterID, sub string) (string, error) {
 		return "", err
 	}
 
-	opts := Options{Cluster: cluster, HTTPClient: httpClient, Local: isLocal}
+	opts := Options{Cluster: cluster, HTTPClient: httpClient, Local: ref.Local}
 	if secrets.RefreshToken != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -113,12 +117,43 @@ func ResolveToken(c *config.Config, clusterID, sub string) (string, error) {
 		}
 	}
 
-	opts.Headless = isLocal
+	opts.Headless = ref.Local
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	_, tokens, err := Login(ctx, c, opts)
 	if err != nil {
 		return "", err
+	}
+	return tokens.IDToken, nil
+}
+
+// renewServiceToken reacquires an identity token and exchanges it for a new service token.
+func renewServiceToken(c *config.Config, ref config.AuthRef, meta config.AuthMetadata) (string, error) {
+	cluster, err := loadClusterForHook(c, ref, meta)
+	if err != nil {
+		return "", err
+	}
+	client, err := NewOIDCHTTPClient(c, cluster)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	source := oidc.Source{IdentityProvider: meta.IdentityProvider, IdentityFile: meta.IdentityFile}
+	identityToken, err := oidc.Acquire(ctx, client, source, meta.ClientID)
+	if err != nil {
+		return "", fmt.Errorf("renew service login: %w", err)
+	}
+	tokens, err := oidc.Exchange(ctx, client, meta.Issuer, meta.ClientID, identityToken)
+	if err != nil {
+		return "", fmt.Errorf("renew service login: %w", err)
+	}
+	sub, _, err := oidc.TrustedIdentity(tokens.IDToken, meta.ClientID)
+	if err != nil || sub != meta.Sub {
+		return "", fmt.Errorf("renewed service token subject does not match the logged-in identity; run `podplane login` again")
+	}
+	if err := c.AuthSet(meta, config.AuthSecrets{IDToken: tokens.IDToken}, ref.Local); err != nil {
+		return "", fmt.Errorf("save renewed service token: %w", err)
 	}
 	return tokens.IDToken, nil
 }
@@ -159,6 +194,37 @@ func Logout(c *config.Config, stdout io.Writer, clusterID string, local bool) er
 	return nil
 }
 
+// ServiceLogin exchanges an identity token and stores the resulting service
+// token and non-secret renewal source.
+func ServiceLogin(ctx context.Context, c *config.Config, cluster *clusterconfig.ClusterConfig, client *http.Client, source oidc.Source, identityToken string) (config.AuthMetadata, oidc.Tokens, error) {
+	if source.IsUserLogin() || (source.IdentityProvider != "" && source.IdentityFile != "") {
+		return config.AuthMetadata{}, oidc.Tokens{}, fmt.Errorf("service login requires one identity provider or identity file")
+	}
+	issuerURL := cluster.Cluster.OIDC.IssuerURL
+	clientID := cluster.ResolvedClientID()
+	caPath, err := c.ResolveCACert("oidc-ca", cluster.Cluster.OIDC.CACert)
+	if err != nil {
+		return config.AuthMetadata{}, oidc.Tokens{}, fmt.Errorf("resolve oidc ca cert: %w", err)
+	}
+	tokens, err := oidc.Exchange(ctx, client, issuerURL, clientID, identityToken)
+	if err != nil {
+		return config.AuthMetadata{}, oidc.Tokens{}, err
+	}
+	sub, email, err := oidc.TrustedIdentity(tokens.IDToken, clientID)
+	if err != nil {
+		return config.AuthMetadata{}, oidc.Tokens{}, fmt.Errorf("inspect exchanged ID token: invalid subject")
+	}
+	meta := config.AuthMetadata{
+		Sub: sub, ClusterID: cluster.Cluster.ID, ClusterName: cluster.Cluster.Name,
+		Issuer: issuerURL, ClientID: clientID, UserEmail: email,
+		IdentityProvider: source.IdentityProvider, IdentityFile: source.IdentityFile, OIDCCAPath: caPath,
+	}
+	if err := c.AuthSet(meta, config.AuthSecrets{IDToken: tokens.IDToken}, false); err != nil {
+		return config.AuthMetadata{}, oidc.Tokens{}, err
+	}
+	return meta, *tokens, nil
+}
+
 // LogoutLocal clears cached auth state and kubectl access for a local cluster.
 func LogoutLocal(stdout io.Writer, clusterID string) error {
 	c, restoreKeyringPass, err := config.InitWithLocalKeyring()
@@ -169,20 +235,15 @@ func LogoutLocal(stdout io.Writer, clusterID string) error {
 	return Logout(c, stdout, clusterID, true)
 }
 
-// localClusterConfigExists reports whether a generated local cluster config exists.
-func localClusterConfigExists(c *config.Config, clusterID string) bool {
-	_, err := os.Stat(local.ClusterConfigPath(c.DataDirectory(), clusterID))
-	return err == nil
-}
-
-func loadClusterForHook(c *config.Config, clusterID string, meta config.AuthMetadata) (*clusterconfig.ClusterConfig, bool, error) {
-	localConfigPath := local.ClusterConfigPath(c.DataDirectory(), clusterID)
-	if _, err := os.Stat(localConfigPath); err == nil {
+// loadClusterForHook reconstructs the cluster configuration needed by an auth hook.
+func loadClusterForHook(c *config.Config, ref config.AuthRef, meta config.AuthMetadata) (*clusterconfig.ClusterConfig, error) {
+	localConfigPath := local.ClusterConfigPath(c.DataDirectory(), ref.ClusterID)
+	if ref.Local {
 		cfg, err := clusterconfig.Load(localConfigPath)
-		return cfg, true, err
+		return cfg, err
 	}
 	if meta.Issuer == "" || meta.ClientID == "" {
-		return nil, false, fmt.Errorf("no cluster config found for %s and stored metadata is incomplete; run `podplane login -f <cluster.jsonc>`", clusterID)
+		return nil, fmt.Errorf("no cluster config found for %s and stored metadata is incomplete; run `podplane login -f <cluster.jsonc>`", ref.ClusterID)
 	}
 	return &clusterconfig.ClusterConfig{
 		Cluster: clusterconfig.Cluster{
@@ -190,9 +251,10 @@ func loadClusterForHook(c *config.Config, clusterID string, meta config.AuthMeta
 			OIDC: clusterconfig.OIDC{
 				IssuerURL: meta.Issuer,
 				ClientID:  meta.ClientID,
+				CACert:    meta.OIDCCAPath,
 			},
 		},
-	}, false, nil
+	}, nil
 }
 
 // NewOIDCHTTPClient returns an *http.Client suitable for talking to
@@ -261,6 +323,10 @@ func persistTokens(c *config.Config, cluster *clusterconfig.ClusterConfig, token
 	if sub == "" {
 		return config.AuthMetadata{}, fmt.Errorf("id_token has no `sub` claim")
 	}
+	caPath, err := c.ResolveCACert("oidc-ca", cluster.Cluster.OIDC.CACert)
+	if err != nil {
+		return config.AuthMetadata{}, fmt.Errorf("resolve oidc ca cert: %w", err)
+	}
 	meta := config.AuthMetadata{
 		Sub:         sub,
 		ClusterID:   cluster.Cluster.ID,
@@ -268,6 +334,7 @@ func persistTokens(c *config.Config, cluster *clusterconfig.ClusterConfig, token
 		Issuer:      cluster.Cluster.OIDC.IssuerURL,
 		ClientID:    cluster.ResolvedClientID(),
 		UserEmail:   email,
+		OIDCCAPath:  caPath,
 	}
 	if err := c.AuthSet(meta, config.AuthSecrets{
 		IDToken:      tokens.IDToken,

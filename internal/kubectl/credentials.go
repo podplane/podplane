@@ -6,6 +6,7 @@ package kubectl
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -38,49 +39,38 @@ func SetCredentials(stdout io.Writer, sub string, clusterID string, local bool) 
 	}
 	// build kubectl credentials key
 	key := CredentialsKey(sub, clusterID, local)
-	// run kubectl to check if credentials already exists
+	// Read JSON and compare names in Go. Credential names are untrusted input
+	// and must never be interpolated into kubectl JSONPath expressions.
 	var outBuf bytes.Buffer
 	var errBuf bytes.Buffer
 	cmd := execwrap.Command(
 		"kubectl",
 		"config",
 		"view",
-		"--output=jsonpath={.users[?(@.name==\""+key+"\")].user.exec.command}",
+		"--output=json",
 	)
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
-		stderr := strings.TrimSpace(errBuf.String())
-		// Handle the specific JSONPath error when users array is nil (first-time setup)
-		if strings.Contains(stderr, "is not array or slice and cannot be filtered") {
-			// This is expected for first-time setup, continue with credential configuration
-		} else {
-			return fmt.Errorf("Error invoking kubectl command: %s", err)
-		}
+		return fmt.Errorf("error invoking kubectl command: %s", err)
 	} else {
-		outString := strings.TrimSpace(outBuf.String())
-		if outString == cliBinaryPath {
+		command, found, err := credentialExecCommand(outBuf.Bytes(), key)
+		if err != nil {
+			return fmt.Errorf("parse kubectl config: %w", err)
+		}
+		if found && command == cliBinaryPath {
 			_, _ = fmt.Fprintf(stdout, "Credentials already exist for %s\n", key)
 			return nil
-		} else if outString != "" && !strings.Contains(outString, "podplane") {
+		} else if found && !strings.Contains(command, "podplane") {
 			_, _ = fmt.Fprintf(stdout, "Skipping configuration of kubectl credentials '%s' due to unknown conflict.\n", key)
 			return nil
 		}
 	}
 	// run kubectl to configure credentials
+	args := credentialExecArgs(cliBinaryPath, sub, clusterID, local)
 	cmd = execwrap.Command(
 		"kubectl",
-		"config",
-		"set-credentials",
-		key,
-		"--exec-api-version=client.authentication.k8s.io/v1beta1",
-		"--exec-command="+cliBinaryPath,
-		"--exec-arg=hooks",
-		"--exec-arg=kubectl-auth",
-		"--exec-arg=--cluster",
-		"--exec-arg="+clusterID,
-		"--exec-arg=--user",
-		"--exec-arg="+sub,
+		args...,
 	)
 	if local {
 		cmd.Args = append(cmd.Args, "--exec-env="+config.KeyringPassEnv+"="+config.LocalKeyringPass)
@@ -88,4 +78,51 @@ func SetCredentials(stdout io.Writer, sub string, clusterID string, local bool) 
 	cmd.Stdout = stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// credentialExecArgs returns kubectl arguments for installing the auth hook.
+func credentialExecArgs(cliBinaryPath, sub, clusterID string, local bool) []string {
+	args := []string{
+		"config",
+		"set-credentials",
+		CredentialsKey(sub, clusterID, local),
+		"--exec-api-version=client.authentication.k8s.io/v1beta1",
+		"--exec-command=" + cliBinaryPath,
+		"--exec-arg=hooks",
+		"--exec-arg=kubectl-auth",
+		"--exec-arg=--cluster",
+		"--exec-arg=" + clusterID,
+		"--exec-arg=--user",
+		"--exec-arg=" + sub,
+	}
+	if local {
+		args = append(args, "--exec-arg=--local")
+	}
+	return args
+}
+
+// credentialExecCommand finds the exec command for an exact kubeconfig user name.
+func credentialExecCommand(data []byte, name string) (string, bool, error) {
+	var cfg struct {
+		Users []struct {
+			Name string `json:"name"`
+			User struct {
+				Exec *struct {
+					Command string `json:"command"`
+				} `json:"exec"`
+			} `json:"user"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return "", false, err
+	}
+	for _, user := range cfg.Users {
+		if user.Name == name {
+			if user.User.Exec == nil {
+				return "", true, nil
+			}
+			return user.User.Exec.Command, true, nil
+		}
+	}
+	return "", false, nil
 }
