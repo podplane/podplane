@@ -56,7 +56,8 @@ func testClusterOptions() ClusterOptions {
 		panic(err)
 	}
 	return ClusterOptions{
-		DepsMirrorURL: "https://deps.podplane.dev",
+		DepsMirrorURL:    "https://deps.podplane.dev",
+		NstanceModuleDir: "../../cache/deps/tf/modules/nstance/2.0.1",
 		VMConfigManifests: []VMConfigManifest{
 			{Kind: "knc", Arch: "arm64", Filename: "vmconfig_knc_debian-13_arm64.json", JSON: append(kncManifest, '\n')},
 			{Kind: "knd", Arch: "arm64", Filename: "vmconfig_knd_debian-13_arm64.json", JSON: append(kndManifest, '\n')},
@@ -511,5 +512,38 @@ func TestWriteFilesPreservesCustomTF(t *testing.T) {
 	}
 	if string(raw) != "{}\n" {
 		t.Fatalf("raw manifest = %q, want unmodified JSON", raw)
+	}
+}
+
+// TestTerraformDependencyRootUsesClusterRequirements verifies dependency roots share cluster constraints.
+func TestTerraformDependencyRootUsesClusterRequirements(t *testing.T) {
+	got := TerraformDependencyRoot("")
+	for _, want := range []string{
+		`source = "hashicorp/aws"`,
+		`source = "podplane/podplane"`,
+		`source = "nstance-dev/nstance/aws//modules/cluster"`,
+		`source = "nstance-dev/nstance/aws//modules/account"`,
+		`source = "nstance-dev/nstance/aws//modules/network"`,
+		`source = "nstance-dev/nstance/aws//modules/shard"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("dependency root missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestTerraformDependencyRootCanPinModuleVersion verifies recovery roots request an exact module version.
+func TestTerraformDependencyRootCanPinModuleVersion(t *testing.T) {
+	got := TerraformDependencyRoot("2.0.1")
+	if strings.Count(got, `version = "2.0.1"`) != 4 {
+		t.Fatalf("dependency root did not pin all module versions:\n%s", got)
+	}
+}
+
+// TestNstanceModuleSourceIsLocal verifies generated clusters use the shared module cache.
+func TestNstanceModuleSourceIsLocal(t *testing.T) {
+	got := nstanceModuleSource(ClusterOptions{NstanceModuleDir: "../../cache/deps/tf/modules/nstance/2.0.1"}, "cluster")
+	if got != "../../cache/deps/tf/modules/nstance/2.0.1/modules/cluster" {
+		t.Fatalf("nstanceModuleSource = %q", got)
 	}
 }

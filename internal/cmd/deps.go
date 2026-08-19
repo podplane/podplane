@@ -7,6 +7,7 @@ package cmd
 import (
 	"github.com/podplane/podplane/internal/config"
 	"github.com/podplane/podplane/internal/deps"
+	"github.com/podplane/podplane/internal/tfdeps"
 	"github.com/spf13/cobra"
 )
 
@@ -29,6 +30,7 @@ func newDepsCmd(c *config.Config) *cobra.Command {
 
 	depsCmd.AddCommand(newDepsStatusCmd(manager, kind, arch))
 	depsCmd.AddCommand(newDepsDownloadCmd(manager, kind, arch))
+	depsCmd.AddCommand(newDepsTFCmd(tfdeps.New(c.DepsCacheDir())))
 
 	return depsCmd
 }

@@ -77,3 +77,38 @@ func TestNewCLIHonorsExecutableEnv(t *testing.T) {
 		t.Fatalf("NewCLI selected %q, want %q", cli.binary, terraform)
 	}
 }
+
+// TestCLIPlatformAndConfigFile verifies platform detection and shared CLI configuration wiring.
+func TestCLIPlatformAndConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "tofu")
+	logPath := filepath.Join(dir, "config.log")
+	script := "#!/bin/sh\nif [ \"$1\" = version ]; then printf '{\"platform\":\"linux_arm64\"}'; exit; fi\nprintf '%s' \"$TF_CLI_CONFIG_FILE\" > " + logPath + "\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv(CommandEnvVar, "")
+	cli, err := NewCLI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	platform, err := cli.Platform(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if platform != "linux_arm64" {
+		t.Fatalf("Platform = %q", platform)
+	}
+	configPath := filepath.Join(dir, "terraform.tfrc")
+	if err := cli.WithCLIConfig(configPath).Init(context.Background(), dir); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != configPath {
+		t.Fatalf("TF_CLI_CONFIG_FILE = %q", raw)
+	}
+}

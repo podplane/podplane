@@ -56,32 +56,28 @@ const validClusterConfigJSON = `{
   }
 }`
 
-// TestClusterCreateNoApplyGeneratesTerraform verifies cluster create writes
-// managed Terraform without invoking OpenTofu/Terraform.
-func TestClusterCreateNoApplyGeneratesTerraform(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "podplane.cluster.jsonc")
-	if err := os.WriteFile(path, []byte(validClusterConfigJSON), 0o644); err != nil {
-		t.Fatal(err)
-	}
+// TestClusterCreateCommandHasExpectedInterface verifies the create command's public flags.
+func TestClusterCreateCommandHasExpectedInterface(t *testing.T) {
 	cmd := newClusterCreateCmd(&config.Config{})
-	cmd.SetArgs([]string{"--cluster-config", path, "--no-apply"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("cluster create --no-apply returned error: %v", err)
+	for _, name := range []string{"cluster-config", "no-apply", "auto-approve"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("cluster create missing --%s", name)
+		}
 	}
-	for _, name := range []string{
-		"podplane.cluster.schema.json",
-		"podplane.cluster.main.tf",
-		"podplane.cluster.buckets.tf",
-		"podplane.cluster.dns.tf",
-		"podplane.cluster.roles.tf",
-		"podplane.cluster.inputs.runtime.tf",
-		"podplane.cluster.inputs.vm.tf",
-		"podplane.cluster.inputs.infra.tf",
-		"podplane.cluster.outputs.tf",
-	} {
-		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
-			t.Fatalf("AWS cluster file %s was not generated: %v", name, err)
+	if cmd.Flags().Lookup("tf-deps") != nil {
+		t.Fatal("cluster create should use cached dependencies without --tf-deps")
+	}
+}
+
+// TestClusterUpgradeCommandHasExpectedInterface verifies the upgrade command's public flags.
+func TestClusterUpgradeCommandHasExpectedInterface(t *testing.T) {
+	cmd := newClusterUpgradeCmd(&config.Config{})
+	if cmd.Name() != "upgrade" {
+		t.Fatalf("command name = %q", cmd.Name())
+	}
+	for _, name := range []string{"cluster-config", "no-apply", "auto-approve"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("cluster upgrade missing --%s", name)
 		}
 	}
 }

@@ -123,22 +123,19 @@ locals {
 }
 
 module "cluster" {
-  source = "nstance-dev/nstance/aws//modules/cluster"
-  version = "~> 2.0"
+  source = "../../cache/deps/tf/modules/nstance/2.0.1/modules/cluster"
   cluster_id = local.cluster_id
   name_prefix = local.name_prefix
 }
 
 module "account_123456789012_us_east_1" {
-  source = "nstance-dev/nstance/aws//modules/account"
-  version = "~> 2.0"
+  source = "../../cache/deps/tf/modules/nstance/2.0.1/modules/account"
   cluster = module.cluster
   enable_ssm = var.enable_ssm
 }
 
 module "network_123456789012_us_east_1" {
-  source = "nstance-dev/nstance/aws//modules/network"
-  version = "~> 2.0"
+  source = "../../cache/deps/tf/modules/nstance/2.0.1/modules/network"
   cluster = module.cluster
   enable_ssm = var.enable_ssm
   vpc_id = var.vpc_id
@@ -149,8 +146,7 @@ module "network_123456789012_us_east_1" {
 }
 
 module "shard_us_east_1a" {
-  source = "nstance-dev/nstance/aws//modules/shard"
-  version = "~> 2.0"
+  source = "../../cache/deps/tf/modules/nstance/2.0.1/modules/shard"
   cluster = module.cluster
   account = module.account_123456789012_us_east_1
   network = module.network_123456789012_us_east_1

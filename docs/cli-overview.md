@@ -95,6 +95,7 @@ See [CLI Storage](cli-storage.md) for more details about these files and how the
 ### `cluster` commands
 
 - `create` generates or reads a cluster config file, generates infra-as-code files, and (for AWS/Google Cloud) deploys the cluster via OpenTofu/Terraform
+- `upgrade` downloads newer compatible infrastructure dependencies for a cluster, regenerates its managed files, and optionally applies the upgrade
 - `delete` removes deployed infrastructure and leaves config and generated `.tf` files in place.
 
 ### `oidc` commands
@@ -161,6 +162,7 @@ The `local` commands automatically download and cache dependencies. These comman
 
 - `status` reports current state of the cache and if any new dependency versions are available to download
 - `download` force-downloads the latest dependency versions
+- `tf [--platform OS_ARCH]...` downloads cluster providers and modules for offline use
 
 ### informational commands
 

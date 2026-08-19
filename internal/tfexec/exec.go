@@ -6,9 +6,11 @@ package tfexec
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // CommandEnvVar selects the OpenTofu or Terraform command used by Podplane.
@@ -24,7 +26,8 @@ type Executor interface {
 
 // CLI runs OpenTofu/Terraform by invoking a local executable.
 type CLI struct {
-	binary string
+	binary        string
+	cliConfigFile string
 }
 
 // NewCLI selects the configured executable or finds tofu or terraform on PATH.
@@ -48,6 +51,51 @@ func NewCLI() (*CLI, error) {
 // Init runs OpenTofu/Terraform init in dir.
 func (c *CLI) Init(ctx context.Context, dir string) error {
 	return c.run(ctx, dir, "init")
+}
+
+// InitBackendDisabled initializes dependencies without configuring a backend.
+func (c *CLI) InitBackendDisabled(ctx context.Context, dir string) error {
+	return c.run(ctx, dir, "init", "-backend=false")
+}
+
+// ProvidersMirror downloads provider packages for platform into mirrorDir.
+func (c *CLI) ProvidersMirror(ctx context.Context, dir, mirrorDir, platform string) error {
+	return c.run(ctx, dir, "providers", "mirror", "-platform="+platform, mirrorDir)
+}
+
+// ProvidersLock records provider checksums for platforms from mirrorDir.
+func (c *CLI) ProvidersLock(ctx context.Context, dir, mirrorDir string, platforms []string) error {
+	args := []string{"providers", "lock", "-fs-mirror=" + mirrorDir}
+	for _, platform := range platforms {
+		args = append(args, "-platform="+platform)
+	}
+	return c.run(ctx, dir, args...)
+}
+
+// Platform returns the platform reported by the selected engine.
+func (c *CLI) Platform(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, c.binary, "version", "-json")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("read OpenTofu/Terraform platform: %w", err)
+	}
+	var version struct {
+		Platform string `json:"platform"`
+	}
+	if err := json.Unmarshal(out, &version); err != nil {
+		return "", fmt.Errorf("decode OpenTofu/Terraform version: %w", err)
+	}
+	if version.Platform == "" {
+		return "", fmt.Errorf("OpenTofu/Terraform version did not report a platform")
+	}
+	return version.Platform, nil
+}
+
+// WithCLIConfig returns a copy that uses path as TF_CLI_CONFIG_FILE.
+func (c *CLI) WithCLIConfig(path string) *CLI {
+	configured := *c
+	configured.cliConfigFile = path
+	return &configured
 }
 
 // Apply runs OpenTofu/Terraform apply in dir.
@@ -84,6 +132,10 @@ func (c *CLI) OutputJSON(ctx context.Context, dir string) ([]byte, error) {
 func (c *CLI) run(ctx context.Context, dir string, args ...string) error {
 	cmd := exec.CommandContext(ctx, c.binary, args...)
 	cmd.Dir = dir
+	if c.cliConfigFile != "" {
+		cmd.Env = withoutEnv(os.Environ(), "TF_CLI_CONFIG_FILE")
+		cmd.Env = append(cmd.Env, "TF_CLI_CONFIG_FILE="+c.cliConfigFile)
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -91,4 +143,16 @@ func (c *CLI) run(ctx context.Context, dir string, args ...string) error {
 		return fmt.Errorf("run OpenTofu/Terraform %v in %s: %w", args, dir, err)
 	}
 	return nil
+}
+
+// withoutEnv returns env without entries for name.
+func withoutEnv(env []string, name string) []string {
+	prefix := name + "="
+	out := make([]string, 0, len(env))
+	for _, value := range env {
+		if !strings.HasPrefix(value, prefix) {
+			out = append(out, value)
+		}
+	}
+	return out
 }

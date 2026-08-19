@@ -20,6 +20,7 @@ func newClusterCmd(c *config.Config) *cobra.Command {
 		_ = cmd.Help()
 	}
 	clusterCmd.AddCommand(newClusterCreateCmd(c))
+	clusterCmd.AddCommand(newClusterUpgradeCmd(c))
 	clusterCmd.AddCommand(newClusterDeleteCmd(c))
 	return clusterCmd
 }

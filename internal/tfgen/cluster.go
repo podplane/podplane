@@ -16,10 +16,26 @@ import (
 	"github.com/podplane/podplane/pkg/seeds"
 )
 
+const (
+	// AWSProviderSource is the registry address of the AWS provider used by cluster infrastructure.
+	AWSProviderSource = "hashicorp/aws"
+	// AWSProviderVersion is the supported AWS provider version constraint.
+	AWSProviderVersion = ">= 6.0"
+	// PodplaneProviderSource is the registry address of the Podplane provider.
+	PodplaneProviderSource = "podplane/podplane"
+	// PodplaneProviderVersion is the supported Podplane provider version constraint.
+	PodplaneProviderVersion = ">= 1.2.0"
+	// NstanceModuleSource is the registry address of the Nstance AWS module.
+	NstanceModuleSource = "nstance-dev/nstance/aws"
+	// NstanceModuleVersion is the supported Nstance module version constraint.
+	NstanceModuleVersion = "~> 2.0"
+)
+
 // ClusterOptions provides dependency inputs needed to render cluster Terraform.
 type ClusterOptions struct {
 	DepsMirrorURL     string
 	VMConfigManifests []VMConfigManifest
+	NstanceModuleDir  string
 }
 
 // VMConfigManifest is one pinned vmconfig manifest used by generated Terraform.
@@ -42,6 +58,9 @@ func (t vmTarget) dataName() string {
 
 // GenerateCluster renders managed Terraform files for a cluster config path.
 func GenerateCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts ClusterOptions) ([]File, error) {
+	if opts.NstanceModuleDir == "" {
+		return nil, fmt.Errorf("nstance module source directory is required")
+	}
 	network, err := clusterconfig.ServiceNetworkFromCIDRs(cfg.Cluster.Kubernetes.ServiceCIDR)
 	if err != nil {
 		return nil, err
@@ -83,6 +102,51 @@ func WriteCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts Clus
 	return clusterconfig.WriteSchema(dir)
 }
 
+// TerraformDependencyRoot renders a minimal root module containing all cluster
+// providers and modules so their complete dependency graph can be resolved.
+// An empty moduleVersion uses the normal version constraint.
+func TerraformDependencyRoot(moduleVersion string) string {
+	var doc hclDocument
+	addClusterTerraformRequirements(&doc)
+	if moduleVersion == "" {
+		moduleVersion = NstanceModuleVersion
+	}
+	for _, name := range []string{"cluster", "account", "network", "shard"} {
+		module := block("module", name)
+		module.Body.Attr("source", str(NstanceModuleSource+"//modules/"+name))
+		module.Body.Attr("version", str(moduleVersion))
+		doc.AddBlock(module)
+	}
+	return doc.String()
+}
+
+// addClusterTerraformRequirements adds the engine and provider constraints used by cluster stacks.
+func addClusterTerraformRequirements(doc *hclDocument) {
+	terraform := block("terraform")
+	terraform.Body.Attr("required_version", str(">= 1.6.0"))
+	requiredProviders := block("required_providers")
+	requiredProviders.Body.Attr("aws", object(
+		identField("source", str(AWSProviderSource)),
+		identField("version", str(AWSProviderVersion)),
+	))
+	requiredProviders.Body.Attr("podplane", object(
+		identField("source", str(PodplaneProviderSource)),
+		identField("version", str(PodplaneProviderVersion)),
+	))
+	terraform.Body.Block(requiredProviders)
+	doc.AddBlock(terraform)
+}
+
+// nstanceModuleSource returns the local source for a generated Nstance submodule.
+func nstanceModuleSource(opts ClusterOptions, name string) string {
+	return strings.TrimSuffix(filepath.ToSlash(opts.NstanceModuleDir), "/") + "/modules/" + name
+}
+
+// addNstanceModuleSource adds a local Nstance submodule source to a module block.
+func addNstanceModuleSource(module *hclBlock, opts ClusterOptions, name string) {
+	module.Body.Attr("source", str(nstanceModuleSource(opts, name)))
+}
+
 // renderAWSCluster renders the AWS cluster Terraform files.
 func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provider, opts ClusterOptions, serviceNetwork clusterconfig.ServiceNetwork) []File {
 	var mainDoc hclDocument
@@ -105,19 +169,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		"Cluster infrastructure inputs. Changes may add, replace, or remove provider resources.",
 	}
 
-	terraform := block("terraform")
-	terraform.Body.Attr("required_version", str(">= 1.6.0"))
-	requiredProviders := block("required_providers")
-	requiredProviders.Body.Attr("aws", object(
-		identField("source", str("hashicorp/aws")),
-		identField("version", str(">= 6.0")),
-	))
-	requiredProviders.Body.Attr("podplane", object(
-		identField("source", str("podplane/podplane")),
-		identField("version", str(">= 1.2.0")),
-	))
-	terraform.Body.Block(requiredProviders)
-	mainDoc.AddBlock(terraform)
+	addClusterTerraformRequirements(&mainDoc)
 
 	awsProvider := block("provider", "aws")
 	awsProvider.Body.Attr("region", expr("local.provider_region"))
@@ -280,8 +332,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	mainDoc.AddBlock(locals)
 
 	cluster := block("module", "cluster")
-	cluster.Body.Attr("source", str("nstance-dev/nstance/aws//modules/cluster"))
-	cluster.Body.Attr("version", str("~> 2.0"))
+	addNstanceModuleSource(&cluster, opts, "cluster")
 	cluster.Body.Attr("cluster_id", expr("local.cluster_id"))
 	cluster.Body.Attr("name_prefix", expr("local.name_prefix"))
 	if provider.Profile != "" {
@@ -313,15 +364,13 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	outputsDoc.AddBlock(manualDNS)
 
 	account := block("module", accountName)
-	account.Body.Attr("source", str("nstance-dev/nstance/aws//modules/account"))
-	account.Body.Attr("version", str("~> 2.0"))
+	addNstanceModuleSource(&account, opts, "account")
 	account.Body.Attr("cluster", expr("module.cluster"))
 	account.Body.Attr("enable_ssm", expr("var.enable_ssm"))
 	mainDoc.AddBlock(account)
 
 	network := block("module", networkName)
-	network.Body.Attr("source", str("nstance-dev/nstance/aws//modules/network"))
-	network.Body.Attr("version", str("~> 2.0"))
+	addNstanceModuleSource(&network, opts, "network")
 	network.Body.Attr("cluster", expr("module.cluster"))
 	network.Body.Attr("enable_ssm", expr("var.enable_ssm"))
 	network.Body.Attr("vpc_id", expr("var.vpc_id"))
@@ -337,8 +386,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	for _, zone := range sortedKeys(provider.Zones) {
 		moduleName := safeName("shard", zone)
 		shard := block("module", moduleName)
-		shard.Body.Attr("source", str("nstance-dev/nstance/aws//modules/shard"))
-		shard.Body.Attr("version", str("~> 2.0"))
+		addNstanceModuleSource(&shard, opts, "shard")
 		shard.Body.Attr("cluster", expr("module.cluster"))
 		shard.Body.Attr("account", expr("module."+accountName))
 		shard.Body.Attr("network", expr("module."+networkName))

@@ -59,11 +59,20 @@ Podplane's configuration aims to cover ~80% of infrastructure use cases. For the
 
 ### Generated vs Custom Code
 
-The CLI generates `podplane.cluster.*.tf` files alongside the `podplane.cluster.jsonc` config file. These files are fully managed by the CLI - `podplane cluster create` generates them and `podplane cluster upgrade` will regenerate them in the future. Users should never edit generated `.tf` files directly, instead tune the `podplane.cluster.jsonc` file, set generated variables in `terraform.tfvars` or `*.auto.tfvars`, or create additional custom `.tf` files.
+The CLI generates `podplane.cluster.*.tf` files alongside the `podplane.cluster.jsonc` config file. These files are fully managed by the CLI: `podplane cluster create` generates them and `podplane cluster upgrade` regenerates them while upgrading cached infrastructure dependencies. Users should never edit generated `.tf` files directly; instead, tune the `podplane.cluster.jsonc` file, set generated variables in `terraform.tfvars` or `*.auto.tfvars`, or create additional custom `.tf` files.
 
 Generated files prefer composition of published [Nstance Terraform modules](https://github.com/nstance-dev/nstance/tree/main/deploy/tf) (`cluster`, `account`, `network`, `shard`) over defining raw cloud resources. `podplane.cluster.main.tf` contains the Terraform/provider configuration, primary derived locals, and module calls. `podplane.cluster.buckets.tf` and `podplane.cluster.roles.tf` contain the cluster's object-storage and IAM resources. Generated inputs are split by review impact: `podplane.cluster.inputs.runtime.tf` reconfigures existing VMs, `podplane.cluster.inputs.vm.tf` can roll or reconcile VMs, and `podplane.cluster.inputs.infra.tf` changes cloud infrastructure and contains generated cluster-identity locals that are not supported as in-place overrides. Re-running `cluster create` after editing JSONC changes the corresponding inputs file, making the expected impact visible in filename-based review. `podplane.cluster.outputs.tf` contains generated outputs. `podplane.cluster.vmconfig.*.json` pins the vmconfig dependency manifests used to render VM userdata. `podplane.cluster.schema.json` contains a generated local JSON Schema referenced by `podplane.cluster.jsonc` so editors can provide validation, completion, and field documentation without internet access.
 
 The pinned vmconfig manifest copies are Terraform inputs and may be edited/updated before planning to audit or override package versions, URLs, and checksums. Manifest changes appear in the Terraform plan through the `podplane_userdata` data source. Manifests are selected per VM pool architecture rather than the CLI host architecture, and `podplane cluster create` automatically fetches any required manifest missing from the local cache. Re-running the command replaces the copies with the currently cached manifests; use `podplane deps download --arch <architecture>` to refresh those cached versions first.
+
+For deployments without public OpenTofu/Terraform registry access, run
+`podplane deps tf --platform <target-platform>` while online and persist the
+resulting `deps/tf/` cache. `podplane cluster create` always copies the provider
+lock into the generated stack and references exact versioned module source and
+the provider mirror directly from the shared cache. Downloads are additive,
+allowing clusters pinned to different versions to use the same cache. Podplane
+does not copy dependency packages or reuse an initialized `.terraform`
+directory.
 
 To set generated variables, create a user-owned `terraform.tfvars` or `*.auto.tfvars` file in the same directory. To add custom infrastructure (e.g. lifecycle rules on a bucket, additional IAM policies, extra cloud resources), create separate `.tf` files in the same directory. These files can reference outputs from the generated modules. The CLI will never modify files it didn't generate.
 
@@ -83,7 +92,7 @@ To set generated variables, create a user-owned `terraform.tfvars` or `*.auto.tf
 │   └── custom.tf                           # your custom infrastructure
 ```
 
-`podplane cluster upgrade` will regenerate all `podplane.cluster.*.tf` files and `podplane.cluster.schema.json` without touching any other files in the directory.
+`podplane cluster upgrade` downloads the latest compatible cached Terraform modules and providers, updates `.terraform.lock.hcl`, and regenerates all `podplane.cluster.*.tf` files and `podplane.cluster.schema.json` without touching user-owned files in the directory.
 
 ## Dependencies
 

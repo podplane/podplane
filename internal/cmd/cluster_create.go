@@ -17,6 +17,7 @@ import (
 	"github.com/podplane/podplane/internal/deps"
 	"github.com/podplane/podplane/internal/infrafiles"
 	"github.com/podplane/podplane/internal/oidccreate"
+	"github.com/podplane/podplane/internal/tfdeps"
 	"github.com/podplane/podplane/internal/tfexec"
 	"github.com/podplane/podplane/internal/tfgen"
 	"github.com/podplane/podplane/internal/tui"
@@ -25,7 +26,7 @@ import (
 )
 
 // newClusterCreateCmd builds the cluster create command and wires config
-// collection, Terraform generation, and optional apply.
+// collection, dependency preparation, Terraform generation, and optional apply.
 func newClusterCreateCmd(c *config.Config) *cobra.Command {
 	var cfgPath string
 	var noApply bool
@@ -102,61 +103,33 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				// Read or download the seed snapshot specified by the cluster config
-				if cfg.Cluster.Seed.Name != "" && cfg.Cluster.Seed.Name != seeds.None {
-					if _, err := depsManager.EnsureSeedSnapshot(context.Background(), cfg.Cluster.Seed.Name, cfg.Cluster.Seed.Version, nil); err != nil {
-						return fmt.Errorf("failed to prepare seed snapshot %q: %w", cfg.Cluster.Seed.Name, err)
-					}
-				}
-			}
-
-			// Resolve vmconfig manifests from the local dependency cache. Terraform
-			// receives pinned copies so plans remain auditable and deterministic.
-			manifests := map[string]tfgen.VMConfigManifest{}
-			for poolName, pool := range cfg.Cluster.Pools {
-				kind := "knd"
-				if poolName == "control-plane" {
-					kind = "knc"
-				}
-				key := kind + "/" + pool.Arch
-				if _, ok := manifests[key]; ok {
-					continue
-				}
-				if _, err := depsManager.EnsureVMConfigManifestCached(kind, pool.Arch); err != nil {
-					return fmt.Errorf("failed to prepare vmconfig manifest %s: %w", key, err)
-				}
-				_, raw, err := depsManager.ReadCachedManifest(kind, pool.Arch)
-				if err != nil {
-					return fmt.Errorf("failed to read vmconfig manifest %s: %w", key, err)
-				}
-				manifests[key] = tfgen.VMConfigManifest{
-					Kind:     kind,
-					Arch:     pool.Arch,
-					Filename: filepath.Base(depsManager.VMConfigManifestCachePath(kind, pool.Arch)),
-					JSON:     raw,
-				}
-			}
-			manifestList := make([]tfgen.VMConfigManifest, 0, len(manifests))
-			for _, manifest := range manifests {
-				manifestList = append(manifestList, manifest)
 			}
 
 			// Generate Terraform files and pinned vmconfig manifest copies.
 			dir := filepath.Dir(path)
-			if err := tfgen.WriteCluster(path, cfg, tfgen.ClusterOptions{
-				DepsMirrorURL:     c.DepsBaseURL(),
-				VMConfigManifests: manifestList,
-			}); err != nil {
+			clusterOptions, err := prepareClusterGeneration(cmd.Context(), c, depsManager, cfg)
+			if err != nil {
+				return err
+			}
+			executor, err := tfexec.NewCLI()
+			if err != nil {
+				return err
+			}
+			depsCtx, depsCancel := context.WithTimeout(cmd.Context(), 30*time.Minute)
+			defer depsCancel()
+			configuration, err := tfdeps.New(c.DepsCacheDir()).Ensure(depsCtx, executor, dir)
+			if err != nil {
+				return err
+			}
+			clusterOptions.NstanceModuleDir = configuration.NstanceModuleDir
+			if err := tfgen.WriteCluster(path, cfg, clusterOptions); err != nil {
 				return err
 			}
 			fmt.Printf("Generated Podplane OpenTofu/Terraform files in %s\n", dir)
 			if noApply {
 				return nil
 			}
-			executor, err := tfexec.NewCLI()
-			if err != nil {
-				return err
-			}
+			executor = executor.WithCLIConfig(configuration.CLIConfigPath)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 			defer cancel()
 			if err := executor.Init(ctx, dir); err != nil {
@@ -176,6 +149,49 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 	cmd.Flags().BoolVar(&noApply, "no-apply", false, "Generate OpenTofu/Terraform files but do not run apply")
 	cmd.Flags().BoolVarP(&autoApprove, "auto-approve", "y", false, "Skip confirmation prompts and pass auto-approval to OpenTofu/Terraform")
 	return cmd
+}
+
+// prepareClusterGeneration resolves the cached inputs needed to regenerate a
+// cluster's managed Terraform files.
+func prepareClusterGeneration(ctx context.Context, c *config.Config, depsManager *deps.Manager, cfg *clusterconfig.ClusterConfig) (tfgen.ClusterOptions, error) {
+	if cfg.Cluster.Seed.Name != "" && cfg.Cluster.Seed.Name != seeds.None {
+		if _, err := depsManager.EnsureSeedSnapshot(ctx, cfg.Cluster.Seed.Name, cfg.Cluster.Seed.Version, nil); err != nil {
+			return tfgen.ClusterOptions{}, fmt.Errorf("failed to prepare seed snapshot %q: %w", cfg.Cluster.Seed.Name, err)
+		}
+	}
+
+	manifests := map[string]tfgen.VMConfigManifest{}
+	for poolName, pool := range cfg.Cluster.Pools {
+		kind := "knd"
+		if poolName == "control-plane" {
+			kind = "knc"
+		}
+		key := kind + "/" + pool.Arch
+		if _, ok := manifests[key]; ok {
+			continue
+		}
+		if _, err := depsManager.EnsureVMConfigManifestCached(kind, pool.Arch); err != nil {
+			return tfgen.ClusterOptions{}, fmt.Errorf("failed to prepare vmconfig manifest %s: %w", key, err)
+		}
+		_, raw, err := depsManager.ReadCachedManifest(kind, pool.Arch)
+		if err != nil {
+			return tfgen.ClusterOptions{}, fmt.Errorf("failed to read vmconfig manifest %s: %w", key, err)
+		}
+		manifests[key] = tfgen.VMConfigManifest{
+			Kind:     kind,
+			Arch:     pool.Arch,
+			Filename: filepath.Base(depsManager.VMConfigManifestCachePath(kind, pool.Arch)),
+			JSON:     raw,
+		}
+	}
+	manifestList := make([]tfgen.VMConfigManifest, 0, len(manifests))
+	for _, manifest := range manifests {
+		manifestList = append(manifestList, manifest)
+	}
+	return tfgen.ClusterOptions{
+		DepsMirrorURL:     c.DepsBaseURL(),
+		VMConfigManifests: manifestList,
+	}, nil
 }
 
 // clusterCreateOIDCIssuer collects or creates the OIDC issuer URL needed by a

@@ -16,6 +16,7 @@ These options are available on all commands:
 ## Cluster Commands
 
 - [podplane cluster create](cluster-create.md) – Generate cluster configuration and deploy infrastructure.
+- [podplane cluster upgrade](cluster-upgrade.md) – Upgrade cluster infrastructure dependencies.
 - [podplane cluster delete](cluster-delete.md) – Remove deployed cluster infrastructure.
 
 ## OIDC Commands
@@ -62,6 +63,7 @@ These options are available on all commands:
 
 - [podplane deps status](deps-status.md) – Report package cache status.
 - [podplane deps download](deps-download.md) – Download latest package versions.
+- [podplane deps tf](deps-tf.md) – Download cluster OpenTofu/Terraform dependencies.
 
 ## Informational Commands
 
