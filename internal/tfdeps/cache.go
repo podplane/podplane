@@ -311,6 +311,13 @@ func (c *Cache) writeCLIConfig() (string, error) {
 	providerDir := filepath.Join(c.root, providersDirName)
 	config := "provider_installation {\n  filesystem_mirror {\n    path = " + strconv.Quote(filepath.ToSlash(providerDir)) + "\n  }\n}\n"
 	configPath := filepath.Join(c.root, CLIConfigFileName)
+	existing, err := os.ReadFile(configPath)
+	if err == nil && bytes.Equal(existing, []byte(config)) {
+		return configPath, nil
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("read shared OpenTofu/Terraform CLI configuration: %w", err)
+	}
 	if err := writeFileAtomic(configPath, []byte(config), 0o644); err != nil {
 		return "", fmt.Errorf("write shared OpenTofu/Terraform CLI configuration: %w", err)
 	}

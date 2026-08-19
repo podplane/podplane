@@ -192,6 +192,40 @@ func TestDownloadDefaultsToEnginePlatform(t *testing.T) {
 	}
 }
 
+// TestEnsureUsesCompleteReadOnlyCache verifies an unchanged CLI config is not rewritten.
+func TestEnsureUsesCompleteReadOnlyCache(t *testing.T) {
+	cache := New(t.TempDir())
+	engine := &fakeEngine{}
+	if err := cache.Download(context.Background(), engine, nil); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(cache.root, CLIConfigFileName)
+	if err := os.Chmod(configPath, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(cache.root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(cache.root, 0o755)
+	})
+
+	configuration, err := cache.Ensure(context.Background(), engine, t.TempDir())
+	if err != nil {
+		t.Fatalf("Ensure returned error with complete read-only cache: %v", err)
+	}
+	if configuration.CLIConfigPath != configPath {
+		t.Fatalf("config path = %q", configuration.CLIConfigPath)
+	}
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o444 {
+		t.Fatalf("CLI config mode = %o; file was rewritten", info.Mode().Perm())
+	}
+}
+
 // TestEnsureRestoresVersionsFromGeneratedSourceAndLock verifies exact historical recovery.
 func TestEnsureRestoresVersionsFromGeneratedSourceAndLock(t *testing.T) {
 	cache := New(t.TempDir())
