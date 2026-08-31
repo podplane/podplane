@@ -33,6 +33,12 @@ Environment variable names must use Kubernetes-compatible names such as `HELLO_M
 
 `--hostname` and `--path` are ergonomic shortcuts for template routing values (`route.hostname` and `route.path`). If the selected template's `values.schema.json` does not support those values, deploy fails before running Helm. Other template-specific values should be configured with Helm-compatible `--set`, for example `--set app.port=8080`. For non-standard external HTTPS ports, set `route.port`, for example `--set route.port=8443`.
 
+Quote values containing Helm list syntax so the shell passes the braces unchanged. For example, the web template accepts a primary app port followed by additional cluster-internal Service ports:
+
+```bash
+podplane deploy web --name hello --set 'app.port={8080,8082}'
+```
+
 ## Options
 
 | Flag | Description |

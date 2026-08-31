@@ -43,7 +43,7 @@ The `web` template deploys a web application with automatic TLS and ingress rout
 - A cert-manager Certificate for pod-internal mTLS
 - A BackendTLSPolicy ensuring encrypted gateway-to-service traffic
 
-Your app container serves plain HTTP on port 8080 by default - the Caddy sidecar handles all TLS. No TLS configuration is needed in your app. Use `--set app.port=<port>` if your image listens on a different plain HTTP port.
+Your app container serves plain HTTP on port 8080 by default — the Caddy sidecar handles service TLS. Set `certificates.server=direct` when the app should receive the serving certificate and terminate TLS itself. Use `--set app.port=<port>` if your image listens on a different primary port.
 
 ### Template values
 
@@ -58,11 +58,17 @@ Template-specific values can be set with `--set` e.g.:
 | `images.app` | `ghcr.io/podplane/hello:latest` | App container image default; `--image` maps here |
 | `images.caddy` | `docker.io/library/caddy:2` | Caddy sidecar image |
 | `app.env` | `{}` | Non-secret environment variables for the app container; `--env` maps here |
-| `app.port` | `8080` | Plain HTTP port exposed by the app container |
+| `app.port` | `8080` | App port, or an array with the primary port first and additional Service ports after it |
 | `route.hostname` | `""` | External hostname for routing; `--hostname` maps here |
 | `route.path` | `/` | URL path prefix for routing; `--path` maps here |
 | `route.port` | `443` | External HTTPS port for the browser-facing route URL |
 | `metrics.http` | `true` | Enable Caddy HTTP metrics |
+
+To expose additional cluster-internal ports, use quoted Helm list syntax. The first port remains the primary port; later ports target the app directly and cannot use the public Service port 443:
+
+```bash
+podplane deploy web --name hello --set 'app.port={8080,8082}'
+```
 
 ### Example
 
@@ -133,4 +139,10 @@ Template-specific configuration uses Helm-compatible `--set` syntax instead of d
 ```bash
 podplane deploy web --name hello --image ghcr.io/podplane/hello:latest \
   --set app.port=8080
+```
+
+Quote values containing Helm list syntax so the shell passes the braces unchanged:
+
+```bash
+podplane deploy web --name hello --set 'app.port={8080,8082}'
 ```
