@@ -38,7 +38,7 @@ Follow the prompts to specify:
 
 - Which cloud/provider to use.
 - Provider config such as account/project/profile and region.
-- Auth server URL, or opt to deploy a new [Easy OIDC](https://easy-oidc.dev) server.
+- Auth server URL, or opt to deploy a new [Truster](https://truster.dev) server.
 - Cluster layout e.g. single node, separate control plane/ingress layers, etc.
 - Networking configuration e.g. CIDR block for VPC and Subnet(s), provider zone(s).
 - Default CPU architecture.

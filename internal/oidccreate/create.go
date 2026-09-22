@@ -29,7 +29,7 @@ type Options struct {
 func Run(ctx context.Context, opts Options) (string, error) {
 	var cfg *oidcconfig.Config
 	if _, err := os.Stat(opts.ConfigPath); os.IsNotExist(err) {
-		fmt.Println("Podplane will deploy Easy OIDC.")
+		fmt.Println("Podplane will deploy Truster.")
 		fmt.Println("Most organisations use one OIDC server across production, staging, development, observability, and CI/CD clusters.")
 		fmt.Println("Consider deploying it in a dedicated or production-grade account, not casually inside the cluster account you happen to be creating today.")
 		cfg, err = RunConfigWizard()

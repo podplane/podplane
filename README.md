@@ -28,7 +28,7 @@ Podplane is easy to use and operate because of three sibling projects which form
 
 - Cluster state is stored in object storage via [Netsy](https://netsy.dev), not etcd.
 - Auto-scaling & provisioning is faster with [Nstance](https://nstance.dev).
-- OIDC & RBAC is simplified with [Easy OIDC](https://easy-oidc.dev).
+- OIDC & RBAC is simplified with [Truster](https://truster.dev).
 
 ## Learn More
 

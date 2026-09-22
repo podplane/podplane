@@ -413,16 +413,18 @@ func TestGenerateAWSClusterTerraformWithoutSeed(t *testing.T) {
 }
 
 // TestGenerateAWSOIDCTerraform verifies the generated AWS OIDC Terraform
-// contains the expected Easy OIDC settings.
+// contains the expected Truster settings.
 func TestGenerateAWSOIDCTerraform(t *testing.T) {
 	cfg := &oidcconfig.Config{OIDC: oidcconfig.OIDC{
-		Provider:            oidcconfig.Provider{Kind: "aws", Region: "us-east-1", Account: "123456789012"},
-		Hostname:            "https://auth.example.com",
-		Domain:              oidcconfig.Domain{Zone: "example.com", Provider: oidcconfig.DomainProvider{Kind: "aws"}},
-		Connector:           oidcconfig.Connector{Kind: "google", ClientSecretARN: "arn:connector"},
-		SigningKeySecretARN: "arn:signing",
-		DefaultRedirectURIs: []string{"http://localhost:8000"},
-		Clients:             map[string]oidcconfig.Client{"kubelogin": {}},
+		Provider:               oidcconfig.Provider{Kind: "aws", Region: "us-east-1", Account: "123456789012"},
+		Hostname:               "https://auth.example.com",
+		Domain:                 oidcconfig.Domain{Zone: "example.com", Provider: oidcconfig.DomainProvider{Kind: "aws"}},
+		Connector:              oidcconfig.Connector{Kind: "google", ClientSecretARN: "arn:connector"},
+		SigningKeySecretARN:    "arn:signing",
+		EncryptionKeySecretARN: "arn:encryption",
+		DefaultRedirectURIs:    []string{"http://localhost:8000"},
+		Clients:                map[string]oidcconfig.Client{"kubelogin": {GroupsOverride: "production"}},
+		GroupsOverrides:        map[string]oidcconfig.GroupsOverride{"production": {"ops@example.com": {"admins"}}},
 	}}
 	files, err := GenerateOIDC(cfg)
 	if err != nil {
@@ -446,9 +448,14 @@ func TestGenerateAWSOIDCTerraform(t *testing.T) {
 	assertExpectedTerraform(t, "podplane.oidc.outputs.expected.tf", contents["podplane.oidc.outputs.tf"])
 	got := contents["podplane.oidc.main.tf"] + contents["podplane.oidc.variables.tf"] + contents["podplane.oidc.outputs.tf"]
 	for _, want := range []string{
+		`source = "truster/truster/aws"`,
 		`oidc_addr = "auth.example.com"`,
-		`connector_type = "google"`,
-		`route53_zone_id = data.aws_route53_zone.oidc.zone_id`,
+		`credentials_secret = "arn:connector"`,
+		`signing_key_name = "arn:signing"`,
+		`user_group_mapping = "production"`,
+		`"ops@example.com" = ["admins"]`,
+		`resource "aws_route53_record" "oidc_ipv4"`,
+		`value = module.oidc.issuer_url`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("generated OIDC tf missing %q:\n%s", want, got)

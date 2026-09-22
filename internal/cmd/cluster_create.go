@@ -204,7 +204,7 @@ func clusterCreateOIDCIssuer(originDir string, noApply bool, autoApprove bool) (
 	if hasOIDC {
 		return tui.Input("Cluster OIDC", "OIDC issuer URL", "https://auth.example.com", tui.Required("OIDC issuer URL"))
 	}
-	createOIDC, err := tui.Confirm("Set up a new Easy OIDC <https://easy-oidc.dev> server now?", false, 0)
+	createOIDC, err := tui.Confirm("Set up a new Truster <https://truster.dev> server now?", false, 0)
 	if err != nil {
 		return "", err
 	}

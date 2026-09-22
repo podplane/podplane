@@ -25,6 +25,8 @@ func TestLoadValidAWSConfig(t *testing.T) {
       "client_secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:connector"
     },
     "signing_key_secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:signing",
+    "encryption_key_secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:encryption",
+    "default_redirect_uris": ["http://localhost:8000"],
     "clients": {
       "kubelogin": { "groups_override": "prod" }
     },
@@ -50,6 +52,15 @@ func TestValidateRejectsGoogleProvider(t *testing.T) {
 	}})
 	if err == nil {
 		t.Fatal("Validate returned nil, want error")
+	}
+}
+
+func TestValidateRequiresEncryptionKeyForGitHub(t *testing.T) {
+	cfg := NewDraftConfig("aws")
+	cfg.OIDC.Connector.Kind = "github"
+	cfg.OIDC.EncryptionKeySecretARN = ""
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "encryption_key_secret_arn") {
+		t.Fatalf("Validate error = %v, want missing encryption key", err)
 	}
 }
 

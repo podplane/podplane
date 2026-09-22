@@ -15,14 +15,15 @@ type Config struct {
 }
 
 type OIDC struct {
-	Provider            Provider                  `json:"provider"`
-	Hostname            string                    `json:"hostname"`
-	Domain              Domain                    `json:"domain"`
-	Connector           Connector                 `json:"connector"`
-	SigningKeySecretARN string                    `json:"signing_key_secret_arn"`
-	DefaultRedirectURIs []string                  `json:"default_redirect_uris,omitempty"`
-	Clients             map[string]Client         `json:"clients,omitempty"`
-	GroupsOverrides     map[string]GroupsOverride `json:"groups_overrides,omitempty"`
+	Provider               Provider                  `json:"provider"`
+	Hostname               string                    `json:"hostname"`
+	Domain                 Domain                    `json:"domain"`
+	Connector              Connector                 `json:"connector"`
+	SigningKeySecretARN    string                    `json:"signing_key_secret_arn"`
+	EncryptionKeySecretARN string                    `json:"encryption_key_secret_arn,omitempty"`
+	DefaultRedirectURIs    []string                  `json:"default_redirect_uris,omitempty"`
+	Clients                map[string]Client         `json:"clients,omitempty"`
+	GroupsOverrides        map[string]GroupsOverride `json:"groups_overrides,omitempty"`
 }
 
 type Provider struct {

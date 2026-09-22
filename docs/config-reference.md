@@ -269,9 +269,10 @@ New OIDC configs include a relative `$schema` reference to `./podplane.oidc.sche
     },
     "connector": {
       "kind": "google",
-      "client_secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:easy-oidc-connector-secret"
+      "client_secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:truster-connector-secret"
     },
-    "signing_key_secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:easy-oidc-signing-key",
+    "signing_key_secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:truster-signing-key",
+    "encryption_key_secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:truster-encryption-key",
     "default_redirect_uris": ["http://localhost:8000"],
     "clients": {
       "kubelogin-prod": {
@@ -292,16 +293,17 @@ New OIDC configs include a relative `$schema` reference to `./podplane.oidc.sche
 
 | Field | Description |
 |---|---|
-| `oidc.provider.kind` | Cloud provider - `aws` (Google Cloud and Azure are planned) |
+| `oidc.provider.kind` | Infrastructure provider. Only `aws` is currently supported. |
 | `oidc.provider.region` | Provider region to deploy into (e.g. `us-east-1`) |
 | `oidc.provider.account` | Provider account identifier (e.g. AWS account ID) |
 | `oidc.provider.profile` | Provider credentials profile (e.g. AWS CLI profile name) |
 | `oidc.hostname` | The hostname for the OIDC server (e.g. `auth.example.com`) |
 | `oidc.domain.zone` | Domain zone for the hostname (e.g. `example.com`) |
-| `oidc.domain.provider.kind` | Domain DNS provider - `aws`, `cloudflare`, or `google` |
+| `oidc.domain.provider.kind` | Managed DNS provider. Only `aws` is currently supported. |
 | `oidc.connector.kind` | Upstream OAuth provider - `google` or `github` |
 | `oidc.connector.client_secret_arn` | ARN of the AWS Secrets Manager secret containing the OAuth client ID and secret |
 | `oidc.signing_key_secret_arn` | ARN of the AWS Secrets Manager secret containing the OIDC signing key |
+| `oidc.encryption_key_secret_arn` | ARN of the AWS Secrets Manager secret containing Truster's encryption key. Required for GitHub connectors and recommended when enabling refresh tokens. |
 | `oidc.default_redirect_uris` | Default redirect URIs applied to clients that don't specify their own |
 | `oidc.clients.<name>` | Map of OIDC client configurations |
 | `oidc.clients.<name>.groups_override` | Name of a groups override to apply to the specified client (optional) |

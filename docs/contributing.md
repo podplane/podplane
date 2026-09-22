@@ -8,7 +8,7 @@ description: "How to contribute to Podplane."
 
 Thanks for your interest in contributing to Podplane!
 
-The Podplane ecosystem of open source projects also includes: [Netsy](https://netsy.dev), [Nstance](https://nstance.dev), [Easy OIDC](https://easy-oidc.dev), and [puidv7](https://puidv7.dev) sub-projects.
+The Podplane ecosystem of open source projects also includes: [Netsy](https://netsy.dev), [Nstance](https://nstance.dev), [Truster](https://truster.dev), [Podmin](https://podmin.dev), [MonVM](https://monvm.dev), [Source Gateway](https://sourcegateway.dev), and [puidv7](https://puidv7.dev) sub-projects.
 
 ## Bug Reports & Feature Requests
 

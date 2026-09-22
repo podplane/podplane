@@ -19,6 +19,8 @@ const validOIDCConfigJSON = `{
     "domain": { "zone": "example.com", "provider": { "kind": "aws" } },
     "connector": { "kind": "google", "client_secret_arn": "arn:connector" },
     "signing_key_secret_arn": "arn:signing",
+    "encryption_key_secret_arn": "arn:encryption",
+    "default_redirect_uris": ["http://localhost:8000"],
     "clients": { "kubelogin": {} }
   }
 }`

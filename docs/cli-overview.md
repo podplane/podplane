@@ -17,7 +17,7 @@ description: "Podplane CLI design and command overview"
 The Podplane CLI can be divided into groups of commands:
 
 - `cluster` for managing Podplane clusters
-- `oidc` for managing Easy OIDC deployments
+- `oidc` for managing Truster deployments
 - authentication commands
 - `hooks` for integration e.g. kubectl exec auth plugin, podplane TF providers for Netsy state initialization
 - app commands for deploying and removing apps using templates
@@ -63,7 +63,7 @@ We recommend setting up a Git repository for storing all of your cluster and OID
 ```
 ├── infra/                                        # git repo
 │   │
-│   ├── auth-production/                          # example Easy OIDC server
+│   ├── auth-production/                          # example Truster server
 │   │   ├── podplane.oidc.jsonc                   # config file
 │   │   ├── podplane.oidc.schema.json             # generated local editor schema
 │   │   └── podplane.*.tf                         # generated .tf files
@@ -100,7 +100,7 @@ See [CLI Storage](cli-storage.md) for more details about these files and how the
 
 ### `oidc` commands
 
-- `create` generates or reads an OIDC config file, generates infra-as-code files, and (for AWS/Google Cloud) deploys the OIDC via OpenTofu/Terraform
+- `create` generates or reads a Truster config file, generates infra-as-code files, and deploys it to AWS via OpenTofu/Terraform
 - `delete` removes deployed infrastructure and leaves config and generated `.tf` files in place.
 
 ### authentication commands

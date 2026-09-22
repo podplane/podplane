@@ -4,7 +4,7 @@
 
 package oidcconfig
 
-// NewDraftConfig returns a mutable draft Easy OIDC config for the requested
+// NewDraftConfig returns a mutable draft Truster config for the requested
 // provider.
 func NewDraftConfig(providerKind string) *Config {
 	cfg := copyConfig(defaultDraftConfig)
@@ -38,11 +38,12 @@ var defaultDraftConfig = Config{OIDC: OIDC{
 	},
 	Connector: Connector{
 		Kind:            "google",
-		ClientSecretARN: "arn:aws:secretsmanager:us-east-1:123456789012:secret:easy-oidc-connector-secret",
+		ClientSecretARN: "arn:aws:secretsmanager:us-east-1:123456789012:secret:truster-connector-secret",
 	},
-	SigningKeySecretARN: "arn:aws:secretsmanager:us-east-1:123456789012:secret:easy-oidc-signing-key",
-	DefaultRedirectURIs: []string{"http://localhost:8000"},
-	Clients:             map[string]Client{"kubelogin": {}},
+	SigningKeySecretARN:    "arn:aws:secretsmanager:us-east-1:123456789012:secret:truster-signing-key",
+	EncryptionKeySecretARN: "arn:aws:secretsmanager:us-east-1:123456789012:secret:truster-encryption-key",
+	DefaultRedirectURIs:    []string{"http://localhost:8000"},
+	Clients:                map[string]Client{"kubelogin": {}},
 }}
 
 // copyConfig returns a deep enough copy for wizard mutation.

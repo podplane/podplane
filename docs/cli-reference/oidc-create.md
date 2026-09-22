@@ -6,7 +6,7 @@ description: "Generate OIDC configuration and deploy infrastructure"
 
 ## Overview
 
-Generates or reads an OIDC config file, generates infrastructure-as-code files, and (for AWS/Google Cloud) deploys the OIDC server via OpenTofu/Terraform.
+Generates or reads a Truster OIDC config file, generates infrastructure-as-code files, and deploys the server to AWS via OpenTofu/Terraform. Other infrastructure providers are not currently supported.
 
 ```
 podplane oidc create [flags]

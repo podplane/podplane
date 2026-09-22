@@ -22,7 +22,7 @@ For Proxmox VE, this layer handles:
 This layer also handles:
 - Configuration for auto-scaling VMs via [Nstance](https://nstance.dev)
 - VM userdata configuration for downloading package dependencies for each `vmconfig` VM "kind"
-- Configuration for deploying an [Easy OIDC](https://easy-oidc.dev) server for cluster authentication (if you don't have an existing OIDC server)
+- Configuration for deploying a [Truster](https://truster.dev) server for cluster authentication (if you don't have an existing OIDC server)
 
 ## Provisioning Flow
 
@@ -105,4 +105,4 @@ To set generated variables, create a user-owned `terraform.tfvars` or `*.auto.tf
 
 If you do not have an existing OIDC server:
 
-- [easy-oidc](https://easy-oidc.dev), a minimal OIDC server for Google and GitHub cluster authentication
+- [Truster](https://truster.dev), a minimal OIDC server for Google and GitHub cluster authentication

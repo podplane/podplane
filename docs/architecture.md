@@ -14,7 +14,7 @@ Podplane is easy to use and operate because it combines three sibling projects i
 
 - Cluster state is stored in object storage via [Netsy](https://netsy.dev), not on disk via etcd.
 - Auto-scaling & provisioning is faster with [Nstance](https://nstance.dev).
-- OIDC & RBAC is simplified with [Easy OIDC](https://easy-oidc.dev) (or you can BYO existing OIDC servers)
+- OIDC & RBAC is simplified with [Truster](https://truster.dev) (or you can bring an existing OIDC server)
 
 Podplane itself consists of three key components:
 
@@ -61,7 +61,7 @@ A Podplane cluster consists of three platform layers:
 │     │ ├───────────────┤ ├────────────────┤ │                     │
 │     │ │ runc          │ │ kube-ctrl-mgr  │ │                     │
 │     │ ├───────────────┤ ├────────────────┤ │  ┌───────────────┐  │
-│     │ │ cni-plugins   │ │ kube-apiserver │ │  │   Easy OIDC   │  │
+│     │ │ cni-plugins   │ │ kube-apiserver │ │  │    Truster    │  │
 │     │ └───────────────┘ └──▲──────────┬──┘ │  │     server    │  │
 │     └──────────────────────┼──────────│────┘  └───▲────────▲──┘  │
 │                            │          └───────────┘        │     │
@@ -76,7 +76,7 @@ The sequence of how these all fit together is:
 
 1. `Podplane CLI` generates infrastructure-as-code configuration files
 
-2. If you don't have an existing OIDC server, the CLI can deploy an `Easy OIDC` server for you.
+2. If you don't have an existing OIDC server, the CLI can deploy a Truster server for you.
 
 3. OpenTofu/Terraform deploys infrastructure (on AWS/Google Cloud)
 

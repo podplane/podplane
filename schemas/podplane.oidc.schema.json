@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://podplane.dev/schemas/podplane.oidc.schema.json",
   "title": "Podplane OIDC config",
-  "description": "Configuration for an Easy OIDC server deployment managed by Podplane.",
+  "description": "Configuration for a Truster server deployment managed by Podplane.",
   "type": "object",
   "additionalProperties": false,
   "required": ["oidc"],
@@ -17,7 +17,19 @@
     "oidc": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider", "hostname", "connector", "signing_key_secret_arn"],
+      "required": ["provider", "hostname", "connector", "signing_key_secret_arn", "clients"],
+      "allOf": [{
+        "if": {
+          "properties": {
+            "connector": {
+              "properties": { "kind": { "const": "github" } },
+              "required": ["kind"]
+            }
+          },
+          "required": ["connector"]
+        },
+        "then": { "required": ["encryption_key_secret_arn"] }
+      }],
       "properties": {
         "provider": { "$ref": "#/$defs/provider" },
         "hostname": {
@@ -30,6 +42,10 @@
           "type": "string",
           "description": "AWS Secrets Manager ARN containing the OIDC signing key."
         },
+        "encryption_key_secret_arn": {
+          "type": "string",
+          "description": "AWS Secrets Manager ARN containing Truster's encryption key. Required for GitHub connectors and recommended for refresh-token support."
+        },
         "default_redirect_uris": {
           "type": "array",
           "description": "Default redirect URIs applied to clients that do not specify their own redirect_uris.",
@@ -38,6 +54,7 @@
         "clients": {
           "type": "object",
           "description": "OIDC client definitions keyed by client name.",
+          "minProperties": 1,
           "additionalProperties": { "$ref": "#/$defs/client" }
         },
         "groups_overrides": {
@@ -54,7 +71,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "description": "Cloud provider used to deploy Easy OIDC. Podplane currently supports aws.",
+          "description": "Cloud provider used to deploy Truster. Podplane currently supports aws.",
           "enum": ["aws", "google", "gcp"]
         },
         "region": {
@@ -108,7 +125,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "description": "Upstream OAuth connector used by Easy OIDC.",
+          "description": "Upstream OAuth connector used by Truster.",
           "enum": ["google", "github"]
         },
         "client_secret_arn": {

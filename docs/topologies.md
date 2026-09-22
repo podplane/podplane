@@ -158,7 +158,7 @@ Many organisations will run one OIDC issuer for all cluster environments, includ
 
 For example, if you are creating a staging cluster and discover that you also need OIDC, avoid casually deploying the an OIDC server into the staging account unless that is a deliberate trust boundary decision.
 
-Podplane can deploy [Easy OIDC](https://easy-oidc.dev) for you with `podplane oidc create`, but you can also bring your own OIDC service, such as [Dex](https://dexidp.io), a corporate identity gateway, or a managed third-party identity provider. The important requirements are that the issuer lets you control which users can authenticate and lets you control which groups appear in the groups claim consumed by Podplane / Kubernetes RBAC.
+Podplane can deploy [Truster](https://truster.dev) for you with `podplane oidc create`, but you can also bring your own OIDC service, such as [Dex](https://dexidp.io), a corporate identity gateway, or a managed third-party identity provider. The important requirements are that the issuer lets you control which users can authenticate and lets you control which groups appear in the groups claim consumed by Podplane / Kubernetes RBAC.
 
 See [RBAC](rbac.md) for Podplane's default Kubernetes access groups.
 

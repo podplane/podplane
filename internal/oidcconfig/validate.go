@@ -10,6 +10,7 @@ import (
 	"strings"
 )
 
+// Validate checks a Podplane Truster deployment configuration.
 func Validate(cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("config is required")
@@ -22,7 +23,7 @@ func Validate(cfg *Config) error {
 		}
 	case "google", "gcp":
 		// TODO: implement GCP support
-		return fmt.Errorf("oidc.provider.kind google is not supported until the Easy OIDC Google module exists")
+		return fmt.Errorf("oidc.provider.kind google is not supported until the Truster Google module is integrated")
 	case "":
 		return fmt.Errorf("oidc.provider.kind is required")
 	default:
@@ -53,9 +54,18 @@ func Validate(cfg *Config) error {
 	if o.SigningKeySecretARN == "" {
 		return fmt.Errorf("oidc.signing_key_secret_arn is required")
 	}
+	if o.Connector.Kind == "github" && o.EncryptionKeySecretARN == "" {
+		return fmt.Errorf("oidc.encryption_key_secret_arn is required for a github connector")
+	}
+	if len(o.Clients) == 0 {
+		return fmt.Errorf("oidc.clients must contain at least one client")
+	}
 	for name, client := range o.Clients {
 		if name == "" {
 			return fmt.Errorf("oidc.clients contains an empty client name")
+		}
+		if len(client.RedirectURIs) == 0 && len(o.DefaultRedirectURIs) == 0 {
+			return fmt.Errorf("oidc.clients.%s requires redirect_uris or oidc.default_redirect_uris", name)
 		}
 		if client.GroupsOverride != "" {
 			if _, ok := o.GroupsOverrides[client.GroupsOverride]; !ok {

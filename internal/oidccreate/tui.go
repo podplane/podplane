@@ -31,7 +31,7 @@ type configForm struct {
 	complete bool
 }
 
-// RunConfigWizard runs an interactive form for an Easy OIDC config.
+// RunConfigWizard runs an interactive form for a Truster config.
 func RunConfigWizard() (*oidcconfig.Config, error) {
 	m := newConfigForm()
 	got, err := tea.NewProgram(m).Run()
@@ -51,7 +51,7 @@ func RunConfigWizard() (*oidcconfig.Config, error) {
 	return form.config()
 }
 
-// newConfigForm creates the initial model for the Easy OIDC config form.
+// newConfigForm creates the initial model for the Truster config form.
 func newConfigForm() configForm {
 	draft := oidcconfig.NewDraftConfig("aws")
 	fields := []configField{
@@ -63,6 +63,7 @@ func newConfigForm() configForm {
 		{label: "Connector kind", value: draft.OIDC.Connector.Kind, validate: validateConnector},
 		{label: "Connector client secret ARN", value: draft.OIDC.Connector.ClientSecretARN, validate: tui.Required("connector client secret ARN")},
 		{label: "Signing key secret ARN", value: draft.OIDC.SigningKeySecretARN, validate: tui.Required("signing key secret ARN")},
+		{label: "Encryption key secret ARN", value: draft.OIDC.EncryptionKeySecretARN, validate: tui.Required("encryption key secret ARN")},
 	}
 	input := textinput.New()
 	input.Focus()
@@ -72,7 +73,7 @@ func newConfigForm() configForm {
 	return configForm{fields: fields, input: input}
 }
 
-// Init starts cursor blinking for the Easy OIDC config form.
+// Init starts cursor blinking for the Truster config form.
 func (m configForm) Init() tea.Cmd {
 	return textinput.Blink
 }
@@ -97,12 +98,12 @@ func (m configForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// View renders the active Easy OIDC config form field.
+// View renders the active Truster config form field.
 func (m configForm) View() string {
 	if m.cancel || m.complete {
 		return "\n"
 	}
-	title := lipgloss.NewStyle().Foreground(tui.ColorWhite).Background(tui.ColorPrimary).Padding(0, 1).Render("New Easy OIDC config")
+	title := lipgloss.NewStyle().Foreground(tui.ColorWhite).Background(tui.ColorPrimary).Padding(0, 1).Render("New Truster config")
 	progress := fmt.Sprintf("%d/%d", m.index+1, len(m.fields))
 	label := lipgloss.NewStyle().Bold(true).Render(m.fields[m.index].label)
 	var errText string
@@ -168,10 +169,11 @@ func (m configForm) config() (*oidcconfig.Config, error) {
 	cfg.OIDC.Connector.Kind = values["Connector kind"]
 	cfg.OIDC.Connector.ClientSecretARN = values["Connector client secret ARN"]
 	cfg.OIDC.SigningKeySecretARN = values["Signing key secret ARN"]
+	cfg.OIDC.EncryptionKeySecretARN = values["Encryption key secret ARN"]
 	return cfg, nil
 }
 
-// validateConnector validates supported Easy OIDC connector kinds.
+// validateConnector validates supported Truster connector kinds.
 func validateConnector(value string) error {
 	switch value {
 	case "google", "github":
