@@ -408,7 +408,7 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 
 	addPodplaneAWSBuckets(&bucketsDoc)
 	addPodplaneAWSRoles(&rolesDoc, cfg, accountName)
-	addWorkloadCAKey(&mainDoc, cfg, provider)
+	managedWorkloadCAKey := addWorkloadCAKey(&mainDoc, cfg, provider)
 
 	if cfg.Cluster.Seed.Name != "" && cfg.Cluster.Seed.Name != seeds.None {
 		seed := block("resource", "podplane_netsy_seed_s3", "cluster")
@@ -421,11 +421,13 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		if provider.Profile != "" {
 			seed.Body.Attr("profile", str(provider.Profile))
 		}
-		dependencies := []hclValue{expr("podplane_workload_ca_key.cluster")}
-		if defaultProvider := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]; defaultProvider.Kind == "aws" {
-			dependencies = append(dependencies, expr("aws_iam_role_policy.podplane_workload_ca_key"))
+		if managedWorkloadCAKey {
+			dependencies := []hclValue{expr("podplane_workload_ca_key.cluster")}
+			if defaultProvider := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]; defaultProvider.Kind == "aws" {
+				dependencies = append(dependencies, expr("aws_iam_role_policy.podplane_workload_ca_key"))
+			}
+			seed.Body.Attr("depends_on", list(dependencies...))
 		}
-		seed.Body.Attr("depends_on", list(dependencies...))
 		mainDoc.AddBlock(seed)
 	}
 
@@ -474,10 +476,13 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 	return files
 }
 
-// addWorkloadCAKey adds the metadata-only provider resource. Private key bytes
-// are generated and written by the provider process and never enter HCL/state.
-func addWorkloadCAKey(doc *hclDocument, cfg *clusterconfig.ClusterConfig, infrastructure clusterconfig.Provider) {
+// addWorkloadCAKey adds the metadata-only provider resource for a
+// Podplane-managed backend. It reports whether it added the resource.
+func addWorkloadCAKey(doc *hclDocument, cfg *clusterconfig.ClusterConfig, infrastructure clusterconfig.Provider) bool {
 	provider := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]
+	if provider.Kind == "vault" || provider.Kind == "openbao" {
+		return false
+	}
 	prefix := provider.KeyPrefix
 	if prefix == "" {
 		prefix = cfg.Cluster.ID
@@ -492,15 +497,6 @@ func addWorkloadCAKey(doc *hclDocument, cfg *clusterconfig.ClusterConfig, infras
 	case provider.Kind == "gcp":
 		resource.Body.Attr("provider", str("gcp_secret_manager"))
 		resource.Body.Attr("project", str(provider.ProjectID))
-	case provider.Kind == "vault", provider.Kind == "openbao":
-		resource.Body.Attr("provider", str(provider.Kind+"_kv_v2"))
-		resource.Body.Attr("address", str(provider.Address))
-		if provider.MountPath != "" {
-			resource.Body.Attr("mount_path", str(provider.MountPath))
-		}
-		if provider.CACert != "" {
-			resource.Body.Attr("ca_cert", str(provider.CACert))
-		}
 	}
 	if provider.Kind == "aws" {
 		region := provider.Region
@@ -513,6 +509,7 @@ func addWorkloadCAKey(doc *hclDocument, cfg *clusterconfig.ClusterConfig, infras
 		}
 	}
 	doc.AddBlock(resource)
+	return true
 }
 
 // route53SeedValues returns tf-resolved Route53 identity and zone settings.

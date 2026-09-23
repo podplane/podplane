@@ -155,7 +155,7 @@ Vault/OpenBao providers use Kubernetes/JWT auth, the same mechanism used by the 
 
 Vault and OpenBao addresses must use HTTPS. `ca_cert` may be used for endpoints served by a private CA. Local Podplane clusters set this for the local fakevault endpoint automatically.
 
-For managed cluster creation, the Podplane Terraform provider bootstraps the workload CA key directly in a KV-v2 mount. Set `VAULT_TOKEN` for Vault or `BAO_TOKEN` for OpenBao in the environment running OpenTofu. This short-lived provisioning credential is never written to cluster config or state and is separate from the Kubernetes/JWT roles used by the in-cluster operator and CSI provider.
+Before creating a managed cluster that uses Vault or OpenBao as its default provider, provision one unencrypted PKCS#8 Ed25519 private key in the KV-v2 field `value` at `<mount_path>/data/<key_prefix>/workload-ca-key`. `mount_path` defaults to `secret`, and `key_prefix` defaults to `cluster.id`. Grant the operator role read-only access to that exact path. Podplane does not require a Vault/OpenBao token outside the cluster.
 
 Cluster admins should grant RBAC to the Podplane aggregated secrets API deliberately. Normal Kubernetes authorization controls who can read key metadata, create new values, overwrite existing values, restore archived values, and permanently destroy provider data.
 

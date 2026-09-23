@@ -440,8 +440,8 @@ func TestGenerateAWSClusterTerraformWithoutSeed(t *testing.T) {
 	}
 }
 
-// TestGenerateAWSClusterTerraformWithVaultDefault verifies AWS infrastructure
-// does not invent AWS access policy for an externally administered Vault.
+// TestGenerateAWSClusterTerraformWithVaultDefault verifies an externally
+// administered Vault owns its workload CA key and access policy.
 func TestGenerateAWSClusterTerraformWithVaultDefault(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ID:     "vault-cluster",
@@ -472,16 +472,8 @@ func TestGenerateAWSClusterTerraformWithVaultDefault(t *testing.T) {
 	}
 	contents := fileContents(files)
 	main := contents["podplane.cluster.main.tf"]
-	for _, want := range []string{
-		`provider = "vault_kv_v2"`,
-		`address = "https://vault.example"`,
-		`mount_path = "platform"`,
-		`ca_cert = "test-ca"`,
-		`depends_on = [podplane_workload_ca_key.cluster]`,
-	} {
-		if !strings.Contains(main, want) {
-			t.Errorf("Vault cluster Terraform is missing %q:\n%s", want, main)
-		}
+	if strings.Contains(main, `resource "podplane_workload_ca_key" "cluster"`) || strings.Contains(main, `depends_on = [podplane_workload_ca_key.cluster]`) {
+		t.Fatalf("Vault cluster Terraform attempts to manage the externally administered workload CA key:\n%s", main)
 	}
 	if strings.Contains(contents["podplane.cluster.roles.tf"], "podplane_workload_ca_key") {
 		t.Fatalf("Vault cluster Terraform contains an AWS workload CA policy:\n%s", contents["podplane.cluster.roles.tf"])

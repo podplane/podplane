@@ -217,7 +217,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.secrets.default_provider` | Default secrets provider name used by `podplane secret` and templates when `--provider` is omitted. |
 | `cluster.secrets.providers` | Named secrets providers. Only provider-selection metadata belongs here; credentials are configured on the operator deployment. |
 | `cluster.secrets.providers.<name>.kind` | Upstream Secrets Store CSI provider slug: `aws`, `gcp`, `vault`, or `openbao`. |
-| `cluster.secrets.providers.<name>.key_prefix` | Optional backend key prefix for this provider. Defaults to `cluster.id`; set it only when clusters should intentionally share a provider backend prefix. |
+| `cluster.secrets.providers.<name>.key_prefix` | Optional backend key prefix for this provider. Defaults to `cluster.id`; set it only when clusters should intentionally share a provider backend prefix. For a default Vault/OpenBao provider, provision the workload CA key in KV-v2 field `value` at `<mount_path>/data/<key_prefix>/workload-ca-key` before creating the cluster. |
 | `cluster.secrets.providers.<name>.object_type` | AWS Secrets Store CSI object type, such as `secretsmanager` or `ssmparameter`. |
 | `cluster.secrets.providers.<name>.region` | AWS region used for provider API calls. |
 | `cluster.secrets.providers.<name>.project_id` | Required Google Cloud project ID for a `gcp` provider. |
@@ -244,14 +244,12 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.components.source.ref.commit` | Git commit to use for component Helm charts. Mutually exclusive with other `source.ref` selectors. |
 | `cluster.components.source.secretRef.name` | Optional Flux Git credentials Secret name in the `platform-components` namespace. Use this for private/enterprise components repos; Podplane wires the reference but does not create the Secret. |
 
-Cluster infrastructure unconditionally creates or adopts a dedicated
-`workload-ca-key` in the default provider, even for `minimal` and `none` seeds.
-The Podplane Terraform provider provisions the key safely in AWS Secrets
-Manager, AWS SSM Parameter Store, Google Secret Manager, Vault KV-v2, or
-OpenBao KV-v2. Generated OpenTofu state stores provider metadata and a
-public-key fingerprint only, never the private key. Vault bootstrap reads
-`VAULT_TOKEN` from the provider process environment; OpenBao reads `BAO_TOKEN`.
-Local clusters create the key automatically in their encrypted local
+Cluster infrastructure creates or adopts a dedicated `workload-ca-key` in AWS
+Secrets Manager, AWS SSM Parameter Store, or Google Secret Manager, even for
+`minimal` and `none` seeds. Generated OpenTofu state stores provider metadata
+and a public-key fingerprint only, never the private key. Customers using an
+external Vault or OpenBao installation provision the key before creating the
+cluster. Local clusters create it automatically in their encrypted local
 OpenBao-compatible store.
 
 Kubernetes usernames default to the token's `sub` claim without an issuer

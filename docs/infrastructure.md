@@ -32,7 +32,7 @@ The flow for AWS or Google Cloud is:
     2. generates OpenTofu/Terraform `.tf` files.
     3. optionally, can deploy the infrastructure as well.
 2. The Podplane OpenTofu/Terraform provider creates a Netsy `bootstrap.netsy` snapshot file from a Podplane seed file using Podplane's `netsyseed` package, then uploads it to object storage (S3 for AWS, GCS for Google Cloud) using a conditional put to ensure it never overwrites existing cluster state.
-3. The provider creates or adopts the workload CA private key in the configured external secrets backend without putting the key in OpenTofu/Terraform state. The Podplane operator later mounts that key through Secrets Store CSI to issue workload certificates.
+3. For AWS and Google Cloud secrets backends, the provider creates or adopts the workload CA private key without putting it in OpenTofu/Terraform state. Customers using an externally administered Vault or OpenBao installation provision this key themselves. The Podplane operator later mounts it through Secrets Store CSI to issue workload certificates.
 4. Nstance auto-scales cluster VMs using the Podplane userdata script.
 
 ## Configuration Impact
