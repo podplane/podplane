@@ -16,7 +16,7 @@ The user-data script which invokes the `vmconfig` entrypoint is responsible for 
 
 2. `knc` creates a Kubernetes Control Plane node, which is essentially a base of `knd` + adds Netsy (as an etcd alternative), kube-apiserver, kube-scheduler, and kube-controller-manager.
 
-Both VM kinds include an optional node-local Zot registry. It runs when registry storage and a registry hostname are configured.
+Both VM kinds include an optional node-local Podplane Registry. It runs when registry storage and a registry hostname are configured.
 
 ## Deployed Clusters
 
@@ -36,14 +36,14 @@ The CLI itself is responsible for downloading/caching dependencies and serving t
 
 ## Container Registry
 
-VMs run a Zot Registry backed by the configured registry object-storage bucket.
+VMs run [Podplane Registry](https://github.com/podplane/registry), a read-only OCI registry backed by the configured registry object-storage bucket.
 
 Podplane supports component and template image "mirroring" whereby the registry bucket stores a copy of all required container images if mirroring is enabled.
 
-To use this mirror, components render explicit image references such as `<registry-hostname>/mirror/<original-registry>/<repository>:<tag>`. This differs to user-pushed app images which live under `<registry-hostname>/apps/...`. Podplane intentionally does not make zot a transparent containerd pull-through cache for all image pulls - while that would have made configuring image references easier without the `<registry-hostname>/` prefix, the decision to use explicit references was because:
+To use this mirror, components render explicit image references such as `<registry-hostname>/mirror/<original-registry>/<repository>:<tag>`. This differs to user-pushed app images which live under `<registry-hostname>/apps/...`. Podplane intentionally does not make the node-local registry a transparent containerd pull-through cache for all image pulls - while that would have made configuring image references easier without the `<registry-hostname>/` prefix, the decision to use explicit references was because:
 
 1. it is obvious from the rendered Kubernetes manifest when an image is using the Podplane built-in registry, even though components and templates need to do more work to render the correct image references (e.g. you have to override an off-the-shelf Helm chart values file to change the images used)
-2. user workloads keep native Kubernetes registry authentication behavior, including per-namespace and per-service-account `imagePullSecrets`; a transparent zot pull-through cache would require zot to authenticate to upstream registries itself and would not naturally receive the pod's upstream registry credentials
+2. user workloads keep native Kubernetes registry authentication behavior, including per-namespace and per-service-account `imagePullSecrets`; a transparent pull-through cache would need to authenticate to upstream registries itself and would not naturally receive the pod's upstream registry credentials
 
 Templates and components should therefore use canonical upstream image references by default, and only render mirrored references intentionally when Podplane owns the image selection and registry mirror behavior.
 
@@ -60,13 +60,13 @@ __Data Plane & Control Plane VMs__:
   - [uidmap](https://packages.debian.org/sid/uidmap) runtime dependency of kubelet for getsubids
   - [libsubid5](https://packages.debian.org/trixie/libsubid5) runtime dependency of kubelet for getsubids
 - [cni-plugins](https://github.com/containernetworking/plugins) the reference CNI plugins
+- [Podplane Registry](https://github.com/podplane/registry) the read-only node-local container registry
 
 __Control Plane VMs__:
 - [netsy](https://netsy.dev/docs/design/) as an etcd alternative
 - [kube-apiserver](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/) the Kubernetes API server
 - [kube-scheduler](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-scheduler/) the Kubernetes scheduler
 - [kube-controller-manager](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-controller-manager/) the core Kubernetes control loops
-- [Zot](https://zotregistry.dev/) the stateless container registry
 
 ## Env Vars & Service Configuration
 

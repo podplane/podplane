@@ -45,8 +45,8 @@ type SPIFFE struct {
 	TrustDomain string `json:"trust_domain"`
 }
 
-// Registry describes the cluster-level OCI registry endpoint used by node-local
-// zot, podplane push, and optional registry ingress.
+// Registry describes the cluster-level OCI registry endpoint used by the
+// node-local registry, podplane push, and optional registry ingress.
 type Registry struct {
 	Hostname string          `json:"hostname,omitempty"`
 	Ingress  RegistryIngress `json:"ingress,omitempty"`

@@ -24,7 +24,6 @@ func Certificates(netsyClusterIDTemplate, apiHostname string, apiServiceIPs []st
 		apiServerDNS = append(apiServerDNS, apiHostname)
 	}
 	return []Certificate{
-		clientCertificate("containerd.client"),
 		clientCertificateWithCN("front-proxy.client", "front-proxy-client"),
 		{
 			Name:         "kube-apiserver.client",
@@ -59,18 +58,15 @@ func Certificates(netsyClusterIDTemplate, apiHostname string, apiServiceIPs []st
 		serverCertificate("kubelet.server"),
 		netsyCertificate("netsy.client", "client", netsyClusterIDTemplate),
 		netsyCertificate("netsy.server", "server", netsyClusterIDTemplate),
-		serverCertificate("registry.server"),
 	}
 }
 
 // CertificateFiles returns the certificate template names required by kind.
 func CertificateFiles(kind string) []string {
 	names := []string{
-		"containerd.client",
 		"kube2iam.client",
 		"kubelet.client",
 		"kubelet.server",
-		"registry.server",
 	}
 	if kind == "knc" {
 		names = append(names,

@@ -416,7 +416,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "hostname": { "type": "string", "format": "hostname", "maxLength": 253, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$", "description": "Cluster registry hostname used by node-local Zot, podplane push, and optional Docker-compatible ingress." },
+        "hostname": { "type": "string", "format": "hostname", "maxLength": 253, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$", "description": "Cluster registry hostname used by the node-local registry, podplane push, and optional Docker-compatible ingress." },
         "ingress": { "$ref": "#/$defs/registryIngress" }
       }
     },

@@ -19,7 +19,7 @@ This `local server` command is run automatically in the background when `podplan
 
 The server also terminates host-facing local ingress TLS on `https://<host>.<cluster-id>.localhost:4433`, dynamically selecting or generating a [mkcert](https://mkcert.dev/)-issued certificate for `<cluster-id>.localhost` and `*.<cluster-id>.localhost` based on the requested hostname, then reverse-proxies to the ingress gateway inside the VM. This requires mkcert to be installed prior to running a local VM. For your browser to trust the local ingress server certificates, please ensure you've run `mkcert -install` once.
 
-The fake S3 service exposes durable local-cluster buckets such as `<cluster-id>-netsy` and `<cluster-id>-telemetry` under `/s3/data/`. Cache-backed buckets are exposed separately under `/s3/cache/`; currently this includes the shared `registry` bucket used by zot for mirrored images from the local registry cache.
+The fake S3 service exposes durable local-cluster buckets such as `<cluster-id>-netsy` and `<cluster-id>-telemetry` under `/s3/data/`. Cache-backed buckets are exposed separately under `/s3/cache/`; currently this includes the shared `registry` bucket used by the node-local registry for mirrored images from the local registry cache.
 
 The local server is the only process that opens the encrypted fake Vault store or its keyring encryption keys. Services inside local VMs use the HTTPS Vault-compatible API with Kubernetes service account authentication. Host-side lifecycle operations, such as creating the workload CA key and deleting/cleaning up a cluster's secrets, use the same API over a user-only Unix socket.
 
