@@ -222,7 +222,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.secrets.providers.<name>.region` | AWS region used for provider API calls. |
 | `cluster.secrets.providers.<name>.project_id` | Required Google Cloud project ID for a `gcp` provider. |
 | `cluster.secrets.providers.<name>.location` | Optional regional Google Secret Manager location. |
-| `cluster.secrets.providers.<name>.address` | Vault/OpenBao server address used by the operator and rendered into generated `SecretProviderClass` objects. |
+| `cluster.secrets.providers.<name>.address` | Vault/OpenBao server address used by the operator and rendered into generated `SecretProviderClass` objects. Vault and OpenBao addresses must use HTTPS. |
 | `cluster.secrets.providers.<name>.mount_path` | Vault/OpenBao KV-v2 mount name. Defaults to `secret`. |
 | `cluster.secrets.providers.<name>.ca_cert` | Optional PEM CA bundle for a Vault/OpenBao endpoint served by a private CA. Local fakevault config sets this automatically. |
 | `cluster.secrets.providers.<name>.auth_path` | Vault/OpenBao Kubernetes/JWT auth mount path used by the operator. Defaults to `auth/kubernetes`. |
@@ -247,11 +247,12 @@ For the operational impact of changing cluster fields after initial deployment, 
 Cluster infrastructure unconditionally creates or adopts a dedicated
 `workload-ca-key` in the default provider, even for `minimal` and `none` seeds.
 The Podplane Terraform provider provisions the key safely in AWS Secrets
-Manager, AWS SSM Parameter Store, or Google Secret Manager. Generated OpenTofu
-state stores provider metadata and a public-key fingerprint only, never the
-private key. OpenBao can also be the default provider when the key has been
-provisioned there separately. Local clusters create the key automatically in
-their encrypted local OpenBao-compatible store.
+Manager, AWS SSM Parameter Store, Google Secret Manager, Vault KV-v2, or
+OpenBao KV-v2. Generated OpenTofu state stores provider metadata and a
+public-key fingerprint only, never the private key. Vault bootstrap reads
+`VAULT_TOKEN` from the provider process environment; OpenBao reads `BAO_TOKEN`.
+Local clusters create the key automatically in their encrypted local
+OpenBao-compatible store.
 
 Kubernetes usernames default to the token's `sub` claim without an issuer
 prefix. Truster places normalized email addresses in `sub` for user logins and

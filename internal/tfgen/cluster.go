@@ -76,10 +76,6 @@ func GenerateCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts C
 	if provider.Kind != "aws" {
 		return nil, fmt.Errorf("cluster provider %q is not supported", provider.Kind)
 	}
-	defaultSecretsProvider := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]
-	if defaultSecretsProvider.Kind != "aws" {
-		return nil, fmt.Errorf("cluster.secrets.default_provider %q cannot receive an exact CSI provider-plugin access grant from the supported AWS cluster stack", cfg.Cluster.Secrets.DefaultProvider)
-	}
 	if err := validateDNSProviders(cfg); err != nil {
 		return nil, err
 	}
@@ -425,10 +421,11 @@ func renderAWSCluster(configPath string, cfg *clusterconfig.ClusterConfig, provi
 		if provider.Profile != "" {
 			seed.Body.Attr("profile", str(provider.Profile))
 		}
-		seed.Body.Attr("depends_on", list(
-			expr("podplane_workload_ca_key.cluster"),
-			expr("aws_iam_role_policy.podplane_workload_ca_key"),
-		))
+		dependencies := []hclValue{expr("podplane_workload_ca_key.cluster")}
+		if defaultProvider := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]; defaultProvider.Kind == "aws" {
+			dependencies = append(dependencies, expr("aws_iam_role_policy.podplane_workload_ca_key"))
+		}
+		seed.Body.Attr("depends_on", list(dependencies...))
 		mainDoc.AddBlock(seed)
 	}
 
@@ -495,6 +492,15 @@ func addWorkloadCAKey(doc *hclDocument, cfg *clusterconfig.ClusterConfig, infras
 	case provider.Kind == "gcp":
 		resource.Body.Attr("provider", str("gcp_secret_manager"))
 		resource.Body.Attr("project", str(provider.ProjectID))
+	case provider.Kind == "vault", provider.Kind == "openbao":
+		resource.Body.Attr("provider", str(provider.Kind+"_kv_v2"))
+		resource.Body.Attr("address", str(provider.Address))
+		if provider.MountPath != "" {
+			resource.Body.Attr("mount_path", str(provider.MountPath))
+		}
+		if provider.CACert != "" {
+			resource.Body.Attr("ca_cert", str(provider.CACert))
+		}
 	}
 	if provider.Kind == "aws" {
 		region := provider.Region
@@ -834,6 +840,9 @@ func addPodplaneKNCPolicy(doc *hclDocument, cfg *clusterconfig.ClusterConfig, ac
 	doc.AddBlock(rolePolicy)
 
 	provider := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]
+	if provider.Kind != "aws" {
+		return
+	}
 	prefix := provider.KeyPrefix
 	if prefix == "" {
 		prefix = cfg.Cluster.ID

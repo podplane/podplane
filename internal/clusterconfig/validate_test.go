@@ -123,6 +123,7 @@ func TestValidateWorkloadCAProvider(t *testing.T) {
 		{Kind: "aws", ObjectType: "secretsmanager"},
 		{Kind: "aws", ObjectType: "ssmparameter"},
 		{Kind: "gcp", ProjectID: "example-project"},
+		{Kind: "vault", Address: "https://vault.example"},
 		{Kind: "openbao", Address: "https://openbao.example"},
 	} {
 		secrets := Secrets{DefaultProvider: "default", Providers: map[string]SecretsProvider{"default": provider}}
@@ -130,9 +131,34 @@ func TestValidateWorkloadCAProvider(t *testing.T) {
 			t.Errorf("ValidateWorkloadCAProvider(%+v) returned error: %v", provider, err)
 		}
 	}
-	secrets := Secrets{DefaultProvider: "default", Providers: map[string]SecretsProvider{"default": {Kind: "openbao"}}}
-	if err := ValidateWorkloadCAProvider(secrets); err == nil {
-		t.Fatal("ValidateWorkloadCAProvider accepted OpenBao without an address")
+	for _, kind := range []string{"vault", "openbao"} {
+		for _, address := range []string{"", "http://vault.example"} {
+			secrets := Secrets{DefaultProvider: "default", Providers: map[string]SecretsProvider{"default": {Kind: kind, Address: address}}}
+			if err := ValidateWorkloadCAProvider(secrets); err == nil {
+				t.Errorf("ValidateWorkloadCAProvider accepted %s address %q", kind, address)
+			}
+		}
+	}
+}
+
+// TestValidateSecretsRequiresVaultHTTPS verifies every Vault-compatible
+// provider uses a credential-free HTTPS endpoint, even when it is not default.
+func TestValidateSecretsRequiresVaultHTTPS(t *testing.T) {
+	for _, address := range []string{"", "http://vault.example", "https://user@vault.example", "https://vault.example?token=value"} {
+		secrets := Secrets{DefaultProvider: "aws", Providers: map[string]SecretsProvider{
+			"aws":   {Kind: "aws", ObjectType: "secretsmanager"},
+			"vault": {Kind: "vault", Address: address},
+		}}
+		if err := ValidateSecrets(secrets); err == nil {
+			t.Errorf("ValidateSecrets accepted Vault address %q", address)
+		}
+	}
+	secrets := Secrets{DefaultProvider: "aws", Providers: map[string]SecretsProvider{
+		"aws":     {Kind: "aws", ObjectType: "secretsmanager"},
+		"openbao": {Kind: "openbao", Address: "https://openbao.example"},
+	}}
+	if err := ValidateSecrets(secrets); err != nil {
+		t.Fatalf("ValidateSecrets rejected HTTPS OpenBao address: %v", err)
 	}
 }
 

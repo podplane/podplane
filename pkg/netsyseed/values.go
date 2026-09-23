@@ -120,8 +120,8 @@ func ingressCertificateDeliveryValues(cfg *clusterconfig.ClusterConfig) (map[str
 	case provider.Kind == "gcp":
 		value["provider"] = "gcp"
 		value["projectID"] = provider.ProjectID
-	case provider.Kind == "openbao":
-		value["provider"] = "openbao"
+	case provider.Kind == "vault", provider.Kind == "openbao":
+		value["provider"] = provider.Kind
 		value["address"] = provider.Address
 		value["mountPath"] = provider.MountPath
 		authMountPath := strings.TrimPrefix(strings.Trim(provider.AuthPath, "/"), "auth/")

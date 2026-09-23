@@ -242,16 +242,31 @@ func TestBuildPlatformComponentsValuesGCPWorkloadCAContract(t *testing.T) {
 	}
 }
 
-// TestBuildPlatformComponentsValuesRejectsUnsupportedWorkloadCAProvider fails before an unsafe deployment.
-func TestBuildPlatformComponentsValuesRejectsUnsupportedWorkloadCAProvider(t *testing.T) {
+// TestBuildPlatformComponentsValuesVaultWorkloadCAContract renders the Vault
+// workload key and ingress certificate mount contracts.
+func TestBuildPlatformComponentsValuesVaultWorkloadCAContract(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+		ID:     "test-cluster",
 		SPIFFE: clusterconfig.SPIFFE{TrustDomain: "k8s.example.com"},
 		Secrets: clusterconfig.Secrets{DefaultProvider: "vault", Providers: map[string]clusterconfig.SecretsProvider{
-			"vault": {Kind: "vault"},
+			"vault": {Kind: "vault", Address: "https://vault.example", MountPath: "platform"},
 		}},
+		Domains: []clusterconfig.Domain{{Zone: "example.com"}},
 	}}
-	if _, err := buildPlatformComponentsValues(cfg); err == nil {
-		t.Fatal("buildPlatformComponentsValues accepted unsupported workload CA provider")
+	values, err := buildPlatformComponentsValues(cfg)
+	if err != nil {
+		t.Fatalf("buildPlatformComponentsValues error = %v", err)
+	}
+	operator := componentValues(values, "podplane-operator")["podplane"].(map[string]any)["operator"].(map[string]any)
+	provider := operator["config"].(map[string]any)["secrets"].(map[string]any)["providers"].(map[string]any)["vault"].(map[string]any)
+	for key, want := range map[string]any{"kind": "vault", "address": "https://vault.example", "mountPath": "platform"} {
+		if got := provider[key]; got != want {
+			t.Fatalf("provider.%s = %v, want %v", key, got, want)
+		}
+	}
+	certificates := componentValues(values, "envoy-gateway")["platform"].(map[string]any)["envoyGateway"].(map[string]any)["ingress"].(map[string]any)["certificates"].(map[string]any)
+	if certificates["provider"] != "vault" || certificates["address"] != "https://vault.example" {
+		t.Fatalf("ingress certificate delivery = %#v", certificates)
 	}
 }
 

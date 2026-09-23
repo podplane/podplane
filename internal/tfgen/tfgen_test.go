@@ -440,6 +440,54 @@ func TestGenerateAWSClusterTerraformWithoutSeed(t *testing.T) {
 	}
 }
 
+// TestGenerateAWSClusterTerraformWithVaultDefault verifies AWS infrastructure
+// does not invent AWS access policy for an externally administered Vault.
+func TestGenerateAWSClusterTerraformWithVaultDefault(t *testing.T) {
+	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+		ID:     "vault-cluster",
+		Name:   "Vault Cluster",
+		OIDC:   clusterconfig.OIDC{IssuerURL: "https://auth.example.com"},
+		SPIFFE: clusterconfig.SPIFFE{TrustDomain: "k8s.example.com"},
+		Secrets: clusterconfig.Secrets{DefaultProvider: "vault", Providers: map[string]clusterconfig.SecretsProvider{
+			"vault": {Kind: "vault", Address: "https://vault.example", MountPath: "platform", CACert: "test-ca"},
+		}},
+		Seed:       clusterconfig.Seed{Name: "recommended", Version: "v1.0.0-1", Digest: "sha512:" + strings.Repeat("0", 128)},
+		Kubernetes: clusterconfig.Kubernetes{APIHostname: "k8s.example.com"},
+		Pools: map[string]clusterconfig.Pool{
+			"control-plane": {Arch: "arm64", InstanceType: "t4g.medium", Size: 1},
+		},
+		Providers: []clusterconfig.Provider{{
+			Kind:    "aws",
+			Region:  "us-east-1",
+			Account: "123456789012",
+			VPC:     clusterconfig.VPC{V4CIDR: "172.18.0.0/16"},
+			Zones: map[string][]clusterconfig.Subnet{
+				"us-east-1a": {{V4CIDR: "172.18.1.0/24", Pool: "control-plane"}},
+			},
+		}},
+	}}
+	files, err := GenerateCluster("podplane.cluster.jsonc", cfg, testClusterOptions())
+	if err != nil {
+		t.Fatalf("GenerateCluster returned error: %v", err)
+	}
+	contents := fileContents(files)
+	main := contents["podplane.cluster.main.tf"]
+	for _, want := range []string{
+		`provider = "vault_kv_v2"`,
+		`address = "https://vault.example"`,
+		`mount_path = "platform"`,
+		`ca_cert = "test-ca"`,
+		`depends_on = [podplane_workload_ca_key.cluster]`,
+	} {
+		if !strings.Contains(main, want) {
+			t.Errorf("Vault cluster Terraform is missing %q:\n%s", want, main)
+		}
+	}
+	if strings.Contains(contents["podplane.cluster.roles.tf"], "podplane_workload_ca_key") {
+		t.Fatalf("Vault cluster Terraform contains an AWS workload CA policy:\n%s", contents["podplane.cluster.roles.tf"])
+	}
+}
+
 // TestGenerateAWSClusterTerraformUsesSecretsProviderRegionInGrant verifies the generated grant region.
 func TestGenerateAWSClusterTerraformUsesSecretsProviderRegionInGrant(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{

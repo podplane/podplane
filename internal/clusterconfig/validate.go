@@ -5,6 +5,7 @@
 package clusterconfig
 
 import (
+	"errors"
 	"fmt"
 	"net/mail"
 	"net/netip"
@@ -210,6 +211,9 @@ func ValidateSecrets(secrets Secrets) error {
 				return fmt.Errorf("%s.project_id is required for gcp", prefix)
 			}
 		case "vault", "openbao":
+			if err := validateSecretsProviderAddress(provider.Address); err != nil {
+				return fmt.Errorf("%s.address %w", prefix, err)
+			}
 			// Address, mount_path, ca_cert, auth_path, and operator_role are
 			// operator/runtime routing fields and are intentionally stripped from
 			// cached cluster summaries.
@@ -230,7 +234,7 @@ func ValidateSecrets(secrets Secrets) error {
 func ValidateWorkloadCAProvider(secrets Secrets) error {
 	provider, ok := secrets.Providers[secrets.DefaultProvider]
 	if !ok {
-		return fmt.Errorf("default_provider must select a configured AWS, GCP, or OpenBao provider for workload CA provisioning")
+		return fmt.Errorf("default_provider must select a configured AWS, GCP, Vault, or OpenBao provider for workload CA provisioning")
 	}
 	if provider.Kind == "aws" && (provider.ObjectType == "secretsmanager" || provider.ObjectType == "ssmparameter") {
 		return nil
@@ -238,10 +242,21 @@ func ValidateWorkloadCAProvider(secrets Secrets) error {
 	if provider.Kind == "gcp" && provider.ProjectID != "" {
 		return nil
 	}
-	if provider.Kind == "openbao" && provider.Address != "" {
-		return nil
+	if provider.Kind == "vault" || provider.Kind == "openbao" {
+		if err := validateSecretsProviderAddress(provider.Address); err == nil {
+			return nil
+		}
 	}
-	return fmt.Errorf("default_provider %q does not support workload CA provisioning; use AWS Secrets Manager, AWS SSM Parameter Store, GCP Secret Manager, or OpenBao", secrets.DefaultProvider)
+	return fmt.Errorf("default_provider %q does not support workload CA provisioning; use AWS Secrets Manager, AWS SSM Parameter Store, GCP Secret Manager, Vault, or OpenBao", secrets.DefaultProvider)
+}
+
+// validateSecretsProviderAddress requires a credential-free HTTPS endpoint.
+func validateSecretsProviderAddress(value string) error {
+	address, err := url.ParseRequestURI(value)
+	if err != nil || address.Scheme != "https" || address.Host == "" || address.RawQuery != "" || address.Fragment != "" || address.User != nil {
+		return errors.New("must be an absolute HTTPS URL without credentials, query, or fragment")
+	}
+	return nil
 }
 
 // validateSecretsProviderName validates a configured secrets provider name.
