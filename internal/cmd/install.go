@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/components"
 	"github.com/podplane/podplane/internal/config"
 	"github.com/podplane/podplane/internal/tui"
@@ -17,11 +18,13 @@ import (
 )
 
 var (
-	installContext     string
-	installKubeconfig  string
-	installAutoApprove bool
+	installContext       string
+	installKubeconfig    string
+	installAutoApprove   bool
+	installClusterConfig string
 )
 
+// newInstallCmd constructs the component install command.
 func newInstallCmd(_ *config.Config) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "install <component>",
@@ -37,6 +40,18 @@ first if you have not yet logged in.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 			name := args[0]
+			if name == "podplane-operator" {
+				clusterCfg, err := clusterconfig.Load(installClusterConfig)
+				if err != nil {
+					return fmt.Errorf("load cluster config: %w", err)
+				}
+				if err := clusterconfig.ValidateTrustDomain(clusterCfg.Cluster.SPIFFE.TrustDomain); err != nil {
+					return fmt.Errorf("cluster.spiffe.trust_domain: %w", err)
+				}
+				if err := clusterconfig.ValidateWorkloadCAProvider(clusterCfg.Cluster.Secrets); err != nil {
+					return fmt.Errorf("cluster.secrets: %w", err)
+				}
+			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
@@ -104,5 +119,6 @@ first if you have not yet logged in.`,
 	cmd.Flags().StringVar(&installContext, "context", "", "kubeconfig context to use (default: current kubeconfig context)")
 	cmd.Flags().StringVar(&installKubeconfig, "kubeconfig", "", "Path to the kubeconfig file")
 	cmd.Flags().BoolVarP(&installAutoApprove, "auto-approve", "y", false, "Skip confirmation prompts")
+	cmd.Flags().StringVarP(&installClusterConfig, "cluster-config", "f", defaultClusterConfigName, "Path to the cluster config file (required when enabling podplane-operator)")
 	return cmd
 }

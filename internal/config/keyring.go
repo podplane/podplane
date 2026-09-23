@@ -55,7 +55,10 @@ func InitWithLocalKeyring() (*Config, func(), error) {
 	return c, restore, nil
 }
 
+// initKeyring opens the configured keyring once for this Config.
 func (c *Config) initKeyring() error {
+	c.keyringMu.Lock()
+	defer c.keyringMu.Unlock()
 	if c.keyring != nil {
 		return nil
 	}
@@ -81,61 +84,63 @@ func (c *Config) initKeyring() error {
 	// note: OS may prompt the user for permission
 	ring, err := keyring.Open(keyringConfig)
 	if err != nil {
-		fmt.Printf("Error opening keyring: %v.\n", err)
-		os.Exit(1)
+		return fmt.Errorf("open keyring: %w", err)
 	}
-	c.keyring = &ring
+	c.keyring = ring
 	return nil
 }
 
+// KeyringWrite stores a value in the configured OS or file-backed keyring.
 func (c *Config) KeyringWrite(key string, value []byte) error {
-	// ensure keyring is initialised; OS may promopt the user for permission
+	// Ensure keyring is initialised; OS may prompt the user for permission.
 	err := c.initKeyring()
 	if err != nil {
 		return err
 	}
 	// store the token in the keyring
-	err = (*c.keyring).Set(keyring.Item{
+	err = c.keyring.Set(keyring.Item{
 		Key:   key,
 		Label: key,
 		Data:  value,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("write keyring item %q: %w", key, err)
 	}
 	return nil
 }
 
+// KeyringRead returns a value from the configured OS or file-backed keyring.
+// It returns nil without an error when the item does not exist.
 func (c *Config) KeyringRead(key string) ([]byte, error) {
-	// ensure keyring is initialised; OS may promopt the user for permission
+	// Ensure keyring is initialised; OS may prompt the user for permission.
 	err := c.initKeyring()
 	if err != nil {
 		return nil, err
 	}
-	item, err := (*c.keyring).Get(key)
+	item, err := c.keyring.Get(key)
 	if err != nil {
 		if err == keyring.ErrKeyNotFound {
 			return nil, nil
 		}
-		fmt.Printf("Error reading keyring: %v.\nUser may have declined request - please try again. Exiting...\n", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("read keyring item %q: %w", key, err)
 	}
 	return item.Data, nil
 }
 
+// KeyringDelete removes a value from the configured OS or file-backed keyring.
 func (c *Config) KeyringDelete(key string) error {
-	// ensure keyring is initialised; OS may promopt the user for permission
+	// Ensure keyring is initialised; OS may prompt the user for permission.
 	err := c.initKeyring()
 	if err != nil {
 		return err
 	}
 	// delete the token from the keyring
-	err = (*c.keyring).Remove(key)
+	err = c.keyring.Remove(key)
 	if err != nil {
 		if err == keyring.ErrKeyNotFound || os.IsNotExist(err) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("delete keyring item %q: %w", key, err)
 	}
 	return nil
 }

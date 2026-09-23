@@ -13,6 +13,7 @@ func NewDraftConfig(providerKind string) *ClusterConfig {
 	}
 	cfg.Cluster.Providers = []Provider{newDraftProvider(providerKind)}
 	cfg.Cluster.Secrets = newDraftSecrets(providerKind)
+	cfg.Cluster.SPIFFE.TrustDomain = cfg.Cluster.Kubernetes.APIHostname
 	return &cfg
 }
 
@@ -40,6 +41,7 @@ func newDraftProvider(kind string) Provider {
 	}
 }
 
+// newDraftSecrets returns provider-specific draft secret settings.
 func newDraftSecrets(providerKind string) Secrets {
 	switch providerKind {
 	case "aws":

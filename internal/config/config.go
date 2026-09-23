@@ -7,6 +7,7 @@ package config
 import (
 	"path/filepath"
 	"runtime"
+	"sync"
 
 	"github.com/99designs/keyring"
 	"github.com/spf13/viper"
@@ -16,7 +17,8 @@ import (
 // our viper instance for the config file and keyring instance.
 type Config struct {
 	viperFile *viper.Viper
-	keyring   *keyring.Keyring
+	keyringMu sync.Mutex
+	keyring   keyring.Keyring
 }
 
 // Init initializes the Config struct

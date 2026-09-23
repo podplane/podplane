@@ -416,7 +416,7 @@ func TestVerifyRequiresCachedVMConfigImages(t *testing.T) {
 func TestFilterComponentsManifestExcludesAddonsAndProviderSpecificImagesByDefault(t *testing.T) {
 	manifest := &ComponentsManifest{Components: Components{Images: []ComponentImage{
 		{Components: []string{"cilium"}, Image: "cilium"},
-		{Components: []string{"traefik"}, Image: "traefik", Addon: true},
+		{Components: []string{"envoy-gateway"}, Image: "envoy-gateway", Addon: true},
 		{Components: []string{"csi-aws-ebs"}, Image: "aws-ebs", Providers: []string{"aws"}},
 		{Components: []string{"aws-addon"}, Image: "aws-addon", Addon: true, Providers: []string{"aws"}},
 		{Components: []string{"arm64"}, Image: "arm64", Platform: "linux/arm64/v8"},
@@ -428,9 +428,9 @@ func TestFilterComponentsManifestExcludesAddonsAndProviderSpecificImagesByDefaul
 		t.Fatalf("filtered images = %v, want cilium", got)
 	}
 
-	indexes = manifest.DownloadImageIndexes(ComponentImageFilter{Archs: archs, Providers: []string{"aws"}, Addons: []string{"traefik"}})
-	if got := componentImageNamesAt(manifest.Components.Images, indexes); strings.Join(got, ",") != "cilium,traefik,aws-ebs" {
-		t.Fatalf("filtered images = %v, want cilium,traefik,aws-ebs", got)
+	indexes = manifest.DownloadImageIndexes(ComponentImageFilter{Archs: archs, Providers: []string{"aws"}, Addons: []string{"envoy-gateway"}})
+	if got := componentImageNamesAt(manifest.Components.Images, indexes); strings.Join(got, ",") != "cilium,envoy-gateway,aws-ebs" {
+		t.Fatalf("filtered images = %v, want cilium,envoy-gateway,aws-ebs", got)
 	}
 
 	manifest.Components.Images = []ComponentImage{{Components: []string{"aws-addon"}, Image: "aws-addon", Addon: true, Providers: []string{"aws"}}}

@@ -16,11 +16,12 @@ Podplane is easy to use and operate because it combines three sibling projects i
 - Auto-scaling & provisioning is faster with [Nstance](https://nstance.dev).
 - OIDC & RBAC is simplified with [Truster](https://truster.dev) (or you can bring an existing OIDC server)
 
-Podplane itself consists of three key components:
+Podplane itself consists of four key runtime projects:
 
 1. [podplane CLI](https://github.com/podplane/podplane): a CLI for deploying and managing clusters, written in Go.
-2. [vmconfig](https://github.com/podplane/vmconfig): a minimal configuration system designed for Debian-based Linux VMs, written in Bash.
-3. [components](https://github.com/podplane/components): a collection of Helm charts used to seed the Kubernetes cluster state.
+2. [operator](https://github.com/podplane/operator): in-cluster APIs and controllers for secrets, workload certificates, and ingress certificates, written in Go.
+3. [vmconfig](https://github.com/podplane/vmconfig): a minimal configuration system designed for Debian-based Linux VMs, written in Bash.
+4. [components](https://github.com/podplane/components): a collection of Helm charts used to seed and manage Kubernetes cluster state.
 
 ## Platform Layers
 
@@ -53,7 +54,7 @@ A Podplane cluster consists of three platform layers:
 │     │ ┌┴──────────────┐ ┌────────────────┐ │  └──▲────▲────▲──┘  │
 │     │ │ nstance-agent │ │ fluent-bit     ├─┼─────┘    │    │     │
 │     │ ├───────────────┤ ├────────────────┤ │          │    │     │
-│     │ │ kube2iam      │ │ distribution   ├─┼──────────┘    │     │
+│     │ │ kube2iam      │ │ zot            ├─┼──────────┘    │     │
 │     │ ├───────────────┤ ├────────────────┤ │               │     │
 │     │ │ kubelet       │ │ netsy          ├─┼───────────────┘     │
 │     │ ├───────────────┤ ├────────────────┤ │                     │
@@ -92,13 +93,13 @@ The sequence of how these all fit together is:
 
 9. Developers can use `podplane deploy` to easily deploy apps using templates
 
-   - When using the `deploy` command, the CLI will prompt to automatically `podplane install` required components like cert-manager and Traefik if not already present
+   - When using the `deploy` command, the CLI will prompt to automatically `podplane install` required components like Envoy Gateway if not already present
 
 ## Learn More
 
 For detailed information about each layer, see:
 
-- [Infrastructure](../infrastructure.md) - how Podplane provisions and manages cloud infrastructure.
-- [VM Configuration](../vmconfig.md) - how VMs are configured and what runs on them.
-- [Components](../components.md) - the component system, including core components and addon installation.
-- [Secrets](../secrets.md) - how Podplane manages and mounts application secrets.
+- [Infrastructure](infrastructure.md) - how Podplane provisions and manages cloud infrastructure.
+- [VM Configuration](vmconfig.md) - how VMs are configured and what runs on them.
+- [Components](components.md) - the component system, including core components and addon installation.
+- [Secrets](secrets.md) - how Podplane manages and mounts application secrets.

@@ -55,63 +55,15 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 				},
 			},
 			{
-				Key:       "cert-manager",
-				Name:      "cert-manager webhook",
+				Key:       "envoy-gateway",
+				Name:      "Envoy Gateway",
 				Kind:      "deployment",
-				Required:  true,
-				DependsOn: []string{"cilium"},
-				Expected:  30 * time.Second,
-				Timeout:   3 * time.Minute,
-				Run: func(ctx context.Context) Result {
-					return readWorkload(ctx, opts.KubeContext, opts.Kubeconfig, "platform-cert-manager", "deployment", "platform-cert-manager-webhook")
-				},
-			},
-			{
-				Key:       "cert-manager-admission",
-				Name:      "cert-manager admission",
-				Kind:      "webhook",
-				Required:  true,
-				DependsOn: []string{"cert-manager"},
-				Expected:  5 * time.Second,
-				Timeout:   2 * time.Minute,
-				Run: func(ctx context.Context) Result {
-					return checkCertManagerAdmission(ctx, opts.KubeContext, opts.Kubeconfig)
-				},
-			},
-			{
-				Key:       "trust-manager",
-				Name:      "trust-manager",
-				Kind:      "deployment",
-				Required:  true,
-				DependsOn: []string{"cert-manager-admission"},
-				Expected:  45 * time.Second,
-				Timeout:   3 * time.Minute,
-				Run: func(ctx context.Context) Result {
-					return readWorkload(ctx, opts.KubeContext, opts.Kubeconfig, "platform-trust-manager", "deployment", "platform-trust-manager")
-				},
-			},
-			{
-				Key:       "default-app-trust-bundle",
-				Name:      "default app trust bundle",
-				Kind:      "configmap",
-				Required:  true,
-				DependsOn: []string{"trust-manager"},
-				Expected:  5 * time.Second,
-				Timeout:   2 * time.Minute,
-				Run: func(ctx context.Context) Result {
-					return checkConfigMapData(ctx, opts.KubeContext, opts.Kubeconfig, "default", "platform-selfsigned-ca-bundle", "ca.crt")
-				},
-			},
-			{
-				Key:       "traefik",
-				Name:      "traefik",
-				Kind:      "daemonset",
 				Required:  true,
 				DependsOn: []string{"cilium"},
 				Expected:  20 * time.Second,
 				Timeout:   3 * time.Minute,
 				Run: func(ctx context.Context) Result {
-					return readWorkload(ctx, opts.KubeContext, opts.Kubeconfig, "platform-traefik", "daemonset", "platform-traefik")
+					return readWorkload(ctx, opts.KubeContext, opts.Kubeconfig, "platform-envoy-gateway", "deployment", "envoy-gateway")
 				},
 			},
 			{
@@ -119,7 +71,7 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 				Name:      "local ingress proxy",
 				Kind:      "ingress",
 				Required:  true,
-				DependsOn: []string{"traefik"},
+				DependsOn: []string{"envoy-gateway"},
 				Expected:  5 * time.Second,
 				Timeout:   time.Minute,
 				Run: func(ctx context.Context) Result {
@@ -133,7 +85,7 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 }
 
 // LocalIngressProxyCheck verifies that the local ingress URL is reachable after
-// Traefik is expected to be running. Any HTTP response proves the proxy path is
+// Envoy Gateway is expected to be running. Any HTTP response proves the proxy path is
 // accepting browser traffic; connection failures keep the check pending.
 func LocalIngressProxyCheck(localIngressURL func() (string, error), required bool) Check {
 	return Check{
@@ -176,11 +128,11 @@ func checkLocalIngressProxy(ctx context.Context, localIngressURL func() (string,
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return Result{Exists: true, Status: StatusPending, Message: fmt.Sprintf("waiting for Traefik via %s: %v", url, err)}
+		return Result{Exists: true, Status: StatusPending, Message: fmt.Sprintf("waiting for Envoy Gateway via %s: %v", url, err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
-		return Result{Exists: true, Status: StatusPending, Message: fmt.Sprintf("waiting for Traefik via %s: HTTP %d", url, resp.StatusCode)}
+		return Result{Exists: true, Status: StatusPending, Message: fmt.Sprintf("waiting for Envoy Gateway via %s: HTTP %d", url, resp.StatusCode)}
 	}
 	return Result{Exists: true, Ready: true, Status: StatusReady, Message: fmt.Sprintf("%s returned HTTP %d", url, resp.StatusCode)}
 }

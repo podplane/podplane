@@ -48,6 +48,7 @@ locals {
 # destroy the cluster, then update podplane.cluster.jsonc and recreate it.
 locals {
   cluster_id = "test-cluster"
+  spiffe_trust_domain = "k8s.example.com"
   name_prefix = "test-cluster"
   provider_kind = "aws"
   provider_account = "123456789012"

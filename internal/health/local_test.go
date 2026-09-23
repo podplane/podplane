@@ -14,38 +14,38 @@ import (
 	"github.com/podplane/podplane/pkg/seeds"
 )
 
-// TestLocalStartRecommendedChecksIncludeTrustPath verifies recommended local
-// start waits for app trust material before reporting deploy-ready health.
-func TestLocalStartRecommendedChecksIncludeTrustPath(t *testing.T) {
+// TestLocalStartRecommendedChecksOrderIngress verifies recommended local start
+// waits for Cilium and Envoy Gateway before probing ingress.
+func TestLocalStartRecommendedChecksOrderIngress(t *testing.T) {
 	checks := LocalStartChecks(LocalStartOptions{SeedName: seeds.Recommended})
 	byKey := map[string]Check{}
 	for _, check := range checks {
 		byKey[check.Key] = check
 	}
 
-	trustManager, ok := byKey["trust-manager"]
+	envoy, ok := byKey["envoy-gateway"]
 	if !ok {
-		t.Fatal("recommended checks missing trust-manager")
+		t.Fatal("recommended checks missing Envoy Gateway")
 	}
-	if got, want := trustManager.DependsOn, []string{"cert-manager-admission"}; len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("trust-manager dependencies = %v, want %v", got, want)
+	if got, want := envoy.DependsOn, []string{"cilium"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("Envoy Gateway dependencies = %v, want %v", got, want)
 	}
 
-	bundle, ok := byKey["default-app-trust-bundle"]
+	ingress, ok := byKey["ingress"]
 	if !ok {
-		t.Fatal("recommended checks missing default app trust bundle")
+		t.Fatal("recommended checks missing ingress")
 	}
-	if got, want := bundle.DependsOn, []string{"trust-manager"}; len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("default app trust bundle dependencies = %v, want %v", got, want)
+	if got, want := ingress.DependsOn, []string{"envoy-gateway"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("ingress dependencies = %v, want %v", got, want)
 	}
-	if bundle.Kind != "configmap" || !bundle.Required {
-		t.Fatalf("default app trust bundle = %#v, want required configmap", bundle)
+	if ingress.Kind != "ingress" || !ingress.Required {
+		t.Fatalf("ingress = %#v, want required ingress check", ingress)
 	}
 }
 
-// TestCheckLocalIngressProxyAcceptsTraefikNotFound verifies Traefik route
-// misses still prove the local ingress proxy reached Traefik.
-func TestCheckLocalIngressProxyAcceptsTraefikNotFound(t *testing.T) {
+// TestCheckLocalIngressProxyAcceptsGatewayNotFound verifies route misses still
+// prove the local ingress proxy reached the gateway.
+func TestCheckLocalIngressProxyAcceptsGatewayNotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
@@ -73,7 +73,7 @@ func TestCheckLocalIngressProxyDialsLocalhostOnLoopback(t *testing.T) {
 }
 
 // TestCheckLocalIngressProxyWaitsOnGatewayErrors verifies local proxy upstream
-// failures are not mistaken for a healthy Traefik connection.
+// failures are not mistaken for a healthy gateway connection.
 func TestCheckLocalIngressProxyWaitsOnGatewayErrors(t *testing.T) {
 	for _, status := range []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

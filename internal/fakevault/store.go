@@ -38,17 +38,20 @@ type Secret struct {
 // Store persists fakevault secrets.
 type Store interface {
 	SetSecret(clusterID, path string, values map[string]string) error
+	CreateSecret(clusterID, path string, values map[string]string) (bool, error)
 	GetSecret(clusterID, path string) (map[string]string, bool, error)
 	ArchiveSecret(clusterID, path string) error
 	RestoreSecret(clusterID, path string) error
 	DeleteSecret(clusterID, path string) error
 	ListSecrets(clusterID string) ([]Secret, error)
+	DeleteCluster(clusterID string) error
 }
 
 // KeyringBackend is the subset of Podplane config used by FileStore.
 type KeyringBackend interface {
 	KeyringWrite(key string, value []byte) error
 	KeyringRead(key string) ([]byte, error)
+	KeyringDelete(key string) error
 }
 
 // FileStore stores fakevault secrets as encrypted files protected by one
@@ -61,12 +64,14 @@ type FileStore struct {
 	keys map[string][]byte
 }
 
+// vaultKeyFile is the versioned key payload stored by the keyring backend.
 type vaultKeyFile struct {
 	Version   int    `json:"version"`
 	Algorithm string `json:"algorithm"`
 	Key       string `json:"key"`
 }
 
+// secretFile is the versioned encrypted representation of one secret.
 type secretFile struct {
 	Version    int      `json:"version"`
 	Algorithm  string   `json:"algorithm"`
@@ -85,37 +90,59 @@ func NewFileStore(backend KeyringBackend, root string) *FileStore {
 
 // SetSecret writes a fakevault secret for clusterID and path.
 func (s *FileStore) SetSecret(clusterID, path string, values map[string]string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.setSecret(clusterID, path, values, false)
+	return err
+}
+
+// CreateSecret writes a fakevault secret only when it does not already exist.
+// It reports whether this call created the secret.
+func (s *FileStore) CreateSecret(clusterID, path string, values map[string]string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.setSecret(clusterID, path, values, true)
+}
+
+// setSecret encrypts and atomically writes one fakevault secret. The caller
+// must hold s.mu.
+func (s *FileStore) setSecret(clusterID, path string, values map[string]string, create bool) (bool, error) {
 	clusterID, path, err := cleanClusterPath(clusterID, path)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if len(values) == 0 {
-		return fmt.Errorf("at least one key=value pair is required")
+		return false, fmt.Errorf("at least one key=value pair is required")
 	}
 	data, err := json.Marshal(values)
 	if err != nil {
-		return fmt.Errorf("marshal fakevault secret: %w", err)
+		return false, fmt.Errorf("marshal fakevault secret: %w", err)
+	}
+	current, ok, err := s.readFile(clusterID, path)
+	if err != nil {
+		return false, err
+	}
+	if create && ok {
+		return false, nil
 	}
 	key, err := s.vaultKey(clusterID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	nonce := make([]byte, nonceSize)
 	if _, err := rand.Read(nonce); err != nil {
-		return fmt.Errorf("create fakevault nonce: %w", err)
+		return false, fmt.Errorf("create fakevault nonce: %w", err)
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return fmt.Errorf("create fakevault cipher: %w", err)
+		return false, fmt.Errorf("create fakevault cipher: %w", err)
 	}
 	aead, err := cipher.NewGCM(block)
 	if err != nil {
-		return fmt.Errorf("create fakevault AEAD: %w", err)
+		return false, fmt.Errorf("create fakevault AEAD: %w", err)
 	}
 	version := 1
-	if current, ok, err := s.readFile(clusterID, path); err != nil {
-		return err
-	} else if ok && current.Version > 0 {
+	if ok && current.Version > 0 {
 		version = current.Version + 1
 	}
 	file := secretFile{
@@ -126,11 +153,16 @@ func (s *FileStore) SetSecret(clusterID, path string, values map[string]string) 
 		Keys:       sortedKeys(values),
 		UpdatedAt:  time.Now().UTC().Format(time.RFC3339),
 	}
-	return s.writeFile(clusterID, path, file)
+	if err := s.writeFile(clusterID, path, file); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // GetSecret returns a fakevault secret for clusterID and path.
 func (s *FileStore) GetSecret(clusterID, path string) (map[string]string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	clusterID, path, err := cleanClusterPath(clusterID, path)
 	if err != nil {
 		return nil, false, err
@@ -161,6 +193,8 @@ func (s *FileStore) RestoreSecret(clusterID, path string) error {
 
 // DeleteSecret permanently removes a fakevault secret for clusterID and path.
 func (s *FileStore) DeleteSecret(clusterID, path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	clusterID, path, err := cleanClusterPath(clusterID, path)
 	if err != nil {
 		return err
@@ -175,8 +209,29 @@ func (s *FileStore) DeleteSecret(clusterID, path string) error {
 	return nil
 }
 
+// DeleteCluster permanently removes a cluster's encrypted secrets and vault
+// key. Shared local-server data is unaffected.
+func (s *FileStore) DeleteCluster(clusterID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clusterID, err := cleanClusterID(clusterID)
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(s.clusterDir(clusterID)); err != nil {
+		return fmt.Errorf("remove fakevault cluster data: %w", err)
+	}
+	if err := s.backend.KeyringDelete(vaultKeyName(clusterID)); err != nil {
+		return fmt.Errorf("delete fakevault key: %w", err)
+	}
+	delete(s.keys, clusterID)
+	return nil
+}
+
 // ListSecrets lists fakevault secrets for clusterID.
 func (s *FileStore) ListSecrets(clusterID string) ([]Secret, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	clusterID, err := cleanClusterID(clusterID)
 	if err != nil {
 		return nil, err
@@ -227,15 +282,13 @@ func CleanPath(path string) string {
 	return strings.Trim(path, "/")
 }
 
-// vaultKey returns the cluster's fakevault encryption key, loading it from the
-// keychain once per local server process and generating it when absent.
+// vaultKey returns the cluster's fakevault encryption key, loading it once per
+// server process and generating it when absent. The caller must hold s.mu.
 func (s *FileStore) vaultKey(clusterID string) ([]byte, error) {
 	clusterID, err := cleanClusterID(clusterID)
 	if err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if key := s.keys[clusterID]; len(key) > 0 {
 		return append([]byte(nil), key...), nil
 	}
@@ -315,6 +368,8 @@ func (s *FileStore) decrypt(clusterID, path string, file secretFile) (map[string
 
 // setArchived updates the archived flag for a fakevault secret file.
 func (s *FileStore) setArchived(clusterID, path string, archived bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	clusterID, path, err := cleanClusterPath(clusterID, path)
 	if err != nil {
 		return err
@@ -347,15 +402,52 @@ func (s *FileStore) readFile(clusterID, path string) (secretFile, bool, error) {
 // writeFile writes one fakevault secret file.
 func (s *FileStore) writeFile(clusterID, path string, file secretFile) error {
 	name := s.secretFilePath(clusterID, path)
-	if err := os.MkdirAll(filepath.Dir(name), 0o700); err != nil {
-		return fmt.Errorf("create fakevault directory: %w", err)
-	}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode fakevault secret file: %w", err)
 	}
-	if err := os.WriteFile(name, append(data, '\n'), 0o600); err != nil {
+	if err := writeFileAtomic(name, append(data, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write fakevault secret file: %w", err)
+	}
+	return nil
+}
+
+// writeFileAtomic replaces a file without exposing partially written content.
+func writeFileAtomic(name string, data []byte, mode fs.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(name), 0o700); err != nil {
+		return fmt.Errorf("create parent directory: %w", err)
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(name), "."+filepath.Base(name)+"-")
+	if err != nil {
+		return fmt.Errorf("create temporary file: %w", err)
+	}
+	temporaryName := temporary.Name()
+	defer func() { _ = os.Remove(temporaryName) }()
+	if err := temporary.Chmod(mode); err != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("set temporary file permissions: %w", err)
+	}
+	if _, err := temporary.Write(data); err != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("write temporary file: %w", err)
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("sync temporary file: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close temporary file: %w", err)
+	}
+	if err := os.Rename(temporaryName, name); err != nil {
+		return fmt.Errorf("install file: %w", err)
+	}
+	directory, err := os.Open(filepath.Dir(name))
+	if err != nil {
+		return fmt.Errorf("open parent directory: %w", err)
+	}
+	defer func() { _ = directory.Close() }()
+	if err := directory.Sync(); err != nil {
+		return fmt.Errorf("sync parent directory: %w", err)
 	}
 	return nil
 }

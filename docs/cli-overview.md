@@ -8,7 +8,7 @@ description: "Podplane CLI design and command overview"
 
 ## Terminology
 
-- **Components** are platform-level services managed via `install` / `uninstall`. Components are either __core__ components (always installed, cannot be removed e.g. CoreDNS, Cilium) or __addon__ components (can be installed and uninstalled e.g. Traefik, metrics-server).
+- **Components** are platform-level services managed via `install` / `uninstall`. Components are either __core__ components (always installed, cannot be removed e.g. CoreDNS, Cilium) or __addon__ components (can be installed and uninstalled e.g. Envoy Gateway, metrics-server).
 - **Apps** are your own workloads, deployed and removed via `deploy` / `remove` using app __templates__ (e.g. `web` or `worker` template).
 - Both templates and components can have configurable __features__.
 
@@ -45,6 +45,7 @@ Podplane commands use different config/context sources depending on the command:
   For Commands: `deploy`, `remove`, `logs`, `install`, `uninstall`, `logout`.
   Exceptions:
   - `logout` optionally also accepts `--cluster` or `-f` / `--cluster-config`
+  - `install podplane-operator` also reads `-f` / `--cluster-config` to validate the workload certificate trust domain and CA-key provider
 
 - __No Context/Not Applicable__
   For Commands: `local *`, `deps *`, `version`, `completion`, `help`
@@ -118,17 +119,17 @@ These commands help you deploy workloads using templates such as the `web` or `w
 
 - `build [PATH] [-t <image>]` builds an OCI image with ocimage and stores it in the local Podplane registry so a local VM can use it immediately. If no `Containerfile` or `Dockerfile` exists, Podplane can generate a conservative `Containerfile` for supported project types.
 - `push <local-image> [<remote-image>]` pushes an image from the local Podplane registry to the current cluster registry. If the image is not cached but exists in Docker, Podplane can import and push it after confirmation.
-- `deploy <template> --name <name> [--image <image>] [-e KEY=value]` deploy an app using a template. The CLI will prompt to install addon components if they have required dependencies which are not installed. Repeat `-e` / `--env` to set non-secret environment variables on the app container. If `--image` is omitted, the template default image is used.
+- `deploy <template> --name <name> [--image <image>] [-e KEY=value] [--secret <key>]` deploy an app using a template. The CLI will prompt to install addon components if they have required dependencies which are not installed. Repeat `-e` / `--env` for non-secret environment variables and `--secret` for keys from the cluster's default secrets provider. If `--image` is omitted, the template default image is used.
 - `remove --name <name>` remove a previously deployed app.
 - `secret <command> --for <secret-provider-class-name>` create, update, list, archive, restore, and destroy application secret values through the Podplane operator. Values are encrypted locally before they are sent to Kubernetes.
-- `logs <name>` tail logs for a deployed app.
+- `logs <name>` tail logs for a deployed app, selecting one container or using `--all` for every container.
 - `shell <name> [-- command...]` open a shell in a deployed app or run one command in the app container.
 
 The `build` command packages prebuilt files into OCI images without requiring Docker. The `deploy` and `remove` commands are convenience functions which wrap `helm` commands. The `logs` command wraps `kubectl logs`; the `shell` command wraps `kubectl exec` and can fall back to `kubectl debug` or a small client-side prompt when an interactive container has no `bash` or `sh`.
 
 ### `install` / `uninstall` commands
 
-Addon components extend your cluster's capabilities, such as Traefik ingress controller or CSI drivers.
+Addon components extend your cluster's capabilities, such as Envoy Gateway or CSI drivers.
 
 - `install <component>` installs a component into the cluster with an opinionated, tested configuration.
 - `uninstall <component>` removes a previously installed component from the cluster.
@@ -152,9 +153,9 @@ The following commands exist primarily for Podplane development work on the `vmc
 
 The following command exists primarily for debugging:
 
-- `server` runs a local background webserver that serves cached packages to VMs and hosts a fake OIDC server for local clusters
+- `server` runs the shared local background services: cached dependencies and component Git repositories, cloud-init data, fake OIDC, S3, Vault/OpenBao, and Nstance services, plus the host-facing ingress TLS proxy
 
-Note `server` is run automatically in the background when `local start` is used, and stopped on `local stop` of the last running VM.
+Note `server` is run automatically in the background when `local start` is used. The current `local stop` implementation stops the shared server whenever it stops a VM; it does not yet preserve the server for another running local VM.
 
 ### `deps` commands
 

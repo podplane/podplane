@@ -8,7 +8,7 @@ terraform {
     }
     podplane = {
       source = "podplane/podplane"
-      version = ">= 1.2.0"
+      version = ">= 1.3.0"
     }
   }
 }
@@ -22,6 +22,9 @@ data "aws_caller_identity" "current" {
 }
 
 data "aws_region" "current" {
+}
+
+data "aws_partition" "current" {
 }
 
 data "podplane_userdata" "knc_arm64" {
@@ -181,8 +184,15 @@ module "shard_us_east_1a" {
   }
 }
 
+resource "podplane_workload_ca_key" "cluster" {
+  key_prefix = "test-cluster"
+  provider = "aws_secrets_manager"
+  region = "us-east-1"
+}
+
 resource "podplane_netsy_seed_s3" "cluster" {
   cluster_config_path = "${path.module}/podplane.cluster.jsonc"
   bucket = aws_s3_bucket.podplane_cluster["netsy"].bucket
   region = local.aws_region
+  depends_on = [podplane_workload_ca_key.cluster, aws_iam_role_policy.podplane_workload_ca_key]
 }

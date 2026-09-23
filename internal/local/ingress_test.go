@@ -249,12 +249,12 @@ func backendPort(t *testing.T, srv *httptest.Server) int {
 
 // writeDevState writes a clusterState for the "dev" cluster into runtimeDir
 // so the local ingress proxy can resolve dev.k8s.localhost / dev.localhost.
-func writeDevState(t *testing.T, runtimeDir string, kubernetesAPIPort, traefikPort int) {
+func writeDevState(t *testing.T, runtimeDir string, kubernetesAPIPort, ingressPort int) {
 	t.Helper()
 	if err := writeState(runtimeDir, clusterState{
 		ClusterID: "dev",
 		Backend:   "qemu",
-		Ports:     portState{KubernetesAPI: kubernetesAPIPort, TraefikHTTPS: traefikPort},
+		Ports:     portState{KubernetesAPI: kubernetesAPIPort, IngressHTTPS: ingressPort},
 	}); err != nil {
 		t.Fatalf("writeState: %v", err)
 	}

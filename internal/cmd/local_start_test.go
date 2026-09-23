@@ -17,7 +17,7 @@ import (
 // TestLocalStartSeedNameUsesExistingClusterSeed verifies the local-start
 // TUI plans checks from the existing cluster config on restart. The
 // --components flag only applies to first boot, so a minimal existing cluster
-// must not get recommended-only progress rows such as trust-manager.
+// must not get recommended-only progress rows such as Envoy Gateway.
 func TestLocalStartSeedNameUsesExistingClusterSeed(t *testing.T) {
 	const existingMinimalClusterConfig = `
 {

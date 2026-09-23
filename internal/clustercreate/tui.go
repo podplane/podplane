@@ -26,6 +26,7 @@ func SelectCloudProvider() (string, bool, error) {
 	return tui.SelectList("Select cloud provider", "Which cloud provider?", cloudProviderItems())
 }
 
+// cloudProviderItems returns the supported cloud provider choices.
 func cloudProviderItems() []list.Item {
 	return []list.Item{
 		tui.Item{Key: "aws", Label: "Amazon Web Services (AWS)"},
@@ -34,6 +35,7 @@ func cloudProviderItems() []list.Item {
 	}
 }
 
+// configField describes one field in the cluster configuration wizard.
 type configField struct {
 	label       string
 	value       string
@@ -44,6 +46,7 @@ type configField struct {
 	acmeDNSOnly bool
 }
 
+// configForm holds the cluster configuration wizard state.
 type configForm struct {
 	fields         []configField
 	index          int
@@ -364,6 +367,7 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 			},
 		}
 	}
+	cfg.Cluster.SPIFFE.TrustDomain = cfg.Cluster.Kubernetes.APIHostname
 	cfg.Cluster.Providers[0] = provider
 	return cfg, nil
 }

@@ -109,6 +109,19 @@ New cluster configs include a relative `$schema` reference to `./podplane.cluste
         }
       }
     ],
+    "secrets": {
+      "default_provider": "aws-secrets-manager",
+      "providers": {
+        "aws-secrets-manager": {
+          "kind": "aws",
+          "object_type": "secretsmanager",
+          "region": "us-east-1"
+        }
+      }
+    },
+    "spiffe": {
+      "trust_domain": "k8s.example.com"
+    },
     "kubernetes": {
       "api_hostname": "k8s.example.com",
       "api_load_balancer": "kubernetes-api",
@@ -121,7 +134,8 @@ New cluster configs include a relative `$schema` reference to `./podplane.cluste
     },
     "seed": {
       "name": "recommended",
-      "version": "v1.2.3-1"
+      "version": "v1.2.3-1",
+      "digest": "sha512:00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
     },
     "components": {
       "registry": {
@@ -147,7 +161,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 
 | Field | Description |
 |---|---|
-| `cluster.id` | Cluster identifier - lowercase alphanumeric and hypens, max 32 characters. Auto-generated from `name` by the CLI, used as a prefix for cloud resources and maps to Nstance `cluster_id`. |
+| `cluster.id` | Cluster identifier: lowercase alphanumeric with single internal hyphens, no leading, trailing, or consecutive hyphens, and at most 32 characters. `local`, `k8s`, and `oidc` are reserved. Auto-generated from `name` by the CLI, used as a prefix for cloud resources, and mapped to Nstance `cluster_id`. |
 | `cluster.name` | Cluster name, used as a human-readable identifier |
 | `cluster.oidc.issuer_url` | OIDC issuer URL for cluster authentication (e.g. `https://auth.example.com`) |
 | `cluster.oidc.client_id` | OIDC client ID (defaults to `cluster.id` if not specified) |
@@ -155,7 +169,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.oidc.groups_claim` | Token claim used for group membership (default: `groups`) |
 | `cluster.oidc.signing_algs` | Allowed OIDC signing algorithms. Passed to kube-apiserver at runtime; vmconfig defaults to `["RS256"]` when omitted. |
 | `cluster.acme.server` | Optional ACME directory override. Defaults to the Let's Encrypt production directory. |
-| `cluster.acme.email` | ACME account email address for expiry and account notices. Configuring it enables ACME for domains using a supported DNS provider; currently only AWS Route53 is enabled. Omit `cluster.acme` to use self-signed ingress certificates. |
+| `cluster.acme.email` | Required ACME account email. Configuring `cluster.acme` enables operator-managed apex-and-wildcard ingress certificates for domains using a supported DNS provider; currently only AWS Route53 is enabled. Omit `cluster.acme` to retain operator-managed self-signed ingress certificates. Ingress certificates are separate from workload PKI: their bundles remain in the external secrets provider and reach Envoy data-plane Pods through Secrets Store CSI and the SDS sidecar, never ordinary Kubernetes TLS Secrets. |
 | `cluster.domains[]` | Array of domain configurations. The first domain is used as the default for ingress routing. |
 | `cluster.domains[].zone` | Exact ingress apex (e.g. `staging.example.com`); Podplane creates apex and wildcard DNS records. |
 | `cluster.domains[].load_balancer` | Named provider load balancer targeted by the apex and wildcard records. Defaults to `main`. |
@@ -163,9 +177,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.domains[].provider.kind` | DNS provider: `aws-route53`, `cloudflare`, `google-cloud-dns`, or `local`. Cluster Terraform generation currently supports `aws-route53`. |
 | `cluster.domains[].provider.region` | AWS Route53 region for DNS-01. If omitted, Podplane can infer it when exactly one matching AWS provider exists. |
 | `cluster.domains[].provider.hosted_zone_id` | Optional explicit Route53 hosted zone ID. Use it to disambiguate or pin the exact hosted zone; otherwise, generated Terraform looks up the public hosted zone by domain name. |
-| `cluster.domains[].provider.secret_provider_class_name` | Existing Secrets Store CSI `SecretProviderClass` to mount so external secret material can be synced before cert-manager uses it. |
-| `cluster.domains[].provider.secret_name` | Kubernetes Secret name containing DNS provider credentials. Used by DNS providers that authenticate with Kubernetes Secrets. |
-| `cluster.domains[].provider.secret_key` | Key inside `secret_name`. Defaults to `api-token` for Cloudflare and `service-account.json` for Google Cloud DNS. |
+| `cluster.domains[].provider.role_arn` | Advanced Route53 role override. Managed AWS clusters generate and inject a least-privilege ACME role automatically. |
 | `cluster.domains[].provider.project` | Google Cloud project ID for Cloud DNS. |
 | `cluster.domains[].provider.hosted_zone_name` | Google Cloud DNS managed zone name for the domain (optional). |
 | `cluster.pools.<name>.arch` | CPU architecture for the pool's nodes. `amd64` or `arm64` |
@@ -199,13 +211,17 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.providers[].roles.<name>.buckets` | Array of bucket names this role can access |
 | `cluster.providers[].roles.<name>.permissions` | Resource access level - `read-write` or `read-only` (default: `read-write`) |
 | `cluster.kubernetes.api_hostname` | Required Kubernetes API hostname used by kubeconfig and the API server certificate. |
+| `cluster.spiffe.trust_domain` | Required immutable SPIFFE trust domain for workload certificates. New clusters persist the initial `cluster.kubernetes.api_hostname`; existing clusters must explicitly add a valid value before upgrading infrastructure or enabling the operator. It allows only lowercase ASCII letters, digits, `.`, `-`, and `_`, up to 255 bytes. |
 | `cluster.kubernetes.api_port` | External Kubernetes API port. Defaults to `6443`; the target port remains `6443`. |
 | `cluster.kubernetes.api_load_balancer` | Optional named provider load balancer. Omit it to manage API connectivity and DNS outside Podplane. |
 | `cluster.secrets.default_provider` | Default secrets provider name used by `podplane secret` and templates when `--provider` is omitted. |
 | `cluster.secrets.providers` | Named secrets providers. Only provider-selection metadata belongs here; credentials are configured on the operator deployment. |
-| `cluster.secrets.providers.<name>.kind` | Secrets provider kind, such as `aws`, `gcp`, or `openbao`. |
+| `cluster.secrets.providers.<name>.kind` | Upstream Secrets Store CSI provider slug: `aws`, `gcp`, `vault`, or `openbao`. |
 | `cluster.secrets.providers.<name>.key_prefix` | Optional backend key prefix for this provider. Defaults to `cluster.id`; set it only when clusters should intentionally share a provider backend prefix. |
 | `cluster.secrets.providers.<name>.object_type` | AWS Secrets Store CSI object type, such as `secretsmanager` or `ssmparameter`. |
+| `cluster.secrets.providers.<name>.region` | AWS region used for provider API calls. |
+| `cluster.secrets.providers.<name>.project_id` | Required Google Cloud project ID for a `gcp` provider. |
+| `cluster.secrets.providers.<name>.location` | Optional regional Google Secret Manager location. |
 | `cluster.secrets.providers.<name>.address` | Vault/OpenBao server address used by the operator and rendered into generated `SecretProviderClass` objects. |
 | `cluster.secrets.providers.<name>.mount_path` | Vault/OpenBao KV-v2 mount name. Defaults to `secret`. |
 | `cluster.secrets.providers.<name>.ca_cert` | Optional PEM CA bundle for a Vault/OpenBao endpoint served by a private CA. Local fakevault config sets this automatically. |
@@ -227,6 +243,15 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.components.source.ref.semver` | Git semver range to use for component Helm charts. Mutually exclusive with other `source.ref` selectors. |
 | `cluster.components.source.ref.commit` | Git commit to use for component Helm charts. Mutually exclusive with other `source.ref` selectors. |
 | `cluster.components.source.secretRef.name` | Optional Flux Git credentials Secret name in the `platform-components` namespace. Use this for private/enterprise components repos; Podplane wires the reference but does not create the Secret. |
+
+Cluster infrastructure unconditionally creates or adopts a dedicated
+`workload-ca-key` in the default provider, even for `minimal` and `none` seeds.
+The Podplane Terraform provider provisions the key safely in AWS Secrets
+Manager, AWS SSM Parameter Store, or Google Secret Manager. Generated OpenTofu
+state stores provider metadata and a public-key fingerprint only, never the
+private key. OpenBao can also be the default provider when the key has been
+provisioned there separately. Local clusters create the key automatically in
+their encrypted local OpenBao-compatible store.
 
 Kubernetes usernames default to the token's `sub` claim without an issuer
 prefix. Truster places normalized email addresses in `sub` for user logins and

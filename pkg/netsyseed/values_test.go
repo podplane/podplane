@@ -12,26 +12,51 @@ import (
 	"github.com/podplane/podplane/internal/clusterconfig"
 )
 
+// TestBuildPlatformComponentsValuesLocalDomain enables ingress for a local domain.
 func TestBuildPlatformComponentsValuesLocalDomain(t *testing.T) {
-	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{Domains: []clusterconfig.Domain{{Zone: "internaltools.localhost", Provider: &clusterconfig.DomainProvider{Kind: "local"}}}}}
+	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+		ID:      "local",
+		Domains: []clusterconfig.Domain{{Zone: "internaltools.localhost", Provider: &clusterconfig.DomainProvider{Kind: "local"}}},
+		Secrets: clusterconfig.Secrets{DefaultProvider: "local-fakevault", Providers: map[string]clusterconfig.SecretsProvider{
+			"local-fakevault": {
+				Kind:      "openbao",
+				Address:   "https://10.0.2.15:19443/vault/local",
+				MountPath: "secret",
+				CACert:    "local CA",
+				AuthPath:  "auth/podplane",
+			},
+		}},
+	}}
 	values, err := buildPlatformComponentsValues(cfg)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
-	ingress := componentValues(values, "traefik")["platform"].(map[string]any)["traefik"].(map[string]any)["ingress"].(map[string]any)
-	issuer := ingress["issuerRef"].(map[string]any)
-	if got, want := issuer["name"], "platform-ingress-selfsigned-clusterissuer"; got != want {
-		t.Fatalf("issuerRef.name = %v, want %v", got, want)
-	}
+	ingress := componentValues(values, "envoy-gateway")["platform"].(map[string]any)["envoyGateway"].(map[string]any)["ingress"].(map[string]any)
 	domains := ingress["domains"].([]map[string]any)
-	if got, want := domains[0]["zone"], "internaltools.localhost"; got != want {
-		t.Fatalf("domain zone = %v, want %v", got, want)
+	if got, want := domains[0]["apex"], "internaltools.localhost"; got != want {
+		t.Fatalf("domain apex = %v, want %v", got, want)
 	}
 	if got, want := domains[0]["default"], true; got != want {
 		t.Fatalf("domain default = %v, want %v", got, want)
 	}
+	delivery := ingress["certificates"].(map[string]any)
+	if got, want := delivery["keyPrefix"], "local"; got != want {
+		t.Fatalf("certificates.keyPrefix = %v, want %v", got, want)
+	}
+	for key, want := range map[string]any{
+		"provider":      "openbao",
+		"address":       "https://10.0.2.15:19443/vault/local",
+		"mountPath":     "secret",
+		"authMountPath": "podplane",
+		"caCertPath":    "/var/run/podplane/secrets-providers/local-fakevault/ca.crt",
+	} {
+		if got := delivery[key]; got != want {
+			t.Fatalf("certificates.%s = %v, want %v", key, got, want)
+		}
+	}
 }
 
+// TestBuildPlatformComponentsValuesAWSProviderEnablesEBSCSI selects the AWS storage driver.
 func TestBuildPlatformComponentsValuesAWSProviderEnablesEBSCSI(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		Providers: []clusterconfig.Provider{{Kind: "aws"}},
@@ -48,9 +73,11 @@ func TestBuildPlatformComponentsValuesAWSProviderEnablesEBSCSI(t *testing.T) {
 	}
 }
 
+// TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents renders the complete secrets stack.
 func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ID:      "test-cluster",
+		SPIFFE:  clusterconfig.SPIFFE{TrustDomain: "k8s.example.com"},
 		Domains: []clusterconfig.Domain{{Zone: "internaltools.localhost", Provider: &clusterconfig.DomainProvider{Kind: "local"}}},
 		OIDC: clusterconfig.OIDC{
 			IssuerURL:     "https://auth.example.com",
@@ -58,7 +85,7 @@ func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *tes
 			UsernameClaim: "preferred_username",
 			GroupsClaim:   "roles",
 		},
-		Secrets: clusterconfig.Secrets{Providers: map[string]clusterconfig.SecretsProvider{
+		Secrets: clusterconfig.Secrets{DefaultProvider: "aws-secrets-manager", Providers: map[string]clusterconfig.SecretsProvider{
 			"aws-secrets-manager": {Kind: "aws", KeyPrefix: "shared-secrets", ObjectType: "secretsmanager"},
 			"hashicorp-vault":     {Kind: "vault", CACert: "-----BEGIN CERTIFICATE-----\nvault\n-----END CERTIFICATE-----"},
 			"local-fakevault":     {Kind: "openbao", CACert: "-----BEGIN CERTIFICATE-----\nlocal\n-----END CERTIFICATE-----", AuthPath: "auth/podplane", OperatorRole: "podplane-operator"},
@@ -104,6 +131,13 @@ func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *tes
 	if got, want := cluster["id"], "test-cluster"; got != want {
 		t.Fatalf("podplane-operator cluster id = %v, want %v", got, want)
 	}
+	spiffe := cluster["spiffe"].(map[string]any)
+	if got, want := spiffe["trustDomain"], "k8s.example.com"; got != want {
+		t.Fatalf("podplane-operator trust domain = %v, want %v", got, want)
+	}
+	if _, ok := operator["workloadCertificates"]; ok {
+		t.Fatal("operator values duplicate workload certificate provider configuration")
+	}
 	oidc := cluster["oidc"].(map[string]any)
 	for key, want := range map[string]any{
 		"issuerURL":     "https://auth.example.com",
@@ -116,6 +150,9 @@ func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *tes
 		}
 	}
 	secrets := config["secrets"].(map[string]any)
+	if got, want := secrets["defaultProvider"], "aws-secrets-manager"; got != want {
+		t.Fatalf("defaultProvider = %v, want %v", got, want)
+	}
 	providers := secrets["providers"].(map[string]any)
 	provider := providers["aws-secrets-manager"].(map[string]any)
 	if got, want := provider["keyPrefix"], "shared-secrets"; got != want {
@@ -130,6 +167,17 @@ func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *tes
 	}
 	if got, want := localProvider["operatorRole"], "podplane-operator"; got != want {
 		t.Fatalf("local provider operatorRole = %v, want %v", got, want)
+	}
+	ingressCertificates := config["ingressCertificates"].(map[string]any)
+	if got, want := ingressCertificates["provider"], "aws-secrets-manager"; got != want {
+		t.Fatalf("ingressCertificates.provider = %v, want %v", got, want)
+	}
+	ingressDomains := ingressCertificates["domains"].(map[string]any)
+	if _, ok := ingressDomains["internaltools.localhost"]; !ok {
+		t.Fatal("ingress certificate fallback domain was not rendered")
+	}
+	if _, ok := ingressCertificates["acme"]; ok {
+		t.Fatal("ACME config rendered without cluster.acme")
 	}
 	openBaoProvider := componentValues(values, "secrets-store-csi-provider-openbao")
 	podplaneProviders := openBaoProvider["podplane"].(map[string]any)["secrets"].(map[string]any)["providers"].(map[string]any)
@@ -168,6 +216,46 @@ func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *tes
 	}
 }
 
+// TestBuildPlatformComponentsValuesGCPWorkloadCAContract renders the GCP CA mount contract.
+func TestBuildPlatformComponentsValuesGCPWorkloadCAContract(t *testing.T) {
+	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+		ID:     "test-cluster",
+		SPIFFE: clusterconfig.SPIFFE{TrustDomain: "k8s.example.com"},
+		Secrets: clusterconfig.Secrets{DefaultProvider: "google-secret-manager", Providers: map[string]clusterconfig.SecretsProvider{
+			"google-secret-manager": {Kind: "gcp", KeyPrefix: "shared", ProjectID: "project-1"},
+		}},
+	}}
+	values, err := buildPlatformComponentsValues(cfg)
+	if err != nil {
+		t.Fatalf("buildPlatformComponentsValues error = %v", err)
+	}
+	operator := componentValues(values, "podplane-operator")["podplane"].(map[string]any)["operator"].(map[string]any)
+	if _, ok := operator["workloadCertificates"]; ok {
+		t.Fatal("operator values duplicate workload certificate provider configuration")
+	}
+	secrets := operator["config"].(map[string]any)["secrets"].(map[string]any)
+	provider := secrets["providers"].(map[string]any)["google-secret-manager"].(map[string]any)
+	for key, want := range map[string]any{"kind": "gcp", "keyPrefix": "shared", "projectID": "project-1"} {
+		if got := provider[key]; got != want {
+			t.Fatalf("provider.%s = %v, want %v", key, got, want)
+		}
+	}
+}
+
+// TestBuildPlatformComponentsValuesRejectsUnsupportedWorkloadCAProvider fails before an unsafe deployment.
+func TestBuildPlatformComponentsValuesRejectsUnsupportedWorkloadCAProvider(t *testing.T) {
+	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+		SPIFFE: clusterconfig.SPIFFE{TrustDomain: "k8s.example.com"},
+		Secrets: clusterconfig.Secrets{DefaultProvider: "vault", Providers: map[string]clusterconfig.SecretsProvider{
+			"vault": {Kind: "vault"},
+		}},
+	}}
+	if _, err := buildPlatformComponentsValues(cfg); err == nil {
+		t.Fatal("buildPlatformComponentsValues accepted unsupported workload CA provider")
+	}
+}
+
+// TestBuildPlatformComponentsValuesRegistryMirror renders registry mirror configuration.
 func TestBuildPlatformComponentsValuesRegistryMirror(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		Components: clusterconfig.Components{
@@ -193,6 +281,7 @@ func TestBuildPlatformComponentsValuesRegistryMirror(t *testing.T) {
 	}
 }
 
+// TestBuildPlatformComponentsValuesZotRegistry renders a managed cluster registry.
 func TestBuildPlatformComponentsValuesZotRegistry(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ID: "test-cluster",
@@ -242,6 +331,7 @@ func TestBuildPlatformComponentsValuesZotRegistry(t *testing.T) {
 	}
 }
 
+// TestBuildPlatformComponentsValuesZotRegistryLocalBucket renders local object storage.
 func TestBuildPlatformComponentsValuesZotRegistryLocalBucket(t *testing.T) {
 	caPath := filepath.Join(t.TempDir(), "oidc-ca.pem")
 	if err := os.WriteFile(caPath, []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"), 0o644); err != nil {
@@ -278,51 +368,15 @@ func TestBuildPlatformComponentsValuesZotRegistryLocalBucket(t *testing.T) {
 	}
 }
 
-func TestBuildPlatformComponentsValuesGroupsAWSSolvers(t *testing.T) {
-	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
-		ACME:      &clusterconfig.ACME{Server: "https://acme.example/directory", Email: "ops@example.com"},
-		Providers: []clusterconfig.Provider{{Kind: "aws", Account: "123", Region: "us-east-1"}},
-		Domains: []clusterconfig.Domain{
-			{Zone: "example.com", Provider: &clusterconfig.DomainProvider{Kind: "aws-route53", Account: "123", HostedZoneID: "Z123", RoleARN: "arn:aws:iam::123:role/cert-manager"}},
-			{Zone: "example.net", Provider: &clusterconfig.DomainProvider{Kind: "aws-route53", Account: "123", HostedZoneID: "Z123", RoleARN: "arn:aws:iam::123:role/cert-manager"}},
-		},
-	}}
-	values, err := buildPlatformComponentsValues(cfg)
-	if err != nil {
-		t.Fatalf("buildPlatformComponentsValues error = %v", err)
-	}
-	certs := componentValues(values, "platform-certs")["platform"].(map[string]any)["certs"].(map[string]any)
-	acme := certs["ingress"].(map[string]any)["acme"].(map[string]any)
-	solvers := acme["solvers"].([]map[string]any)
-	if got, want := len(solvers), 1; got != want {
-		t.Fatalf("solver count = %d, want %d", got, want)
-	}
-	zones := solvers[0]["dnsZones"].([]string)
-	if got, want := len(zones), 2; got != want {
-		t.Fatalf("dnsZones count = %d, want %d", got, want)
-	}
-	route53 := solvers[0]["route53"].(map[string]any)
-	if got, want := route53["region"], "us-east-1"; got != want {
-		t.Fatalf("route53.region = %v, want %v", got, want)
-	}
-	if got, want := route53["hostedZoneID"], "Z123"; got != want {
-		t.Fatalf("route53.hostedZoneID = %v, want %v", got, want)
-	}
-	if _, exists := route53["roleArn"]; exists {
-		t.Fatalf("route53 solver must use AWS credentials supplied by kube2iam instead of roleArn: %#v", route53)
-	}
-	apps := values["platform"].(map[string]any)["components"].(map[string]any)["apps"].(map[string]any)
-	if _, ok := apps["cert-manager"].(map[string]any)["namespaceAnnotations"]; ok {
-		t.Fatal("base values must not generate Route53 role annotations")
-	}
-}
-
 // TestBuildPlatformComponentsValuesUsesSelfSignedForUnsupportedDomain verifies
 // ACME is selected per domain while unsupported domains remain self-signed.
 func TestBuildPlatformComponentsValuesUsesSelfSignedForUnsupportedDomain(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ACME:      &clusterconfig.ACME{Email: "ops@example.com"},
 		Providers: []clusterconfig.Provider{{Kind: "aws", Region: "us-east-1"}},
+		Secrets: clusterconfig.Secrets{DefaultProvider: "default", Providers: map[string]clusterconfig.SecretsProvider{
+			"default": {Kind: "aws", ObjectType: "secretsmanager"},
+		}},
 		Domains: []clusterconfig.Domain{
 			{Zone: "managed.example.com", Provider: &clusterconfig.DomainProvider{Kind: "aws-route53", HostedZoneID: "Z123"}},
 			{Zone: "manual.example.com"},
@@ -333,39 +387,21 @@ func TestBuildPlatformComponentsValuesUsesSelfSignedForUnsupportedDomain(t *test
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
-	ingress := componentValues(values, "traefik")["platform"].(map[string]any)["traefik"].(map[string]any)["ingress"].(map[string]any)
+	ingress := componentValues(values, "envoy-gateway")["platform"].(map[string]any)["envoyGateway"].(map[string]any)["ingress"].(map[string]any)
 	domains := ingress["domains"].([]map[string]any)
-	if _, ok := domains[0]["issuerRef"]; !ok {
-		t.Fatalf("supported domain does not select ACME: %#v", domains[0])
-	}
-	for _, domain := range domains[1:] {
+	for _, domain := range domains {
 		if _, ok := domain["issuerRef"]; ok {
-			t.Fatalf("unsupported domain unexpectedly selects ACME: %#v", domain)
+			t.Fatalf("gateway domain unexpectedly contains issuer contract: %#v", domain)
 		}
 	}
-	acme := componentValues(values, "platform-certs")["platform"].(map[string]any)["certs"].(map[string]any)["ingress"].(map[string]any)["acme"].(map[string]any)
+	operator := componentValues(values, "podplane-operator")["podplane"].(map[string]any)["operator"].(map[string]any)
+	acme := operator["config"].(map[string]any)["ingressCertificates"].(map[string]any)["acme"].(map[string]any)
 	if got, want := acme["server"], clusterconfig.DefaultACMEServer; got != want {
 		t.Fatalf("default ACME server = %v, want %v", got, want)
 	}
 }
 
-// TestDNSProviderSolverRetainsFutureProviderRendering verifies dormant solver
-// rendering remains available for DNS providers not yet enabled for ACME.
-func TestDNSProviderSolverRetainsFutureProviderRendering(t *testing.T) {
-	cloudflare, _, err := dnsProviderSolver(&clusterconfig.ClusterConfig{}, clusterconfig.DomainProvider{
-		Kind: "cloudflare", SecretName: "cloudflare-dns01",
-	}, "")
-	if err != nil || cloudflare["cloudflare"] == nil {
-		t.Fatalf("Cloudflare solver = %#v, error = %v", cloudflare, err)
-	}
-	google, _, err := dnsProviderSolver(&clusterconfig.ClusterConfig{}, clusterconfig.DomainProvider{
-		Kind: "google-cloud-dns", Project: "example-project",
-	}, "")
-	if err != nil || google["cloudDNS"] == nil {
-		t.Fatalf("Google CloudDNS solver = %#v, error = %v", google, err)
-	}
-}
-
+// TestBuildPlatformComponentsValuesAmbiguousAWSRegion rejects an ambiguous DNS identity.
 func TestBuildPlatformComponentsValuesAmbiguousAWSRegion(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ACME:      &clusterconfig.ACME{Server: "https://acme.example/directory", Email: "ops@example.com"},

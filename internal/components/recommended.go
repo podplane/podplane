@@ -6,12 +6,10 @@ package components
 
 var recommendedAddons = []string{
 	"agent-sandbox",
-	"cert-manager",
-	"platform-certs",
+	"envoy-gateway",
 	"podplane-operator",
 	"secrets-store-csi-driver",
-	"traefik",
-	"trust-manager",
+	"zot-registry",
 }
 
 // RecommendedAddons returns addon components included by the recommended

@@ -10,7 +10,7 @@ Podplane can deploy clusters on AWS, Google Cloud, or Proxmox environments.
 
 Using the Podplane CLI, you can deploy a Podplane cluster in a few minutes.
 
-Every cluster comes with CoreDNS and Cilium CNI built-in. You are also able to select addon components to install like Traefik ingress controller or CSI drivers, either during cluster creation or later using `podplane install`.
+The default `recommended` cluster comes with CoreDNS, Cilium CNI, and commonly used addons such as Envoy Gateway and CSI drivers. You can instead choose `minimal` for only core components or `none` for a bare cluster, and install addons later using `podplane install`.
 
 Deploying a cluster first generates versionable infrastructure-as-code artifacts such as OpenTofu/Terraform `.tf` files for AWS & Google Cloud, which then deploys a cluster into your public or private cloud of choice.
 
@@ -43,7 +43,7 @@ Follow the prompts to specify:
 - Networking configuration e.g. CIDR block for VPC and Subnet(s), provider zone(s).
 - Default CPU architecture.
 - Cluster name.
-- Which components to install (e.g. Traefik, CSI drivers, etc)
+- Which components to install (e.g. Envoy Gateway, CSI drivers, etc)
 
 This will:
 
@@ -77,7 +77,7 @@ podplane deploy web --name hello --image ghcr.io/podplane/hello:latest
 
 This will print a URL you can use to view the hello app.
 
-Note: The `deploy` template may require specific addon components to be installed in the cluster. If they aren't installed, the CLI will prompt you to install them e.g. web apps require Traefik ingress controller.
+Note: The `deploy` template may require specific addon components to be installed in the cluster. If they aren't installed, the CLI will prompt you to install them e.g. web apps require Envoy Gateway.
 
 ## Viewing Logs
 

@@ -6,18 +6,23 @@ package local
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/fatih/color"
 )
 
-// Delete deletes the local cluster VM and cluster data if it is the last VM
+// Delete removes a local cluster VM and its durable and runtime data.
 func (m *Local) Delete() error {
 	fmt.Println("Deleting local VM disk and runtime files...")
 	if err := m.vm.Delete(); err != nil {
 		return err
+	}
+	if err := m.deleteClusterSecrets(); err != nil {
+		return fmt.Errorf("remove local cluster secrets: %w", err)
 	}
 	fmt.Println("Removing local cluster runtime state...")
 	if err := removeState(m.runtimeDir, m.clusterID); err != nil {
@@ -29,6 +34,31 @@ func (m *Local) Delete() error {
 	}
 	color.Green("✓ Local cluster deleted successfully")
 	return nil
+}
+
+// deleteClusterSecrets asks the local server to remove cluster-owned fake
+// Vault data. It starts the shared server temporarily when necessary.
+func (m *Local) deleteClusterSecrets() error {
+	pidFile, err := ServerPIDFile(m.runtimeDir)
+	if err != nil {
+		return err
+	}
+	running, err := pidFile.IsRunning()
+	if err != nil {
+		return err
+	}
+	if !running {
+		if err := m.ServerEnsure(io.Discard); err != nil {
+			return err
+		}
+	}
+	vault := newLocalVaultClient(filepath.Join(m.runtimeDir, localVaultSocketName))
+	deleteErr := vault.DeleteCluster(m.clusterID)
+	if running {
+		return deleteErr
+	}
+	cleanupErr := m.ServerCleanup()
+	return errors.Join(deleteErr, cleanupErr)
 }
 
 // deleteClusterData removes durable local data that belongs only to this

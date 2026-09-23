@@ -21,11 +21,10 @@ type clusterState struct {
 
 // portState is the selected host port set for one local cluster VM.
 type portState struct {
-	SSH              int `json:"ssh"`
-	KubernetesAPI    int `json:"kubernetes_api"`
-	TraefikDashboard int `json:"traefik_dashboard"`
-	Registry         int `json:"registry"`
-	TraefikHTTPS     int `json:"traefik_https"`
+	SSH           int `json:"ssh"`
+	KubernetesAPI int `json:"kubernetes_api"`
+	Registry      int `json:"registry"`
+	IngressHTTPS  int `json:"ingress_https"`
 }
 
 // writeState writes state metadata for one local

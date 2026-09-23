@@ -14,7 +14,9 @@ The user-data script which invokes the `vmconfig` entrypoint is responsible for 
 
 1. `knd` creates a Kubernetes Data Plane / Worker node, which runs kubelet, containerd, and supporting services.
 
-2. `knc` creates a Kubernetes Control Plane node, which is essentially a base of `knd` + adds Netsy (as an etcd alternative), kube-apiserver, kube-scheduler, kube-controller-manager, and a stateless container registry.
+2. `knc` creates a Kubernetes Control Plane node, which is essentially a base of `knd` + adds Netsy (as an etcd alternative), kube-apiserver, kube-scheduler, and kube-controller-manager.
+
+Both VM kinds include an optional node-local Zot registry. It runs when registry storage and a registry hostname are configured.
 
 ## Deployed Clusters
 
@@ -64,7 +66,7 @@ __Control Plane VMs__:
 - [kube-apiserver](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/) the Kubernetes API server
 - [kube-scheduler](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-scheduler/) the Kubernetes scheduler
 - [kube-controller-manager](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-controller-manager/) the core Kubernetes control loops
-- [distribution](https://distribution.github.io/distribution/) the stateless container registry
+- [Zot](https://zotregistry.dev/) the stateless container registry
 
 ## Env Vars & Service Configuration
 

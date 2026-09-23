@@ -31,6 +31,7 @@ import (
 const (
 	localGuestHostAddr     = "10.0.2.2"
 	localServerLogFilename = "local-server.log"
+	localVaultSocketName   = "local-vault.sock"
 )
 
 // localServerCertificateSANs returns all DNS names and IPs that may be used to
@@ -198,9 +199,12 @@ type Server struct {
 	httpServer      *http.Server
 	httpsServer     *http.Server
 	ingressServer   *http.Server
+	vaultServer     *http.Server
 	httpListener    net.Listener
 	httpsListener   net.Listener
 	ingressListener net.Listener
+	vaultListener   net.Listener
+	vaultSocketPath string
 	nstance         *fakeserver.Server
 }
 
@@ -407,6 +411,14 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vault
 	}
 	fakeVault := fakevault.NewHandler(vaultStore, validator.ValidateToken)
 	httpsMux.Handle("/vault/", fakeVault)
+	vaultSocketPath := filepath.Join(c.RuntimeDirectory(), localVaultSocketName)
+	vaultListener, err := localVaultListener(vaultSocketPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create local Vault socket: %w", err)
+	}
+	w.vaultListener = vaultListener
+	w.vaultSocketPath = vaultSocketPath
+	w.vaultServer = &http.Server{Handler: fakevault.NewTrustedHandler(vaultStore)}
 
 	// Create the guest-facing HTTP and HTTPS servers with an app-level peer allowlist.
 	w.httpServer = &http.Server{Handler: localServicePeerAllowlist(httpMux)}
@@ -433,6 +445,11 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vault
 	go func() {
 		if err := w.ingressServer.ServeTLS(w.ingressListener, "", ""); err != nil && err != http.ErrServerClosed {
 			_, _ = fmt.Fprintf(os.Stderr, "Local ingress proxy error: %v\n", err)
+		}
+	}()
+	go func() {
+		if err := w.vaultServer.Serve(w.vaultListener); err != nil && err != http.ErrServerClosed {
+			_, _ = fmt.Fprintf(os.Stderr, "Local Vault socket error: %v\n", err)
 		}
 	}()
 
@@ -499,6 +516,16 @@ func (w *Server) Stop(timeout time.Duration) error {
 	if w.ingressServer != nil {
 		if err := w.ingressServer.Shutdown(ctx); err != nil {
 			return fmt.Errorf("failed to shutdown local ingress proxy: %w", err)
+		}
+	}
+	if w.vaultServer != nil {
+		if err := w.vaultServer.Shutdown(ctx); err != nil {
+			return fmt.Errorf("failed to shutdown local Vault socket: %w", err)
+		}
+	}
+	if w.vaultSocketPath != "" {
+		if err := os.Remove(w.vaultSocketPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove local Vault socket: %w", err)
 		}
 	}
 	if w.nstance != nil {

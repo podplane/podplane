@@ -10,35 +10,32 @@ import (
 )
 
 // fixture builds a small Config used across resolve tests. The shape mirrors
-// the platform-components values.yaml: traefik depends on platform-certs
-// (addon) + traefik-crds + gateway-api-crds; platform-certs depends on
-// cert-manager; cert-manager depends on cert-manager-crds.
+// the platform-components values.yaml: Envoy Gateway depends on its CRDs and
+// the Gateway API CRDs.
 func fixture() *Config {
 	return &Config{
 		Apps: map[string]Entry{
-			"cilium":         {Enabled: true, Core: true, DependsOn: []string{"cilium-crds"}},
-			"cert-manager":   {Enabled: false, DependsOn: []string{"cert-manager-crds"}},
-			"platform-certs": {Enabled: false, DependsOn: []string{"cert-manager"}},
-			"traefik":        {Enabled: false, DependsOn: []string{"platform-certs", "traefik-crds", "gateway-api-crds"}},
-			"snapshot":       {Enabled: true, DependsOn: []string{"snapshot-crds"}},
+			"cilium":        {Enabled: true, Core: true, DependsOn: []string{"cilium-crds"}},
+			"envoy-gateway": {Enabled: false, DependsOn: []string{"envoy-gateway-crds", "gateway-api-crds"}},
+			"snapshot":      {Enabled: true, DependsOn: []string{"snapshot-crds"}},
 		},
 		CRDs: map[string]Entry{
-			"cilium-crds":       {Enabled: true, Core: true},
-			"cert-manager-crds": {Enabled: false},
-			"traefik-crds":      {Enabled: false},
-			"gateway-api-crds":  {Enabled: true, Core: true},
-			"snapshot-crds":     {Enabled: true},
+			"cilium-crds":        {Enabled: true, Core: true},
+			"envoy-gateway-crds": {Enabled: false},
+			"gateway-api-crds":   {Enabled: true, Core: true},
+			"snapshot-crds":      {Enabled: true},
 		},
 	}
 }
 
+// TestResolveEnableTransitive verifies component dependency resolution behavior.
 func TestResolveEnableTransitive(t *testing.T) {
-	got, err := fixture().ResolveEnable("traefik")
+	got, err := fixture().ResolveEnable("envoy-gateway")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantApps := []string{"cert-manager", "platform-certs", "traefik"}
-	wantCRDs := []string{"cert-manager-crds", "traefik-crds"}
+	wantApps := []string{"envoy-gateway"}
+	wantCRDs := []string{"envoy-gateway-crds"}
 	if !reflect.DeepEqual(got.Apps, wantApps) {
 		t.Errorf("apps = %v, want %v", got.Apps, wantApps)
 	}
@@ -47,6 +44,7 @@ func TestResolveEnableTransitive(t *testing.T) {
 	}
 }
 
+// TestResolveEnableAlreadyEnabled verifies component dependency resolution behavior.
 func TestResolveEnableAlreadyEnabled(t *testing.T) {
 	got, err := fixture().ResolveEnable("snapshot")
 	if err != nil {
@@ -57,12 +55,14 @@ func TestResolveEnableAlreadyEnabled(t *testing.T) {
 	}
 }
 
+// TestResolveEnableUnknown verifies component dependency resolution behavior.
 func TestResolveEnableUnknown(t *testing.T) {
 	if _, err := fixture().ResolveEnable("does-not-exist"); err == nil {
 		t.Fatal("expected error for unknown component")
 	}
 }
 
+// TestResolveEnableUnknownDependency verifies component dependency resolution behavior.
 func TestResolveEnableUnknownDependency(t *testing.T) {
 	cfg := &Config{
 		Apps: map[string]Entry{
@@ -74,23 +74,22 @@ func TestResolveEnableUnknownDependency(t *testing.T) {
 	}
 }
 
+// TestEnabledDependents verifies component dependency resolution behavior.
 func TestEnabledDependents(t *testing.T) {
 	cfg := &Config{
 		Apps: map[string]Entry{
-			"cert-manager":   {Enabled: true, DependsOn: []string{"cert-manager-crds"}},
-			"platform-certs": {Enabled: true, DependsOn: []string{"cert-manager"}},
-			"traefik":        {Enabled: false, DependsOn: []string{"platform-certs"}},
+			"envoy-gateway": {Enabled: true, DependsOn: []string{"envoy-gateway-crds"}},
 		},
 		CRDs: map[string]Entry{
-			"cert-manager-crds": {Enabled: true},
+			"envoy-gateway-crds": {Enabled: true},
 		},
 	}
-	got := cfg.EnabledDependents("cert-manager")
-	want := []string{"platform-certs"}
+	got := cfg.EnabledDependents("envoy-gateway-crds")
+	want := []string{"envoy-gateway"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("dependents = %v, want %v", got, want)
 	}
-	if deps := cfg.EnabledDependents("platform-certs"); len(deps) != 0 {
-		t.Errorf("platform-certs dependents = %v, want empty (traefik disabled)", deps)
+	if deps := cfg.EnabledDependents("envoy-gateway"); len(deps) != 0 {
+		t.Errorf("envoy-gateway dependents = %v, want empty", deps)
 	}
 }

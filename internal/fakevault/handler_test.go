@@ -37,6 +37,19 @@ func (s *memoryStore) SetSecret(clusterID, path string, values map[string]string
 	return nil
 }
 
+// CreateSecret stores a fakevault secret only when it does not already exist.
+func (s *memoryStore) CreateSecret(clusterID, path string, values map[string]string) (bool, error) {
+	if s.secrets == nil {
+		s.secrets = map[string]map[string]string{}
+	}
+	key := clusterID + ":" + CleanPath(path)
+	if _, ok := s.secrets[key]; ok {
+		return false, nil
+	}
+	s.secrets[key] = values
+	return true, nil
+}
+
 // GetSecret returns a fakevault secret from memory for handler tests.
 func (s *memoryStore) GetSecret(clusterID, path string) (map[string]string, bool, error) {
 	key := clusterID + ":" + CleanPath(path)
@@ -67,6 +80,18 @@ func (s *memoryStore) DeleteSecret(clusterID, path string) error {
 	key := clusterID + ":" + CleanPath(path)
 	delete(s.secrets, key)
 	delete(s.archived, key)
+	return nil
+}
+
+// DeleteCluster removes all fakevault secrets belonging to clusterID.
+func (s *memoryStore) DeleteCluster(clusterID string) error {
+	for key := range s.secrets {
+		entryClusterID, _, _ := strings.Cut(key, ":")
+		if entryClusterID == clusterID {
+			delete(s.secrets, key)
+			delete(s.archived, key)
+		}
+	}
 	return nil
 }
 
@@ -319,6 +344,70 @@ func TestHandlerAcceptsBaoWriteBody(t *testing.T) {
 	}
 	if readResp.Data.Data["password"] != "secret" {
 		t.Fatalf("password = %q, want secret", readResp.Data.Data["password"])
+	}
+}
+
+// TestTrustedHandlerCreateOnlyWrite verifies KV-v2 cas=0 creates once without
+// a Vault token and cannot overwrite the winning value.
+func TestTrustedHandlerCreateOnlyWrite(t *testing.T) {
+	store := &memoryStore{}
+	handler := NewTrustedHandler(store)
+	path := "/vault/dev/v1/secret/data/dev/workload-ca-key"
+
+	first := httptest.NewRequest(http.MethodPut, path, bytes.NewBufferString(`{"options":{"cas":0},"data":{"value":"first"}}`))
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, first)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first write status = %d, body = %s", firstRec.Code, firstRec.Body.String())
+	}
+
+	second := httptest.NewRequest(http.MethodPut, path, bytes.NewBufferString(`{"options":{"cas":0},"data":{"value":"second"}}`))
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, second)
+	if secondRec.Code != http.StatusBadRequest {
+		t.Fatalf("second write status = %d, want %d", secondRec.Code, http.StatusBadRequest)
+	}
+
+	read := httptest.NewRequest(http.MethodGet, path, nil)
+	readRec := httptest.NewRecorder()
+	handler.ServeHTTP(readRec, read)
+	if readRec.Code != http.StatusOK {
+		t.Fatalf("read status = %d, body = %s", readRec.Code, readRec.Body.String())
+	}
+	var response struct {
+		Data struct {
+			Data map[string]string `json:"data"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(readRec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode read response: %v", err)
+	}
+	if response.Data.Data["value"] != "first" {
+		t.Fatalf("value = %q, want first", response.Data.Data["value"])
+	}
+}
+
+// TestClusterDeleteRequiresTrustedHandler verifies cluster-wide cleanup is not
+// exposed through the VM-facing authenticated handler.
+func TestClusterDeleteRequiresTrustedHandler(t *testing.T) {
+	store := &memoryStore{secrets: map[string]map[string]string{
+		"dev:secret/data/dev/key": {"value": "secret"},
+	}}
+	path := "/vault/dev/v1/sys/podplane/cluster"
+
+	untrustedRec := httptest.NewRecorder()
+	NewHandler(store, nil).ServeHTTP(untrustedRec, httptest.NewRequest(http.MethodDelete, path, nil))
+	if untrustedRec.Code != http.StatusNotFound {
+		t.Fatalf("untrusted delete status = %d, want %d", untrustedRec.Code, http.StatusNotFound)
+	}
+
+	trustedRec := httptest.NewRecorder()
+	NewTrustedHandler(store).ServeHTTP(trustedRec, httptest.NewRequest(http.MethodDelete, path, nil))
+	if trustedRec.Code != http.StatusNoContent {
+		t.Fatalf("trusted delete status = %d, body = %s", trustedRec.Code, trustedRec.Body.String())
+	}
+	if len(store.secrets) != 0 {
+		t.Fatalf("secrets after cluster delete = %#v", store.secrets)
 	}
 }
 

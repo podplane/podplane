@@ -69,9 +69,13 @@ func testClusterOptions() ClusterOptions {
 // contains the expected provider modules and group references.
 func TestGenerateAWSClusterTerraform(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
-		ID:   "test-cluster",
-		Name: "Test Cluster",
-		OIDC: clusterconfig.OIDC{IssuerURL: "https://auth.example.com", SigningAlgs: []string{"RS256", "ES256"}},
+		ID:     "test-cluster",
+		Name:   "Test Cluster",
+		OIDC:   clusterconfig.OIDC{IssuerURL: "https://auth.example.com", SigningAlgs: []string{"RS256", "ES256"}},
+		SPIFFE: clusterconfig.SPIFFE{TrustDomain: "k8s.example.com"},
+		Secrets: clusterconfig.Secrets{DefaultProvider: "aws-secrets-manager", Providers: map[string]clusterconfig.SecretsProvider{
+			"aws-secrets-manager": {Kind: "aws", ObjectType: "secretsmanager"},
+		}},
 		Domains: []clusterconfig.Domain{{
 			Zone:     "example.com",
 			Provider: &clusterconfig.DomainProvider{Kind: "aws-route53"},
@@ -150,6 +154,10 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		`module "network_123456789012_us_east_1"`,
 		`source = "podplane/podplane"`,
 		`resource "podplane_netsy_seed_s3" "cluster"`,
+		`resource "podplane_workload_ca_key" "cluster"`,
+		`provider = "aws_secrets_manager"`,
+		`key_prefix = "test-cluster"`,
+		`depends_on = [podplane_workload_ca_key.cluster, aws_iam_role_policy.podplane_workload_ca_key]`,
 		`cluster_config_path = "${path.module}/podplane.cluster.jsonc"`,
 		`bucket = aws_s3_bucket.podplane_cluster["netsy"].bucket`,
 		`region = local.aws_region`,
@@ -173,6 +181,12 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		`zone_id = module.network_123456789012_us_east_1.load_balancers[each.value.load_balancer].zone_id`,
 		`REGISTRY_ASSUME_ROLE = aws_iam_role.podplane_cluster["registry-read-only"].arn`,
 		`output "registry_read_write_role_arn"`,
+		`secretsmanager:GetSecretValue`,
+		`secret:/test-cluster/workload-ca-key-*`,
+		`sid = "ManagePodplaneIngressCertificates"`,
+		`secretsmanager:CreateSecret`,
+		`secretsmanager:PutSecretValue`,
+		`secret:/test-cluster/platform-cluster/ingress-certificates/*`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("generated cluster tf missing %q:\n%s", want, got)
@@ -193,6 +207,11 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	if strings.Contains(got, "pool_disk_sizes") {
 		t.Fatalf("generated Terraform must not advertise disk sizing as an independent override:\n%s", got)
 	}
+	for _, forbidden := range []string{"PRIVATE KEY", "private_key", "secret_value", "value = podplane_workload_ca_key"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("generated Terraform contains forbidden workload CA material path %q", forbidden)
+		}
+	}
 
 	// ACME adds a dedicated Route53 role and passes runtime-generated values
 	// through the generic Netsy seed values overlay.
@@ -203,16 +222,14 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	}
 	acme := fileContents(acmeFiles)
 	for _, want := range []string{
-		`resource "aws_iam_role" "cert_manager_route53"`,
+		`resource "aws_iam_role" "acme_route53"`,
 		`"route53:ChangeResourceRecordSets"`,
 		`variable = "route53:ChangeResourceRecordSetsRecordTypes"`,
 		`values = ["TXT"]`,
 		`resources = [for zone in data.aws_route53_zone.managed : zone.arn]`,
 		`values_content = yamlencode({`,
-		`"iam.amazonaws.com/allowed-roles" = jsonencode([aws_iam_role.cert_manager_route53[0].arn])`,
-		`"iam.amazonaws.com/role" = aws_iam_role.cert_manager_route53[0].arn`,
-		`solvers = [for name, zone in data.aws_route53_zone.managed : {`,
-		`dnsZones = [name]`,
+		`podplane-operator = {`,
+		`roleARN = aws_iam_role.acme_route53[0].arn`,
 		`hostedZoneID = zone.zone_id`,
 		`region = local.aws_region`,
 	} {
@@ -226,7 +243,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		}
 	}
 	if strings.Contains(acme["podplane.cluster.roles.tf"], "route53:ListResourceRecordSets") {
-		t.Fatal("generated cert-manager policy permits unnecessary Route53 record listing")
+		t.Fatal("generated ACME policy permits unnecessary Route53 record listing")
 	}
 	cfg.Cluster.ACME = nil
 	infra := contents["podplane.cluster.inputs.infra.tf"]
@@ -385,9 +402,13 @@ func TestDNSOutputValues(t *testing.T) {
 // upload an empty Netsy seed snapshot.
 func TestGenerateAWSClusterTerraformWithoutSeed(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
-		ID:         "bare-cluster",
-		Name:       "Bare Cluster",
-		OIDC:       clusterconfig.OIDC{IssuerURL: "https://auth.example.com"},
+		ID:     "bare-cluster",
+		Name:   "Bare Cluster",
+		OIDC:   clusterconfig.OIDC{IssuerURL: "https://auth.example.com"},
+		SPIFFE: clusterconfig.SPIFFE{TrustDomain: "k8s.example.com"},
+		Secrets: clusterconfig.Secrets{DefaultProvider: "aws-ssm", Providers: map[string]clusterconfig.SecretsProvider{
+			"aws-ssm": {Kind: "aws", ObjectType: "ssmparameter"},
+		}},
 		Kubernetes: clusterconfig.Kubernetes{APIHostname: "k8s.example.com"},
 		Pools: map[string]clusterconfig.Pool{
 			"control-plane": {Arch: "arm64", InstanceType: "t4g.medium", Size: 1},
@@ -409,6 +430,46 @@ func TestGenerateAWSClusterTerraformWithoutSeed(t *testing.T) {
 	got := fileContents(files)["podplane.cluster.main.tf"]
 	if strings.Contains(got, `resource "podplane_netsy_seed_s3" "cluster"`) {
 		t.Fatalf("generated cluster tf unexpectedly contains seed resource:\n%s", got)
+	}
+	if !strings.Contains(got, `resource "podplane_workload_ca_key" "cluster"`) || !strings.Contains(got, `provider = "aws_ssm"`) {
+		t.Fatalf("bare cluster must provision the workload CA key:\n%s", got)
+	}
+	roles := fileContents(files)["podplane.cluster.roles.tf"]
+	if !strings.Contains(roles, `actions = ["ssm:GetParameter"]`) || !strings.Contains(roles, `parameter/bare-cluster/workload-ca-key`) {
+		t.Fatalf("bare cluster missing exact SSM plugin grant:\n%s", roles)
+	}
+}
+
+// TestGenerateAWSClusterTerraformUsesSecretsProviderRegionInGrant verifies the generated grant region.
+func TestGenerateAWSClusterTerraformUsesSecretsProviderRegionInGrant(t *testing.T) {
+	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+		ID:     "regional-secrets",
+		OIDC:   clusterconfig.OIDC{IssuerURL: "https://auth.example.com"},
+		SPIFFE: clusterconfig.SPIFFE{TrustDomain: "k8s.example.com"},
+		Secrets: clusterconfig.Secrets{DefaultProvider: "aws-ssm", Providers: map[string]clusterconfig.SecretsProvider{
+			"aws-ssm": {Kind: "aws", ObjectType: "ssmparameter", Region: "us-west-2"},
+		}},
+		Kubernetes: clusterconfig.Kubernetes{APIHostname: "k8s.example.com"},
+		Pools: map[string]clusterconfig.Pool{
+			"control-plane": {Arch: "arm64", InstanceType: "t4g.medium", Size: 1},
+		},
+		Providers: []clusterconfig.Provider{{
+			Kind:    "aws",
+			Account: "123456789012",
+			Region:  "us-east-1",
+			VPC:     clusterconfig.VPC{V4CIDR: "172.18.0.0/16"},
+			Zones: map[string][]clusterconfig.Subnet{
+				"us-east-1a": {{V4CIDR: "172.18.1.0/24", Pool: "control-plane"}},
+			},
+		}},
+	}}
+	files, err := GenerateCluster("podplane.cluster.jsonc", cfg, testClusterOptions())
+	if err != nil {
+		t.Fatalf("GenerateCluster error = %v", err)
+	}
+	roles := fileContents(files)["podplane.cluster.roles.tf"]
+	if !strings.Contains(roles, ":ssm:us-west-2:${local.aws_account_id}:parameter/regional-secrets/workload-ca-key") {
+		t.Fatalf("workload CA grant does not use secrets provider region:\n%s", roles)
 	}
 }
 

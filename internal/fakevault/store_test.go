@@ -8,13 +8,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
+// testKeyring is an in-memory KeyringBackend used by FileStore tests.
 type testKeyring struct {
-	items  map[string][]byte
-	reads  map[string]int
-	writes map[string]int
+	items   map[string][]byte
+	reads   map[string]int
+	writes  map[string]int
+	deletes map[string]int
 }
 
 // KeyringWrite stores a test keyring item in memory.
@@ -38,6 +41,16 @@ func (k *testKeyring) KeyringRead(key string) ([]byte, error) {
 	k.reads[key]++
 	value := k.items[key]
 	return append([]byte{}, value...), nil
+}
+
+// KeyringDelete removes a test keyring item from memory.
+func (k *testKeyring) KeyringDelete(key string) error {
+	if k.deletes == nil {
+		k.deletes = map[string]int{}
+	}
+	delete(k.items, key)
+	k.deletes[key]++
+	return nil
 }
 
 // TestFileStoreSetGetListDeleteSecret verifies encrypted file-backed secret
@@ -123,6 +136,82 @@ func TestFileStoreUsesOneCachedVaultKeyPerCluster(t *testing.T) {
 	}
 	if _, ok := keyring.items[vaultKeyName("other")]; !ok {
 		t.Fatalf("other cluster vault key was not written")
+	}
+}
+
+// TestFileStoreCreateSecretIsAtomic verifies concurrent requests cannot both
+// win create-only secret initialization.
+func TestFileStoreCreateSecretIsAtomic(t *testing.T) {
+	keyring := &testKeyring{}
+	store := NewFileStore(keyring, t.TempDir())
+	start := make(chan struct{})
+	results := make(chan bool, 2)
+	errs := make(chan error, 2)
+	var workers sync.WaitGroup
+	for i := range 2 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			created, err := store.CreateSecret("dev", "secret/data/dev/key", map[string]string{"value": string(rune('a' + i))})
+			results <- created
+			errs <- err
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	close(errs)
+	created := 0
+	for result := range results {
+		if result {
+			created++
+		}
+	}
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("CreateSecret: %v", err)
+		}
+	}
+	if created != 1 {
+		t.Fatalf("created = %d, want 1", created)
+	}
+	if keyring.writes[vaultKeyName("dev")] != 1 {
+		t.Fatalf("vault key writes = %d, want 1", keyring.writes[vaultKeyName("dev")])
+	}
+}
+
+// TestFileStoreDeleteClusterRemovesKey verifies deleting a local cluster
+// removes its files, keyring item, and process-local cached key.
+func TestFileStoreDeleteClusterRemovesKey(t *testing.T) {
+	keyring := &testKeyring{}
+	root := t.TempDir()
+	store := NewFileStore(keyring, root)
+	if err := store.SetSecret("dev", "secret/data/dev/key", map[string]string{"value": "first"}); err != nil {
+		t.Fatalf("SetSecret: %v", err)
+	}
+	if err := store.DeleteCluster("dev"); err != nil {
+		t.Fatalf("DeleteCluster: %v", err)
+	}
+	itemKey := vaultKeyName("dev")
+	if _, ok := keyring.items[itemKey]; ok {
+		t.Fatal("vault key still exists after DeleteCluster")
+	}
+	if keyring.deletes[itemKey] != 1 {
+		t.Fatalf("vault key deletes = %d, want 1", keyring.deletes[itemKey])
+	}
+	if _, err := os.Stat(filepath.Join(root, "dev", "fakevault")); !os.IsNotExist(err) {
+		t.Fatalf("fakevault cluster directory still exists: %v", err)
+	}
+	if err := store.SetSecret("dev", "secret/data/dev/key", map[string]string{"value": "second"}); err != nil {
+		t.Fatalf("SetSecret after DeleteCluster: %v", err)
+	}
+	if keyring.writes[itemKey] != 2 {
+		t.Fatalf("vault key writes after recreation = %d, want 2", keyring.writes[itemKey])
+	}
+	values, ok, err := store.GetSecret("dev", "secret/data/dev/key")
+	if err != nil || !ok || values["value"] != "second" {
+		t.Fatalf("GetSecret after recreation = %#v, %v, %v", values, ok, err)
 	}
 }
 

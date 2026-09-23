@@ -32,6 +32,7 @@ podplane install <component> [flags]
 
 | Flag | Description |
 | --- | --- |
+| `-f, --cluster-config string` | Path to the cluster config file (default: `podplane.cluster.jsonc`; required when enabling `podplane-operator`) |
 | `--context string` | kubeconfig context to use (default: current kubeconfig context) |
 | `--kubeconfig string` | Path to the kubeconfig file |
 | `-y, --auto-approve` | Skip confirmation prompts |

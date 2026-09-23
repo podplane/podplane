@@ -17,7 +17,7 @@
     "cluster": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "oidc", "kubernetes"],
+      "required": ["id", "oidc", "spiffe", "kubernetes"],
       "allOf": [{
         "if": {
           "properties": { "domains": { "minItems": 1 } },
@@ -58,6 +58,7 @@
           "items": { "$ref": "#/$defs/provider" }
         },
         "secrets": { "$ref": "#/$defs/secrets" },
+        "spiffe": { "$ref": "#/$defs/spiffe" },
         "kubernetes": { "$ref": "#/$defs/kubernetes" },
         "seed": { "$ref": "#/$defs/seed" },
         "components": { "$ref": "#/$defs/components" }
@@ -143,9 +144,6 @@
         "region": { "type": "string", "description": "Cloud region for DNS provider API calls when applicable." },
         "hosted_zone_id": { "type": "string", "description": "Optional explicit Route53 hosted zone ID. Use it to disambiguate or pin the exact hosted zone; otherwise, generated Terraform looks up the public hosted zone by domain name." },
         "role_arn": { "type": "string", "description": "IAM role ARN used for DNS automation." },
-        "secret_provider_class_name": { "type": "string", "description": "Kubernetes SecretProviderClass name for DNS credentials." },
-        "secret_name": { "type": "string", "description": "Kubernetes Secret name for DNS credentials." },
-        "secret_key": { "type": "string", "description": "Key within the Kubernetes Secret for DNS credentials." },
         "project": { "type": "string", "description": "Google Cloud project ID." },
         "hosted_zone_name": { "type": "string", "description": "Provider-specific hosted zone name." }
       }
@@ -270,6 +268,20 @@
         "ca_cert": { "type": "string", "description": "Optional PEM CA bundle for the Vault/OpenBao endpoint." },
         "auth_path": { "type": "string", "description": "Vault/OpenBao Kubernetes auth mount path used by the operator. Defaults to auth/kubernetes." },
         "operator_role": { "type": "string", "description": "Vault/OpenBao role used by the operator service account. Defaults to podplane-operator." }
+      }
+    },
+    "spiffe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trust_domain"],
+      "properties": {
+        "trust_domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[a-z0-9._-]+$",
+          "description": "Immutable SPIFFE trust domain. New clusters default this to the initial Kubernetes API hostname; existing clusters must set it explicitly before enabling workload certificates."
+        }
       }
     },
     "vpc": {

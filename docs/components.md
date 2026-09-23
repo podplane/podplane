@@ -14,13 +14,15 @@ The "Containers Layer" of the Podplane [Architecture](architecture.md) is design
 
 During cluster creation, users are given three initial state options to choose from:
 
-1. __Recommended__ - which includes all Core Components + a small selection of commonly used Addon Components such as Traefik ingress controller. The goal is that deployment templates such as "web" do not require any additional Addon Components to be installed.
+1. __Recommended__ - which includes all Core Components + a small selection of commonly used Addon Components such as Envoy Gateway. The goal is that deployment templates such as "web" do not require any additional Addon Components to be installed.
 
 2. __Minimal__ - deploys just the Core Components. From there, users can manually install Components using `podplane install` as required.
 
 3. __None__ - does not install any Podplane Components, meaning you get a bare Kubernetes cluster and Nodes will be `NotReady` until a CNI is installed and they can become `Ready` and able to schedule Pods. For advanced users only.
 
 Components are deployed with an opinionated, tested configuration - not the full surface area of each component's underlying official Helm chart.
+
+The current component charts require Kubernetes 1.37 or later. This is also the minimum version for the stable Pod Certificates and ClusterTrustBundles used by Podplane's workload certificate system.
 
 ### Core Components
 
@@ -29,13 +31,13 @@ Components are deployed with an opinionated, tested configuration - not the full
     - `cilium-crds` for Cilium CNI
 - `fluxcd` for automated Podplane container-layer upgrades
     - `fluxcd-crds` for Flux CD
-- `gateway-api-crds` for any ingress controller using Gateway API, particularly Traefik
+- `gateway-api-crds` for ingress controllers using Gateway API
 - `platform-components` for Podplane component management. This chart creates the Flux source, platform namespaces, and HelmReleases for enabled components.
 - `platform-rbac` for default Podplane platform [RBAC](rbac.md) and admission policies
 
 ### Provider-Specific Components
 
-These components are installed as core components if the cluster infrastructure provider is a match:
+These charts are marked as provider-specific core components and are enabled by cluster bootstrap configuration when required:
 
 - `csi-aws-ebs` for persistent storage on AWS
 - `cluster-api` for the [Cluster API](https://cluster-api.sigs.k8s.io/) core controller on AWS and Google Cloud
@@ -49,18 +51,13 @@ Recommended components which can also be installed via `podplane install` atop t
 
 - `agent-sandbox`: [Agent Sandbox](https://agent-sandbox.sigs.k8s.io/) controller for isolated, stateful singleton workloads such as AI agent runtimes
     - `agent-sandbox-crds`
-- `cert-manager`: [cert-manager](https://cert-manager.io/docs/) and [cert-manager-csi-driver](https://cert-manager.io/docs/usage/csi-driver/)
-    - `cert-manager-crds`
-- `platform-certs` for default self-signed and ACME certificate issuers, CA, certificates, etc. (requires `cert-manager`)
-- `trust-manager`: [trust-manager](https://cert-manager.io/docs/trust/trust-manager/) by the cert-manager project
-    - `trust-manager-crds`
-- `platform-trust` for default trust bundles (requires `trust-manager`)
-- `podplane-operator` for Podplane platform APIs and controllers such as Secrets
+- `podplane-operator` for Podplane platform APIs and controllers. It signs workload and Service certificates, publishes the workload trust bundle, injects that CA into annotated API extension resources, and manages self-signed fallback and optional ACME ingress certificates.
     - `podplane-operator-crds`
-- `secrets-store-csi-driver`: [Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/) for mounting provider-backed secrets into Pods. The recommended set includes the OpenBao provider; other provider-specific components, such as AWS, GCP, and Vault providers, are installed separately based on cluster/provider needs.
+- `secrets-store-csi-driver`: [Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/) for mounting provider-backed secrets into Pods. Provider-specific components are installed separately based on cluster configuration.
     - `secrets-store-csi-driver-crds`
-    - `secrets-store-csi-provider-openbao`
-- `traefik`: [Traefik](https://doc.traefik.io/traefik/) ingress controller
+- `envoy-gateway`: [Envoy Gateway](https://gateway.envoyproxy.io/) ingress controller
+    - `envoy-gateway-crds`
+- `zot-registry` for the in-cluster OCI registry
 
 Addon components which can only be installed via `podplane install`:
 
@@ -82,11 +79,11 @@ The `Recommended` and `Minimal` options each have their own Podplane seed files.
 
 See [Seeds](seeds.md) for how seed files, the seeds manifest, the `seedgen` seed generator utility, and the Terraform provider fit together.
 
-### The Platform Component
+### The Platform Components Chart
 
-A core component called `platform` is a Helm chart that holds all Podplane-related configuration - reserved namespaces, components management, default trust bundles (enabled when trust-manager is installed), etc.
+The core `platform-components` chart is the control point for component installation. It defines the available app and CRD components, their dependencies, namespaces, image-mirror settings, and per-component values.
 
-It acts as the single control point for all component installations. The platform chart's values file is the canonical list of enabled components and their configuration. Flux CD watches the platform chart and reconciles HelmRelease resources for each enabled component:
+Its values are the canonical in-cluster list of enabled components and their configuration. Flux CD watches the chart and reconciles HelmRelease resources for each enabled component:
 
 - `podplane install <component>` updates the platform chart values to enable a component; Flux CD then deploys it.
 - `podplane uninstall <component>` disables a component in the platform chart values; Flux CD removes it.
@@ -121,12 +118,12 @@ This means the CLI doesn't need to bundle or fetch dependency information from t
 Dependency examples:
 
 - Some addon components depend on other addon components (e.g. snapshot requires snapshot-crds).
-- App templates (used by `podplane deploy`) also have component dependencies (e.g. the `web` template requires traefik).
+- App templates (used by `podplane deploy`) also have component dependencies (e.g. the `web` template requires Envoy Gateway).
 
 When running `podplane deploy` or `podplane install`, the CLI checks dependencies and prompts the user to install missing ones.
 
 ### Relationship to Cluster Config
 
-`podplane.cluster.jsonc` is the user-facing projection of cluster configuration, including configuration values like cluster name/slug, and which components and features are enabled.
+`podplane.cluster.jsonc` is the user-facing source for cluster identity, initial seed selection, component source, image-mirror settings, and platform features that affect generated component values.
 
-Conceptually, the cluster config file syncs its component/feature settings into the platform chart's values.
+Initial component enablement comes from the selected seed. Cluster creation interpolates relevant cluster settings into the `platform-components` values, while later `podplane install` and `podplane uninstall` operations update the in-cluster HelmRelease. The cluster is the runtime source of truth for which addons are enabled.

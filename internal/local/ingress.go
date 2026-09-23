@@ -24,7 +24,7 @@ import (
 
 const (
 	localIngressHTTPSPort      = 4433
-	localTraefikHTTPSHostname  = "127.0.0.1"
+	localIngressHTTPSHostname  = "127.0.0.1"
 	localKubernetesAPIHostname = "127.0.0.1"
 )
 
@@ -48,7 +48,7 @@ const (
 type localIngressTargetKind string
 
 const (
-	localIngressTargetTraefik       localIngressTargetKind = "traefik"
+	localIngressTargetApp           localIngressTargetKind = "app-ingress"
 	localIngressTargetKubernetesAPI localIngressTargetKind = "kubernetes-api"
 )
 
@@ -69,7 +69,7 @@ func LocalKubernetesAPIHostname(clusterID string) string {
 // Kubernetes API.
 func IsAppIngressHostname(host string) bool {
 	target, err := localIngressTargetForHost(host)
-	return err == nil && target.kind == localIngressTargetTraefik
+	return err == nil && target.kind == localIngressTargetApp
 }
 
 // LocalIngressClusterID extracts the local cluster ID from a browser-facing
@@ -79,7 +79,7 @@ func LocalIngressClusterID(host string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if target.kind != localIngressTargetTraefik {
+	if target.kind != localIngressTargetApp {
 		return "", fmt.Errorf("local ingress hostname %q is reserved for Kubernetes API routing", host)
 	}
 	return target.clusterID, nil
@@ -139,7 +139,7 @@ func localIngressTargetForHost(host string) (localIngressTarget, error) {
 	if clusterID == "k8s" {
 		return localIngressTarget{}, fmt.Errorf("local ingress TLS hostname %q is reserved for Kubernetes API routing", host)
 	}
-	return localIngressTarget{clusterID: clusterID, kind: localIngressTargetTraefik}, nil
+	return localIngressTarget{clusterID: clusterID, kind: localIngressTargetApp}, nil
 }
 
 // localIngressClusterID extracts the local cluster ID from any valid local
@@ -179,7 +179,7 @@ func (t *upgradeAwareTransport) RoundTrip(r *http.Request) (*http.Response, erro
 }
 
 // localIngressProxy builds the local TLS ingress reverse proxy to either the
-// VM's raw Traefik HTTPS endpoint or the reserved Kubernetes API endpoint.
+// VM's raw ingress HTTPS endpoint or the reserved Kubernetes API endpoint.
 //
 // The returned handler maintains a process-lifetime cache of one warm
 // *httputil.ReverseProxy per (clusterID, ingress kind) so that:
@@ -223,11 +223,11 @@ func localIngressProxy(runtimeDir string) http.Handler {
 		// inside the proxy.
 		proxy.FlushInterval = -1
 		proxy.ErrorHandler = func(rw http.ResponseWriter, r *http.Request, err error) {
-			// Traefik gets a friendly text 502 so a developer hitting an
-			// app URL before Traefik is installed sees an actionable
+			// App ingress gets a friendly text 502 so a developer hitting an
+			// app URL before the gateway is installed sees an actionable
 			// message rather than a Kubernetes-shaped error body.
-			if key.kind == localIngressTargetTraefik {
-				http.Error(rw, fmt.Sprintf("local ingress proxy to %s is unavailable: %v; ensure Traefik is installed and running in the local cluster", targetName, err), http.StatusBadGateway)
+			if key.kind == localIngressTargetApp {
+				http.Error(rw, fmt.Sprintf("local ingress proxy to %s is unavailable: %v; ensure Envoy Gateway is installed and running in the local cluster", targetName, err), http.StatusBadGateway)
 				return
 			}
 			writeKubernetesAPIProxyError(rw, r, err)
@@ -255,7 +255,7 @@ func localIngressProxy(runtimeDir string) http.Handler {
 			http.Error(rw, fmt.Sprintf("local ingress proxy failed to read cluster state: %v", err), http.StatusBadGateway)
 			return
 		}
-		port, targetHost, targetName := state.Ports.TraefikHTTPS, localTraefikHTTPSHostname, "VM Traefik"
+		port, targetHost, targetName := state.Ports.IngressHTTPS, localIngressHTTPSHostname, "VM ingress gateway"
 		if ingressTarget.kind == localIngressTargetKubernetesAPI {
 			port, targetHost, targetName = state.Ports.KubernetesAPI, localKubernetesAPIHostname, "VM Kubernetes API"
 		}
@@ -268,7 +268,7 @@ func localIngressProxy(runtimeDir string) http.Handler {
 }
 
 // newUpstreamTransport returns a transport tuned for proxying many concurrent
-// requests to the local cluster VM Kubernetes API or Traefik.
+// requests to the local cluster VM Kubernetes API or ingress gateway.
 //
 // Ordinary traffic explicitly enables HTTP/2 because Go's net/http package
 // conservatively disables it when a custom TLSClientConfig is supplied. SPDY
@@ -294,7 +294,7 @@ func newUpstreamHTTPTransport(enableHTTP2 bool) *http.Transport {
 		}).DialContext,
 		TLSClientConfig: &tls.Config{
 			//nolint:gosec // upstream is loopback QEMU hostfwd to VM TLS endpoints:
-			// kube-apiserver uses fake Nstance CA; Traefik may use in-cluster/self-signed local certs.
+			// kube-apiserver uses fake Nstance CA; ingress may use in-cluster/self-signed local certs.
 			InsecureSkipVerify: true,
 			NextProtos:         nextProtos,
 		},

@@ -190,6 +190,10 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 		progress.Omitted("vm-image", "VM image")
 		progress.Omitted("cloud-init", "cloud-init user-data")
 	}
+	vault := newLocalVaultClient(filepath.Join(m.runtimeDir, localVaultSocketName))
+	if err := ensureWorkloadCAKey(vault, clusterID, !vmExisted); err != nil {
+		return "", fmt.Errorf("prepare local workload CA key: %w", err)
+	}
 
 	// Existing local clusters keep the seed recorded in cluster.jsonc. Only new
 	// VMs need to resolve the requested seed version from the cached seeds
@@ -697,6 +701,9 @@ func (m *Local) WriteLocalClusterConfig(clusterID, oidcIssuerURL, oidcCACertPath
       "ca_cert": %q,
       "signing_algs": ["RS256"]
     },
+    "spiffe": {
+      "trust_domain": %q
+    },
     "domains": [
       {
         "zone": %q,
@@ -733,7 +740,7 @@ func (m *Local) WriteLocalClusterConfig(clusterID, oidcIssuerURL, oidcCACertPath
     }
   }
 }
-`, clusterID, clusterID, "local-"+clusterID, oidcIssuerURL, clusterID, oidcCACertPath, clusterID+".localhost", registryHostname, vaultAddress, vaultCACert, apiHostname, apiPort, seedBlock, componentsSourceBlock)
+`, clusterID, clusterID, "local-"+clusterID, oidcIssuerURL, clusterID, oidcCACertPath, apiHostname, clusterID+".localhost", registryHostname, vaultAddress, vaultCACert, apiHostname, apiPort, seedBlock, componentsSourceBlock)
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}

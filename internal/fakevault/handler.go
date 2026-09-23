@@ -22,8 +22,15 @@ const methodList = "LIST"
 type handler struct {
 	store     Store
 	validator func(context.Context, string, string, string) error
+	trusted   bool
 	mu        sync.Mutex
 	tokens    map[string]token
+}
+
+// NewTrustedHandler returns a Vault/OpenBao-compatible handler for a
+// user-protected local transport. Requests do not require Vault tokens.
+func NewTrustedHandler(store Store) http.Handler {
+	return &handler{store: store, trusted: true, tokens: make(map[string]token)}
 }
 
 type token struct {
@@ -59,6 +66,10 @@ func (h *handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(apiPath, "/sys/internal/ui/mounts/") {
 		h.serveMount(rw, r)
+		return
+	}
+	if apiPath == "/sys/podplane/cluster" {
+		h.serveClusterDelete(rw, r, clusterID)
 		return
 	}
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
@@ -138,26 +149,25 @@ func (h *handler) serveMount(rw http.ResponseWriter, r *http.Request) {
 
 // serveKV handles the minimal KV-v2 API surface fakevault supports.
 func (h *handler) serveKV(rw http.ResponseWriter, r *http.Request, clusterID, apiPath string) {
-	entry, ok := h.authenticate(r.Header.Get("X-Vault-Token"), clusterID)
+	clusterID, ok := h.authorize(rw, r, clusterID)
 	if !ok {
-		errorResponse(rw, http.StatusForbidden, "permission denied")
 		return
 	}
 
 	if r.Method == methodList || (r.Method == http.MethodGet && r.URL.Query().Get("list") == "true") {
-		h.serveList(rw, entry.ClusterID, apiPath)
+		h.serveList(rw, clusterID, apiPath)
 		return
 	}
 	if r.Method == http.MethodDelete {
-		h.serveDelete(rw, entry.ClusterID, apiPath)
+		h.serveDelete(rw, clusterID, apiPath)
 		return
 	}
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
-		h.serveWrite(rw, r, entry.ClusterID, apiPath)
+		h.serveWrite(rw, r, clusterID, apiPath)
 		return
 	}
 	if r.Method == http.MethodGet {
-		h.serveRead(rw, entry.ClusterID, apiPath)
+		h.serveRead(rw, clusterID, apiPath)
 		return
 	}
 
@@ -208,8 +218,28 @@ func (h *handler) serveWrite(rw http.ResponseWriter, r *http.Request, clusterID,
 		return
 	}
 	data := body
-	if nested, ok := body["data"].(map[string]any); ok {
+	nested, nestedData := body["data"].(map[string]any)
+	if nestedData {
 		data = nested
+	}
+	create := false
+	if rawOptions, hasOptions := body["options"]; hasOptions {
+		options, ok := rawOptions.(map[string]any)
+		if !ok || !nestedData {
+			errorResponse(rw, http.StatusBadRequest, "invalid check-and-set options")
+			return
+		}
+		rawCAS, ok := options["cas"]
+		if !ok {
+			errorResponse(rw, http.StatusBadRequest, "cas is required")
+			return
+		}
+		cas, ok := rawCAS.(float64)
+		if !ok || cas != 0 {
+			errorResponse(rw, http.StatusBadRequest, "only cas=0 is supported")
+			return
+		}
+		create = true
 	}
 	if len(data) == 0 {
 		errorResponse(rw, http.StatusBadRequest, "secret data is required")
@@ -227,15 +257,46 @@ func (h *handler) serveWrite(rw http.ResponseWriter, r *http.Request, clusterID,
 			values[key] = fmt.Sprint(value)
 		}
 	}
-	if err := h.store.SetSecret(clusterID, path, values); err != nil {
-		errorResponse(rw, http.StatusInternalServerError, err.Error())
-		return
+	if create {
+		created, err := h.store.CreateSecret(clusterID, path, values)
+		if err != nil {
+			errorResponse(rw, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !created {
+			errorResponse(rw, http.StatusBadRequest, "check-and-set parameter did not match the current version")
+			return
+		}
+	} else {
+		if err := h.store.SetSecret(clusterID, path, values); err != nil {
+			errorResponse(rw, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	jsonResponse(rw, http.StatusOK, map[string]any{
 		"data": map[string]any{
 			"version": secretVersion(clusterID, path, h.store),
 		},
 	})
+}
+
+// serveClusterDelete removes all fakevault state for a local cluster. It is
+// available only through the trusted local transport.
+func (h *handler) serveClusterDelete(rw http.ResponseWriter, r *http.Request, clusterID string) {
+	if !h.trusted {
+		errorResponse(rw, http.StatusNotFound, "not found")
+		return
+	}
+	if r.Method != http.MethodDelete {
+		rw.Header().Set("Allow", http.MethodDelete)
+		errorResponse(rw, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if err := h.store.DeleteCluster(clusterID); err != nil {
+		errorResponse(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	jsonResponse(rw, http.StatusNoContent, nil)
 }
 
 // serveDelete soft-deletes a KV-v2 data path or permanently deletes metadata.
@@ -334,12 +395,11 @@ func (h *handler) serveMetadata(rw http.ResponseWriter, clusterID, path string) 
 
 // serveUndelete restores an archived KV-v2 data path.
 func (h *handler) serveUndelete(rw http.ResponseWriter, r *http.Request, clusterID, path string) {
-	entry, ok := h.authenticate(r.Header.Get("X-Vault-Token"), clusterID)
+	clusterID, ok := h.authorize(rw, r, clusterID)
 	if !ok {
-		errorResponse(rw, http.StatusForbidden, "permission denied")
 		return
 	}
-	if err := h.store.RestoreSecret(entry.ClusterID, path); err != nil {
+	if err := h.store.RestoreSecret(clusterID, path); err != nil {
 		errorResponse(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -348,16 +408,30 @@ func (h *handler) serveUndelete(rw http.ResponseWriter, r *http.Request, cluster
 
 // serveDestroy permanently deletes a KV-v2 data path.
 func (h *handler) serveDestroy(rw http.ResponseWriter, r *http.Request, clusterID, path string) {
-	entry, ok := h.authenticate(r.Header.Get("X-Vault-Token"), clusterID)
+	clusterID, ok := h.authorize(rw, r, clusterID)
 	if !ok {
-		errorResponse(rw, http.StatusForbidden, "permission denied")
 		return
 	}
-	if err := h.store.DeleteSecret(entry.ClusterID, path); err != nil {
+	if err := h.store.DeleteSecret(clusterID, path); err != nil {
 		errorResponse(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
 	jsonResponse(rw, http.StatusNoContent, nil)
+}
+
+// authorize returns the request's cluster after enforcing token authentication
+// on the VM-facing transport. The trusted local transport relies on its socket
+// permissions instead.
+func (h *handler) authorize(rw http.ResponseWriter, r *http.Request, clusterID string) (string, bool) {
+	if h.trusted {
+		return clusterID, true
+	}
+	entry, ok := h.authenticate(r.Header.Get("X-Vault-Token"), clusterID)
+	if !ok {
+		errorResponse(rw, http.StatusForbidden, "permission denied")
+		return "", false
+	}
+	return entry.ClusterID, true
 }
 
 // secretVersion returns the stored version for path, defaulting to one when unknown.
@@ -472,6 +546,9 @@ func randomToken() (string, error) {
 func jsonResponse(rw http.ResponseWriter, status int, body any) {
 	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(status)
+	if body == nil {
+		return
+	}
 	_ = json.NewEncoder(rw).Encode(body)
 }
 

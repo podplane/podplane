@@ -27,7 +27,7 @@ func TestInterpolatePlatformComponentsMergesValues(t *testing.T) {
 		"platform": map[string]any{
 			"components": map[string]any{
 				"apps": map[string]any{
-					"traefik": map[string]any{"enabled": true},
+					"envoy-gateway": map[string]any{"enabled": true},
 				},
 			},
 		},
@@ -44,7 +44,7 @@ func TestInterpolatePlatformComponentsMergesValues(t *testing.T) {
 	if apps["cilium"] == nil {
 		t.Fatalf("existing app values were not preserved")
 	}
-	if apps["traefik"] == nil {
+	if apps["envoy-gateway"] == nil {
 		t.Fatalf("derived app values were not merged")
 	}
 }
@@ -296,7 +296,7 @@ platform:
       enabled: true
       hostname: first.example.com
     apps:
-      traefik:
+      envoy-gateway:
         enabled: true
 `), 0o600); err != nil {
 		t.Fatalf("write values: %v", err)
@@ -330,7 +330,7 @@ platform:
 		t.Fatalf("mirror.hostname = %v, want %v", got, want)
 	}
 	apps := components["apps"].(map[string]any)
-	if apps["cilium"] == nil || apps["coredns"] == nil || apps["traefik"] == nil {
+	if apps["cilium"] == nil || apps["coredns"] == nil || apps["envoy-gateway"] == nil {
 		t.Fatalf("apps were not merged: %v", apps)
 	}
 }
@@ -348,7 +348,7 @@ func TestWriteSnapshotWritesBytes(t *testing.T) {
 		Components: clusterconfig.Components{Registry: &clusterconfig.ComponentsRegistry{
 			Mirror: clusterconfig.ComponentsRegistryMirror{Enabled: true, Hostname: "dev-registry.local"},
 		}},
-		Secrets: clusterconfig.Secrets{Providers: map[string]clusterconfig.SecretsProvider{
+		Secrets: clusterconfig.Secrets{DefaultProvider: "local-fakevault", Providers: map[string]clusterconfig.SecretsProvider{
 			"local-fakevault": {Kind: "openbao", Address: "https://10.0.2.15:19443/vault/localdev"},
 		}},
 	}}
@@ -395,7 +395,7 @@ func TestWriteSnapshotWritesBytes(t *testing.T) {
 		t.Fatalf("WriteSnapshot wrote no data")
 	}
 
-	// Verify the interpolated values contain our seeded traefik domain.
+	// Verify the interpolated values contain our seeded gateway domain.
 	got, err := datafile.ReadSnapshot(bytes.NewReader(data.Bytes()))
 	if err != nil {
 		t.Fatalf("read built snapshot: %v", err)
@@ -409,8 +409,8 @@ func TestWriteSnapshotWritesBytes(t *testing.T) {
 				t.Fatalf("unmarshal HelmRelease: %v", err)
 			}
 			components := obj["spec"].(map[string]any)["values"].(map[string]any)["platform"].(map[string]any)["components"].(map[string]any)
-			traefik := components["values"].(map[string]any)["traefik"].(map[string]any)
-			zone := traefik["platform"].(map[string]any)["traefik"].(map[string]any)["ingress"].(map[string]any)["domains"].([]any)[0].(map[string]any)["zone"]
+			envoyGateway := components["values"].(map[string]any)["envoy-gateway"].(map[string]any)
+			zone := envoyGateway["platform"].(map[string]any)["envoyGateway"].(map[string]any)["ingress"].(map[string]any)["domains"].([]any)[0].(map[string]any)["apex"]
 			if zone != "local.localhost" {
 				t.Fatalf("seeded ingress zone = %v, want local.localhost", zone)
 			}

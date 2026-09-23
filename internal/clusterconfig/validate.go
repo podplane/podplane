@@ -17,6 +17,22 @@ var clusterIDPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 var secretsProviderNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 var domainLabelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 var awsRegionPattern = regexp.MustCompile(`^[a-z]{2}(?:-[a-z0-9]+)+-[1-9][0-9]*$`)
+var trustDomainPattern = regexp.MustCompile(`^[a-z0-9._-]+$`)
+
+// ValidateTrustDomain validates the SPIFFE trust-domain grammar. It is
+// deliberately narrower than URI host syntax so no normalization is needed.
+func ValidateTrustDomain(domain string) error {
+	if domain == "" {
+		return fmt.Errorf("is required; existing clusters must persist a trust domain before workload certificates can be enabled")
+	}
+	if len(domain) > 255 {
+		return fmt.Errorf("must be at most 255 bytes")
+	}
+	if !trustDomainPattern.MatchString(domain) {
+		return fmt.Errorf("must contain only lowercase ASCII letters, digits, dots, hyphens, and underscores")
+	}
+	return nil
+}
 
 // ValidateDomainName validates a fully qualified DNS name without a trailing
 // dot or wildcard label.
@@ -209,6 +225,26 @@ func ValidateSecrets(secrets Secrets) error {
 	return nil
 }
 
+// ValidateWorkloadCAProvider ensures the default provider can mount a workload
+// CA key for the Podplane operator.
+func ValidateWorkloadCAProvider(secrets Secrets) error {
+	provider, ok := secrets.Providers[secrets.DefaultProvider]
+	if !ok {
+		return fmt.Errorf("default_provider must select a configured AWS, GCP, or OpenBao provider for workload CA provisioning")
+	}
+	if provider.Kind == "aws" && (provider.ObjectType == "secretsmanager" || provider.ObjectType == "ssmparameter") {
+		return nil
+	}
+	if provider.Kind == "gcp" && provider.ProjectID != "" {
+		return nil
+	}
+	if provider.Kind == "openbao" && provider.Address != "" {
+		return nil
+	}
+	return fmt.Errorf("default_provider %q does not support workload CA provisioning; use AWS Secrets Manager, AWS SSM Parameter Store, GCP Secret Manager, or OpenBao", secrets.DefaultProvider)
+}
+
+// validateSecretsProviderName validates a configured secrets provider name.
 func validateSecretsProviderName(prefix, name string) error {
 	if name == "" {
 		return fmt.Errorf("%s is required", prefix)
@@ -233,6 +269,9 @@ func Validate(cfg *ClusterConfig) error {
 	}
 	if err := ValidateDomainName(cfg.Cluster.Kubernetes.APIHostname); err != nil {
 		return fmt.Errorf("cluster.kubernetes.api_hostname: %w", err)
+	}
+	if err := ValidateTrustDomain(cfg.Cluster.SPIFFE.TrustDomain); err != nil {
+		return fmt.Errorf("cluster.spiffe.trust_domain: %w", err)
 	}
 	if port := cfg.Cluster.Kubernetes.APIPort; port < 0 || port > 65535 {
 		return fmt.Errorf("cluster.kubernetes.api_port must be 1-65535 when set")
@@ -354,6 +393,7 @@ func requireListener(provider Provider, loadBalancer string, port, targetPort in
 	return fmt.Errorf("load balancer %q requires listener port %d targeting port %d", loadBalancer, port, targetPort)
 }
 
+// validateProvider validates one infrastructure provider.
 func validateProvider(cfg *ClusterConfig, index int, provider Provider) error {
 	prefix := fmt.Sprintf("cluster.providers[%d]", index)
 	switch provider.Kind {
@@ -463,6 +503,7 @@ func validateProvider(cfg *ClusterConfig, index int, provider Provider) error {
 	return nil
 }
 
+// validateSubnet validates one provider subnet.
 func validateSubnet(cfg *ClusterConfig, prefix string, subnet Subnet) error {
 	if subnet.ID != "" && (subnet.V4CIDR != "" || subnet.V6CIDR != "") {
 		return fmt.Errorf("%s.id cannot be combined with subnet CIDRs", prefix)

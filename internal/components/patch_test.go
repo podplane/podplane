@@ -33,7 +33,7 @@ func TestBuildEnabledPatch(t *testing.T) {
 }
 
 func TestBuildEnabledPatchOnlyApps(t *testing.T) {
-	got := buildEnabledPatch([]string{"traefik"}, nil, false)
+	got := buildEnabledPatch([]string{"envoy-gateway"}, nil, false)
 	components := got["spec"].(map[string]any)["values"].(map[string]any)["platform"].(map[string]any)["components"].(map[string]any)
 	if _, hasCRDs := components["crds"]; hasCRDs {
 		t.Errorf("expected no crds key when no CRDs passed")

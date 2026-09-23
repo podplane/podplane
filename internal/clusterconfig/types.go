@@ -34,9 +34,15 @@ type Cluster struct {
 	Pools      map[string]Pool `json:"pools,omitempty"`
 	Providers  []Provider      `json:"providers,omitempty"`
 	Secrets    Secrets         `json:"secrets,omitempty"`
+	SPIFFE     SPIFFE          `json:"spiffe"`
 	Kubernetes Kubernetes      `json:"kubernetes"`
 	Seed       Seed            `json:"seed,omitempty"`
 	Components Components      `json:"components,omitempty"`
+}
+
+// SPIFFE contains immutable workload identity configuration.
+type SPIFFE struct {
+	TrustDomain string `json:"trust_domain"`
 }
 
 // Registry describes the cluster-level OCI registry endpoint used by node-local
@@ -161,17 +167,14 @@ type Domain struct {
 
 // DomainProvider is the DNS provider for a Domain.
 type DomainProvider struct {
-	Kind                    string `json:"kind"`
-	Account                 string `json:"account,omitempty"`
-	Profile                 string `json:"profile,omitempty"`
-	Region                  string `json:"region,omitempty"`
-	HostedZoneID            string `json:"hosted_zone_id,omitempty"`
-	RoleARN                 string `json:"role_arn,omitempty"`
-	SecretProviderClassName string `json:"secret_provider_class_name,omitempty"`
-	SecretName              string `json:"secret_name,omitempty"`
-	SecretKey               string `json:"secret_key,omitempty"`
-	Project                 string `json:"project,omitempty"`
-	HostedZoneName          string `json:"hosted_zone_name,omitempty"`
+	Kind           string `json:"kind"`
+	Account        string `json:"account,omitempty"`
+	Profile        string `json:"profile,omitempty"`
+	Region         string `json:"region,omitempty"`
+	HostedZoneID   string `json:"hosted_zone_id,omitempty"`
+	RoleARN        string `json:"role_arn,omitempty"`
+	Project        string `json:"project,omitempty"`
+	HostedZoneName string `json:"hosted_zone_name,omitempty"`
 }
 
 // SupportsACME reports whether Podplane currently supports automated ACME

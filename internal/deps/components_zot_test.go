@@ -20,7 +20,7 @@ func TestMirrorRepoFromChartImagePreservesRenderedRepoPath(t *testing.T) {
 		"quay.io/cilium/cilium:v1.16.3@sha256:abc":                   "mirror/quay.io/cilium/cilium",
 		"ghcr.io/fluxcd/source-controller:v1.8.2":                    "mirror/ghcr.io/fluxcd/source-controller",
 		"registry.k8s.io/sig-storage/snapshot-controller@sha256:abc": "mirror/registry.k8s.io/sig-storage/snapshot-controller",
-		"docker.io/traefik:v3.4.3":                                   "mirror/docker.io/traefik",
+		"docker.io/envoyproxy/gateway:v1.5.0":                        "mirror/docker.io/envoyproxy/gateway",
 		"coredns/coredns:1.11.3":                                     "mirror/docker.io/coredns/coredns",
 		"caddy:latest":                                               "mirror/docker.io/library/caddy",
 		"localhost:5000/example/app:tag":                             "mirror/localhost:5000/example/app",
@@ -52,7 +52,7 @@ func TestRegistryHostFromImage(t *testing.T) {
 	tests := map[string]string{
 		"public.ecr.aws/csi-components/csi-attacher:v4.9.0-eksbuild.3": "public.ecr.aws",
 		"quay.io/cilium/cilium:v1.16.3@sha256:abc":                     "quay.io",
-		"docker.io/traefik:v3.4.3":                                     "docker.io",
+		"docker.io/envoyproxy/gateway:v1.5.0":                          "docker.io",
 		"coredns/coredns:1.11.3":                                       "docker.io",
 		"caddy:latest":                                                 "docker.io",
 		"localhost:5000/example/app:tag":                               "localhost:5000",

@@ -145,9 +145,6 @@ func (c *Config) authDeleteKey(key string) error {
 
 	// Remove from keyring (ignore not-found).
 	if err := c.KeyringDelete(keyringPrefix + key); err != nil {
-		// keyringDelete may report "not found" as an error; we tolerate that.
-		// We can't tell easily without backend-specific knowledge, so just
-		// surface the error to the caller for visibility.
 		return fmt.Errorf("delete keyring for %s: %w", key, err)
 	}
 	return nil

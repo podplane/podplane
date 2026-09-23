@@ -31,6 +31,8 @@ podplane deploy web --name hello --image ghcr.io/podplane/hello:latest \
 
 Environment variable names must use Kubernetes-compatible names such as `HELLO_MESSAGE`. These values are stored in the rendered Deployment and Helm release metadata, so use them for non-secret configuration only.
 
+Use `--secret <key>` to bind a key from the cluster's default secrets provider. Repeat the flag for multiple keys. The CLI uses `--name` as the binding name and configures the template to mount the selected keys read-only at `/var/run/podplane/secrets`. Use template-specific `--set secrets[...]` values for advanced bindings, providers, or mount paths.
+
 `--hostname` and `--path` are ergonomic shortcuts for template routing values (`route.hostname` and `route.path`). If the selected template's `values.schema.json` does not support those values, deploy fails before running Helm. Other template-specific values should be configured with Helm-compatible `--set`, for example `--set app.port=8080`. For non-standard external HTTPS ports, set `route.port`, for example `--set route.port=8443`.
 
 Quote values containing Helm list syntax so the shell passes the braces unchanged. For example, the web template accepts a primary app port followed by additional cluster-internal Service ports:
@@ -46,6 +48,7 @@ podplane deploy web --name hello --set 'app.port={8080,8082}'
 | `--name string` | Name of the app deployment (required) |
 | `--image string` | App container image to deploy. If omitted, the template default is used. |
 | `-e, --env stringArray` | Set an environment variable on the app container. Use `KEY=value` or `KEY` to read from the local environment. May be specified multiple times. |
+| `--secret stringArray` | Bind a key from the cluster's default secrets provider. May be specified multiple times; files mount at `/var/run/podplane/secrets`. |
 | `--hostname string` | External hostname for routing, when supported by the template |
 | `--path string` | URL path prefix for routing, when supported by the template |
 | `--set stringArray` | Set a template value using Helm `--set` syntax. May be specified multiple times. |

@@ -219,6 +219,9 @@ func TestGetSeedConfigReadsSavedValue(t *testing.T) {
 	if !strings.Contains(string(raw), wantVaultAddress) {
 		t.Fatalf("cluster config should use stable local Vault forward:\n%s", raw)
 	}
+	if !strings.Contains(string(raw), `"trust_domain": "dev.k8s.localhost"`) {
+		t.Fatalf("cluster config should use the local Kubernetes hostname as its SPIFFE trust domain:\n%s", raw)
+	}
 	if strings.Contains(string(raw), `10.0.2.2`) {
 		t.Fatalf("cluster config should not persist host-side local server addresses:\n%s", raw)
 	}

@@ -31,19 +31,22 @@ Under the hood deploy runs `helm upgrade --install --wait --timeout 2m` by defau
 
 ## `web`
 
-The `web` template deploys a web application with automatic TLS and ingress routing.
+The `web` template deploys a web application with ingress routing and two separate TLS layers. Envoy Gateway terminates browser-facing ingress TLS, while the web Pod uses an operator-signed Service certificate for encrypted gateway-to-workload traffic.
 
-**Component dependencies:** cert-manager, traefik, platform-trust
+**Component dependencies:** podplane-operator, secrets-store-csi-driver, envoy-gateway
+
+The certificate projections require Kubernetes 1.37 or later, where Pod Certificates and ClusterTrustBundles are stable and enabled by default.
 
 ### What You Get
 
-- A Deployment running your container alongside a Caddy sidecar for TLS termination
+- A Deployment running your container alongside an Envoy sidecar for service TLS termination
 - A ClusterIP Service exposing HTTPS (port 443)
-- A Gateway API HTTPRoute attached to the platform's Traefik gateway
-- A cert-manager Certificate for pod-internal mTLS
+- A Gateway API HTTPRoute attached to the platform Envoy Gateway
+- An automatically rotating Kubernetes `podCertificate` for service TLS
 - A BackendTLSPolicy ensuring encrypted gateway-to-service traffic
+- An optional ServiceAccount SPIFFE identity for application-managed mTLS
 
-Your app container serves plain HTTP on port 8080 by default — the Caddy sidecar handles service TLS. Set `certificates.server=direct` when the app should receive the serving certificate and terminate TLS itself. Use `--set app.port=<port>` if your image listens on a different primary port.
+Your app container serves plain HTTP on port 8080 by default — the Envoy sidecar handles service TLS. Set `certificates.server=direct` when the app should receive the serving certificate and terminate TLS itself. Use `--set app.port=<port>` if your image listens on a different primary port.
 
 ### Template values
 
@@ -56,13 +59,31 @@ Template-specific values can be set with `--set` e.g.:
 | Value | Default | Description |
 |---|---|---|
 | `images.app` | `ghcr.io/podplane/hello:latest` | App container image default; `--image` maps here |
-| `images.caddy` | `docker.io/library/caddy:2` | Caddy sidecar image |
+| `images.envoy` | `docker.io/envoyproxy/envoy:distroless-v1.37-latest` | Envoy sidecar image |
 | `app.env` | `{}` | Non-secret environment variables for the app container; `--env` maps here |
 | `app.port` | `8080` | App port, or an array with the primary port first and additional Service ports after it |
 | `route.hostname` | `""` | External hostname for routing; `--hostname` maps here |
 | `route.path` | `/` | URL path prefix for routing; `--path` maps here |
 | `route.port` | `443` | External HTTPS port for the browser-facing route URL |
-| `metrics.http` | `true` | Enable Caddy HTTP metrics |
+| `certificates.server` | `sidecar` | Terminate service TLS in the Envoy `sidecar` or `direct` in the app |
+| `certificates.client` | `false` | Project a ServiceAccount SPIFFE identity and workload trust bundle |
+
+Kubernetes projects the serving key and certificate chain together at
+`/var/run/secrets/podplane/server-certificate/credential-bundle.pem`. The
+Podplane signer authorizes the chart's selecting Service and issues its four
+cluster DNS names. Kubelet projects the certificate directly, without creating
+a Kubernetes TLS Secret. In sidecar mode, Envoy's filesystem SDS watches the
+projected directory and reloads valid rotations without restarting the Pod. In
+direct mode the app reads the same bundle and must reload it after atomic
+rotation.
+
+When `certificates.client=true`, the app receives a separate SPIFFE credential
+at `/var/run/secrets/podplane/client-certificate/credential-bundle.pem` and the
+workload roots at
+`/var/run/secrets/podplane/client-certificate/trust-bundle.pem`. The identity is
+`spiffe://<trust-domain>/ns/<namespace>/sa/<service-account>`. Applications must
+validate the chain and explicitly authorize peer identities; trusting the CA
+alone is not authorization.
 
 To expose additional cluster-internal ports, use quoted Helm list syntax. The first port remains the primary port; later ports target the app directly and cannot use the public Service port 443:
 
@@ -85,31 +106,39 @@ podplane deploy web \
 ```
 External Traffic
   → HTTPRoute (hostname + path matching)
-    → Traefik Gateway
-      → BackendTLSPolicy (verified mTLS)
+    → Envoy Gateway
+      → BackendTLSPolicy (verified backend TLS)
         → Service (:443)
-          → Caddy sidecar (TLS termination, reverse proxy to localhost:<port>)
+          → Envoy sidecar (TLS termination, reverse proxy to localhost:<port>)
             → App container (<port>, plain HTTP)
 ```
 
-The Caddy sidecar mounts a cert-manager-issued TLS certificate and reverse proxies to your app on `127.0.0.1:<port>`. The BackendTLSPolicy verifies the connection from the gateway to the service using the platform's self-signed CA bundle.
+The Envoy sidecar mounts the projected Service certificate and reverse proxies to your app on `127.0.0.1:<port>`. The BackendTLSPolicy verifies the Service hostname against the operator-published Podplane workload ClusterTrustBundle. This is server-authenticated TLS, not mTLS: Envoy Gateway does not present a client certificate to the workload.
 
 ## `worker`
 
-The `worker` template deploys a background worker process with no ingress or TLS.
+The `worker` template deploys a background worker process with no ingress or server TLS.
 
-**Component dependencies:** None
+**Component dependencies:** podplane-operator, Secrets Store CSI Driver
 
 ### What You Get
 
 - A Deployment running your container
-- No Service, no ingress, no TLS - the worker is not externally reachable
+- No Service, ingress, or server TLS—the worker is not externally reachable
+- An optional ServiceAccount SPIFFE identity for application-managed mTLS
 
 This is suitable for queue consumers, cron-like processors, or any workload that initiates its own outbound connections rather than serving HTTP traffic.
 
 ### Template values
 
 Use [`podplane deploy`](./cli-reference/deploy.md) flags for universal inputs such as worker name, optional image override, and environment variables. Worker-specific configuration should be exposed as schema-backed template values and set with `--set`.
+
+Set `certificates.client=true` to project the worker's SPIFFE credential and
+workload trust bundle at
+`/var/run/secrets/podplane/client-certificate/credential-bundle.pem` and
+`/var/run/secrets/podplane/client-certificate/trust-bundle.pem`. The credential
+is generated and rotated by kubelet, is never Secret-backed, and uses the
+worker Pod's explicit ServiceAccount identity.
 
 ### Example
 
@@ -124,11 +153,11 @@ podplane deploy worker \
 
 Every template chart must include `values.schema.json`. The schema is the contract for supported template values and is used by Podplane to validate common ergonomic flags before invoking Helm.
 
-`podplane deploy` keeps a small stable set of universal flags: `--name`, `--image`, `-e` / `--env`, `--namespace`, Kubernetes context flags, and `--auto-approve`. These apply to deploy itself rather than to any one template.
+`podplane deploy` keeps common flags for release name, image and environment overrides, simple secret bindings, routing shortcuts, Helm value overrides, namespace and Kubernetes context selection, readiness waiting, timeout, and approval. These apply to deploy itself rather than to any one template; see the [`deploy` reference](cli-reference/deploy.md) for the complete list.
 
-Template charts must put container image values under `images`. The `--image` flag maps to the app workload image, conventionally `images.app`; template-owned support images use sibling keys such as `images.caddy`. This gives Podplane one predictable place to inspect, prefetch, mirror, or override image references.
+Template charts must put container image values under `images`. The `--image` flag maps to the app workload image, conventionally `images.app`; template-owned support images use sibling keys such as `images.envoy`. This gives Podplane one predictable place to inspect, prefetch, mirror, or override image references.
 
-Template manifests include a flat `templates.images` list, modelled after the components image manifest. Each row records a resolved image for one platform (`image`, `digest`, `size`, `platform`, and optional `index`) plus a `templates` map from template name to the image key under `images`. For example, `"templates": {"web": "caddy"}` means the image is referenced by the web template at `images.caddy`.
+Template manifests include a flat `templates.images` list, modelled after the components image manifest. Each row records a resolved image for one platform (`image`, `digest`, `size`, `platform`, and optional `index`) plus a `templates` map from template name to the image key under `images`. For example, `"templates": {"web": "envoy"}` means the image is referenced by the web template at `images.envoy`.
 
 When the cached cluster summary enables a registry mirror, `podplane deploy` uses this manifest metadata to inject mirrored refs for template image defaults. Explicit user overrides are preserved: `--image` prevents generated mirror injection for `images.app`, and `--set images.<key>=...` prevents generated mirror injection for that image key.
 

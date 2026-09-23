@@ -20,8 +20,8 @@ func TestHealthCriticalPathExpected(t *testing.T) {
 		{Key: "cilium", Required: true, Expected: 30 * time.Second},
 		{Key: "cert-manager", Required: true, DependsOn: []string{"cilium"}, Expected: 30 * time.Second},
 		{Key: "cert-manager-admission", Required: true, DependsOn: []string{"cert-manager"}, Expected: 10 * time.Second},
-		{Key: "traefik", Required: true, DependsOn: []string{"cilium"}, Expected: 20 * time.Second},
-		{Key: "ingress", Required: true, DependsOn: []string{"traefik"}, Expected: 5 * time.Second},
+		{Key: "envoy-gateway", Required: true, DependsOn: []string{"cilium"}, Expected: 20 * time.Second},
+		{Key: "ingress", Required: true, DependsOn: []string{"envoy-gateway"}, Expected: 5 * time.Second},
 	}
 
 	if got, want := healthCriticalPathExpected(checks), 70*time.Second; got != want {
@@ -78,7 +78,7 @@ func TestHealthProgressPollerTimeoutIncludesLastPendingMessage(t *testing.T) {
 			Required: true,
 			Timeout:  time.Nanosecond,
 			Run: func(context.Context) health.Result {
-				return health.Result{Exists: true, Status: health.StatusPending, Message: "waiting for Traefik: HTTP 502"}
+				return health.Result{Exists: true, Status: health.StatusPending, Message: "waiting for Envoy Gateway: HTTP 502"}
 			},
 		},
 	}
@@ -92,7 +92,7 @@ func TestHealthProgressPollerTimeoutIncludesLastPendingMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("second poll succeeded, want timeout")
 	}
-	if !strings.Contains(err.Error(), "waiting for Traefik: HTTP 502") {
+	if !strings.Contains(err.Error(), "waiting for Envoy Gateway: HTTP 502") {
 		t.Fatalf("timeout error = %q, want last pending message", err)
 	}
 }

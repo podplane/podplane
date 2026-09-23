@@ -16,7 +16,7 @@ The goal is to combine infrastructure and security best practices with an intuit
 
 Using the Podplane CLI, you can deploy a Podplane cluster in a few minutes.
 
-Every cluster includes CoreDNS and Cilium CNI out of the box, and you can install addon components like Traefik ingress controller or CSI drivers, either at cluster creation or later with `podplane install`.
+The default `recommended` cluster includes CoreDNS, Cilium CNI, and commonly used addons such as Envoy Gateway and CSI drivers. Choose the `minimal` seed for only core components, or `none` for an unseeded cluster. Addon components can also be installed later with `podplane install`.
 
 Some CLI commands (like `podplane deploy`) require specific components and will guide you to install them if needed.
 

@@ -30,7 +30,7 @@ The selected seed is recorded in `cluster.seed` in the cluster configuration fil
 }
 ```
 
-- `recommended` seeds Core Components plus commonly used addon components such as Traefik.
+- `recommended` seeds Core Components plus commonly used addon components such as Envoy Gateway.
 - `minimal` seeds only the Core Components needed for a usable cluster.
 - An empty `"seed": {}` object represents None, skips seeding entirely, for a bare cluster you must bootstrap manually.
 

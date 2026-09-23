@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+// TestComponentsUnmarshalObject verifies object-form component sources decode.
 func TestComponentsUnmarshalObject(t *testing.T) {
 	var cfg ClusterConfig
 	if err := json.Unmarshal([]byte(`{"cluster":{"components":{"source":{"url":"https://github.com/example/components.git","ref":{"branch":"feature"}}}}}`), &cfg); err != nil {
@@ -23,6 +24,7 @@ func TestComponentsUnmarshalObject(t *testing.T) {
 	}
 }
 
+// TestValidateComponentsRejectsMultipleSourceRefs rejects ambiguous source revisions.
 func TestValidateComponentsRejectsMultipleSourceRefs(t *testing.T) {
 	err := ValidateComponents(Components{Source: &ComponentsSource{Ref: ComponentsSourceRef{Branch: "main", Tag: "v1.0.0"}}})
 	if err == nil {
@@ -30,6 +32,7 @@ func TestValidateComponentsRejectsMultipleSourceRefs(t *testing.T) {
 	}
 }
 
+// TestValidateComponentsRejectsEmptySourceSecretRefName rejects an unnamed source credential.
 func TestValidateComponentsRejectsEmptySourceSecretRefName(t *testing.T) {
 	err := ValidateComponents(Components{Source: &ComponentsSource{URL: "https://github.com/example/components.git", SecretRef: &ComponentsSourceSecretRef{}}})
 	if err == nil {
@@ -51,6 +54,7 @@ func TestValidateACME(t *testing.T) {
 	}
 }
 
+// TestValidateSeedDigest accepts only required SHA-512 seed digests.
 func TestValidateSeedDigest(t *testing.T) {
 	if err := ValidateSeed(Seed{Name: "recommended", Digest: "sha512:" + strings.Repeat("a", 128)}); err != nil {
 		t.Fatalf("ValidateSeed returned error for valid digest: %v", err)
@@ -63,6 +67,7 @@ func TestValidateSeedDigest(t *testing.T) {
 	}
 }
 
+// TestValidateClusterID covers valid, malformed, and reserved cluster IDs.
 func TestValidateClusterID(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -95,6 +100,39 @@ func TestValidateClusterID(t *testing.T) {
 				t.Fatalf("ValidateClusterID(%q) error = %v, expectErr %v", tt.id, err, tt.expectErr)
 			}
 		})
+	}
+}
+
+// TestValidateTrustDomain covers the supported SPIFFE trust-domain syntax.
+func TestValidateTrustDomain(t *testing.T) {
+	for _, domain := range []string{"k8s.example.com", "mesh_test-1"} {
+		if err := ValidateTrustDomain(domain); err != nil {
+			t.Errorf("ValidateTrustDomain(%q) returned error: %v", domain, err)
+		}
+	}
+	for _, domain := range []string{"", "https://example.com", "Example.com", "example.com:443", strings.Repeat("a", 256)} {
+		if err := ValidateTrustDomain(domain); err == nil {
+			t.Errorf("ValidateTrustDomain(%q) returned nil, want error", domain)
+		}
+	}
+}
+
+// TestValidateWorkloadCAProvider accepts providers that can mount a workload CA key.
+func TestValidateWorkloadCAProvider(t *testing.T) {
+	for _, provider := range []SecretsProvider{
+		{Kind: "aws", ObjectType: "secretsmanager"},
+		{Kind: "aws", ObjectType: "ssmparameter"},
+		{Kind: "gcp", ProjectID: "example-project"},
+		{Kind: "openbao", Address: "https://openbao.example"},
+	} {
+		secrets := Secrets{DefaultProvider: "default", Providers: map[string]SecretsProvider{"default": provider}}
+		if err := ValidateWorkloadCAProvider(secrets); err != nil {
+			t.Errorf("ValidateWorkloadCAProvider(%+v) returned error: %v", provider, err)
+		}
+	}
+	secrets := Secrets{DefaultProvider: "default", Providers: map[string]SecretsProvider{"default": {Kind: "openbao"}}}
+	if err := ValidateWorkloadCAProvider(secrets); err == nil {
+		t.Fatal("ValidateWorkloadCAProvider accepted OpenBao without an address")
 	}
 }
 
@@ -303,6 +341,7 @@ func validManagedConfig() *ClusterConfig {
 	return &ClusterConfig{Cluster: Cluster{
 		ID:       "example",
 		OIDC:     OIDC{IssuerURL: "https://auth.example.com"},
+		SPIFFE:   SPIFFE{TrustDomain: "k8s.example.com"},
 		Domains:  []Domain{{Zone: "example.com", Provider: &DomainProvider{Kind: "aws-route53"}}},
 		Registry: Registry{Hostname: "registry.example.com"},
 		Kubernetes: Kubernetes{

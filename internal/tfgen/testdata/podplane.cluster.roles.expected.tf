@@ -75,3 +75,23 @@ resource "aws_iam_role_policy" "podplane_knc" {
   role = module.account_123456789012_us_east_1.agent_iam_role_name
   policy = data.aws_iam_policy_document.podplane_knc.json
 }
+
+data "aws_iam_policy_document" "podplane_workload_ca_key" {
+  statement {
+    sid = "ReadPodplaneWorkloadCAKey"
+    actions = ["secretsmanager:GetSecretValue"]
+    resources = ["arn:${data.aws_partition.current.partition}:secretsmanager:${local.aws_region}:${local.aws_account_id}:secret:/test-cluster/workload-ca-key-*"]
+  }
+
+  statement {
+    sid = "ManagePodplaneIngressCertificates"
+    actions = ["secretsmanager:CreateSecret", "secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue"]
+    resources = ["arn:${data.aws_partition.current.partition}:secretsmanager:${local.aws_region}:${local.aws_account_id}:secret:/test-cluster/platform-cluster/ingress-certificates/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "podplane_workload_ca_key" {
+  name = "${local.name_prefix}-workload-ca-key"
+  role = module.account_123456789012_us_east_1.agent_iam_role_name
+  policy = data.aws_iam_policy_document.podplane_workload_ca_key.json
+}

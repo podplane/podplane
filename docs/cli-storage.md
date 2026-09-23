@@ -85,6 +85,7 @@ The `XDG_*` environment variables can be used on any operating system to move Po
 - **Local fake OIDC signing key**: part of the durable local cluster environment. Deleting it changes local issuer signing identity and can invalidate local auth assumptions/tokens. Not cache or runtime.
 - **QEMU VM disk images**: durable local cluster data. Deleting them destroys the local VM contents.
 - **Fake S3 object storage**: durable local service/application data visible to the local cluster. Deleting it loses local object-storage state such as the default `<cluster-id>-netsy` and `<cluster-id>-telemetry` buckets. The special `registry` bucket is backed by the component image cache instead, so it can be recreated by downloading dependencies again.
+- **Encrypted fake Vault data**: secrets used by a local cluster, including its workload CA private key. Each cluster's files are encrypted with a key held in the OS keyring (or encrypted file-backed keyring). `podplane local delete` removes both the encrypted files and that cluster's keyring key.
 
 ### Runtime Files
 
