@@ -53,8 +53,9 @@ const (
 )
 
 type localIngressTarget struct {
-	clusterID string
-	kind      localIngressTargetKind
+	clusterID  string
+	kind       localIngressTargetKind
+	serverName string
 }
 
 // LocalKubernetesAPIHostname returns the reserved host routed by the local
@@ -122,7 +123,7 @@ func localIngressTargetForHost(host string) (localIngressTarget, error) {
 		if clusterID == "" || strings.Contains(clusterID, ".") {
 			return localIngressTarget{}, fmt.Errorf("local Kubernetes API hostname %q must be <cluster-id>.k8s.localhost", host)
 		}
-		return localIngressTarget{clusterID: clusterID, kind: localIngressTargetKubernetesAPI}, nil
+		return localIngressTarget{clusterID: clusterID, kind: localIngressTargetKubernetesAPI, serverName: host}, nil
 	}
 	if !strings.HasSuffix(host, ".localhost") {
 		return localIngressTarget{}, fmt.Errorf("local ingress TLS hostname %q is not under .localhost", host)
@@ -139,7 +140,7 @@ func localIngressTargetForHost(host string) (localIngressTarget, error) {
 	if clusterID == "k8s" {
 		return localIngressTarget{}, fmt.Errorf("local ingress TLS hostname %q is reserved for Kubernetes API routing", host)
 	}
-	return localIngressTarget{clusterID: clusterID, kind: localIngressTargetApp}, nil
+	return localIngressTarget{clusterID: clusterID, kind: localIngressTargetApp, serverName: host}, nil
 }
 
 // localIngressClusterID extracts the local cluster ID from any valid local
@@ -182,7 +183,7 @@ func (t *upgradeAwareTransport) RoundTrip(r *http.Request) (*http.Response, erro
 // VM's raw ingress HTTPS endpoint or the reserved Kubernetes API endpoint.
 //
 // The returned handler maintains a process-lifetime cache of one warm
-// *httputil.ReverseProxy per (clusterID, ingress kind) so that:
+// *httputil.ReverseProxy per (clusterID, ingress kind, server name) so that:
 //   - bursts of concurrent requests to the same backend share a connection
 //     pool instead of repeatedly paying TLS handshake + slow-start costs;
 //   - HTTP/2 is negotiated to the backend, multiplexing burst requests over a
@@ -217,7 +218,7 @@ func localIngressProxy(runtimeDir string) http.Handler {
 		}
 		u := &url.URL{Scheme: "https", Host: target}
 		proxy := httputil.NewSingleHostReverseProxy(u)
-		proxy.Transport = newUpstreamTransport()
+		proxy.Transport = newUpstreamTransport(key.serverName)
 		// Flush each upstream write immediately so streaming endpoints
 		// (kube-apiserver watches, `kubectl logs -f`) don't get buffered
 		// inside the proxy.
@@ -274,14 +275,14 @@ func localIngressProxy(runtimeDir string) http.Handler {
 // conservatively disables it when a custom TLSClientConfig is supplied. SPDY
 // upgrades use a separate HTTP/1.1 transport. HTTP/2 multiplexing remains the
 // key robustness lever for bursts such as helm's parallel CRD applies.
-func newUpstreamTransport() http.RoundTripper {
+func newUpstreamTransport(serverName string) http.RoundTripper {
 	return &upgradeAwareTransport{
-		http2: newUpstreamHTTPTransport(true),
-		http1: newUpstreamHTTPTransport(false),
+		http2: newUpstreamHTTPTransport(serverName, true),
+		http1: newUpstreamHTTPTransport(serverName, false),
 	}
 }
 
-func newUpstreamHTTPTransport(enableHTTP2 bool) *http.Transport {
+func newUpstreamHTTPTransport(serverName string, enableHTTP2 bool) *http.Transport {
 	nextProtos := []string{"http/1.1"}
 	if enableHTTP2 {
 		nextProtos = []string{"h2", "http/1.1"}
@@ -296,6 +297,7 @@ func newUpstreamHTTPTransport(enableHTTP2 bool) *http.Transport {
 			//nolint:gosec // upstream is loopback QEMU hostfwd to VM TLS endpoints:
 			// kube-apiserver uses fake Nstance CA; ingress may use in-cluster/self-signed local certs.
 			InsecureSkipVerify: true,
+			ServerName:         serverName,
 			NextProtos:         nextProtos,
 		},
 		ForceAttemptHTTP2:     enableHTTP2,

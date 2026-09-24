@@ -165,6 +165,37 @@ func TestLocalIngressProxyRoutesKubernetesAPIByTLSServerName(t *testing.T) {
 	}
 }
 
+func TestLocalIngressProxyForwardsAppTLSServerName(t *testing.T) {
+	serverNames := make(chan string, 1)
+	backend := httptest.NewUnstartedServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.WriteHeader(http.StatusNoContent)
+	}))
+	backend.TLS = &tls.Config{
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			serverNames <- hello.ServerName
+			return nil, nil
+		},
+	}
+	backend.StartTLS()
+	t.Cleanup(backend.Close)
+
+	runtimeDir := t.TempDir()
+	writeDevState(t, runtimeDir, 0, backendPort(t, backend))
+	r := httptest.NewRequest(http.MethodGet, "https://hello.dev.localhost/", nil)
+	r.Host = "hello.dev.localhost"
+	r.TLS = &tls.ConnectionState{ServerName: "hello.dev.localhost"}
+	w := httptest.NewRecorder()
+
+	localIngressProxy(runtimeDir).ServeHTTP(w, r)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusNoContent, w.Body.String())
+	}
+	if got := <-serverNames; got != "hello.dev.localhost" {
+		t.Fatalf("upstream TLS server name = %q, want hello.dev.localhost", got)
+	}
+}
+
 func TestLocalIngressProxyShowsPlaceholderForMissingClusterState(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "https://hello.localhost:4433/", nil)
 	w := httptest.NewRecorder()
