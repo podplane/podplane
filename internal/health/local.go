@@ -55,11 +55,35 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 				},
 			},
 			{
-				Key:       "envoy-gateway",
-				Name:      "Envoy Gateway",
-				Kind:      "deployment",
+				Key:       "secrets-store-csi-driver",
+				Name:      "secrets-store-csi-driver",
+				Kind:      "daemonsets",
 				Required:  true,
 				DependsOn: []string{"cilium"},
+				Expected:  20 * time.Second,
+				Timeout:   3 * time.Minute,
+				Run: func(ctx context.Context) Result {
+					return readSecretsStoreCSI(ctx, opts.KubeContext, opts.Kubeconfig)
+				},
+			},
+			{
+				Key:       "podplane-operator",
+				Name:      "podplane-operator",
+				Kind:      "deployment",
+				Required:  true,
+				DependsOn: []string{"secrets-store-csi-driver"},
+				Expected:  15 * time.Second,
+				Timeout:   3 * time.Minute,
+				Run: func(ctx context.Context) Result {
+					return readWorkload(ctx, opts.KubeContext, opts.Kubeconfig, "platform-podplane-operator", "deployment", "platform-podplane-operator")
+				},
+			},
+			{
+				Key:       "envoy-gateway",
+				Name:      "envoy-gateway",
+				Kind:      "deployment",
+				Required:  true,
+				DependsOn: []string{"podplane-operator"},
 				Expected:  20 * time.Second,
 				Timeout:   3 * time.Minute,
 				Run: func(ctx context.Context) Result {
@@ -84,8 +108,22 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 	}
 }
 
+// readSecretsStoreCSI reports ready only when both the CSI driver and the
+// OpenBao provider DaemonSets are ready.
+func readSecretsStoreCSI(ctx context.Context, kubeContext, kubeconfig string) Result {
+	driver := readWorkload(ctx, kubeContext, kubeconfig, "platform-secrets-store-csi-driver", "daemonset", "platform-secrets-store-csi-driver")
+	if !driver.Ready {
+		return driver
+	}
+	provider := readWorkload(ctx, kubeContext, kubeconfig, "platform-secrets-store-csi-provider-openbao", "daemonset", "platform-secrets-store-csi-provider-openbao-csi-provider")
+	if !provider.Ready {
+		return provider
+	}
+	return Result{Exists: true, Ready: true, Status: StatusReady, Message: "driver and OpenBao provider ready"}
+}
+
 // LocalIngressProxyCheck verifies that the local ingress URL is reachable after
-// Envoy Gateway is expected to be running. Any HTTP response proves the proxy path is
+// envoy-gateway is expected to be running. Any HTTP response proves the proxy path is
 // accepting browser traffic; connection failures keep the check pending.
 func LocalIngressProxyCheck(localIngressURL func() (string, error), required bool) Check {
 	return Check{
@@ -128,11 +166,11 @@ func checkLocalIngressProxy(ctx context.Context, localIngressURL func() (string,
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return Result{Exists: true, Status: StatusPending, Message: fmt.Sprintf("waiting for Envoy Gateway via %s: %v", url, err)}
+		return Result{Exists: true, Status: StatusPending, Message: fmt.Sprintf("waiting for envoy-gateway via %s: %v", url, err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
-		return Result{Exists: true, Status: StatusPending, Message: fmt.Sprintf("waiting for Envoy Gateway via %s: HTTP %d", url, resp.StatusCode)}
+		return Result{Exists: true, Status: StatusPending, Message: fmt.Sprintf("waiting for envoy-gateway via %s: HTTP %d", url, resp.StatusCode)}
 	}
 	return Result{Exists: true, Ready: true, Status: StatusReady, Message: fmt.Sprintf("%s returned HTTP %d", url, resp.StatusCode)}
 }

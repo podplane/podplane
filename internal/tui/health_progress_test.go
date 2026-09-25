@@ -78,7 +78,7 @@ func TestHealthProgressPollerTimeoutIncludesLastPendingMessage(t *testing.T) {
 			Required: true,
 			Timeout:  time.Nanosecond,
 			Run: func(context.Context) health.Result {
-				return health.Result{Exists: true, Status: health.StatusPending, Message: "waiting for Envoy Gateway: HTTP 502"}
+				return health.Result{Exists: true, Status: health.StatusPending, Message: "waiting for envoy-gateway: HTTP 502"}
 			},
 		},
 	}
@@ -92,7 +92,7 @@ func TestHealthProgressPollerTimeoutIncludesLastPendingMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("second poll succeeded, want timeout")
 	}
-	if !strings.Contains(err.Error(), "waiting for Envoy Gateway: HTTP 502") {
+	if !strings.Contains(err.Error(), "waiting for envoy-gateway: HTTP 502") {
 		t.Fatalf("timeout error = %q, want last pending message", err)
 	}
 }
