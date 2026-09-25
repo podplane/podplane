@@ -84,6 +84,10 @@ func WriteSnapshot(w io.Writer, opts SnapshotOptions) error {
 	if err := interpolatePlatformComponents(records, values); err != nil {
 		return err
 	}
+	records, err = interpolateEnvoyIngress(records, cluster)
+	if err != nil {
+		return err
+	}
 	if err := interpolateComponentsSource(records, cluster.Cluster.Components.Source); err != nil {
 		return err
 	}
