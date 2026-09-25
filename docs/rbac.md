@@ -42,4 +42,4 @@ beginning with `trusted:`.
 
 ## Implementation
 
-The `platform-rbac` [component](./components.md) installs the default `ClusterRoleBinding` resources and admission policies. Kubernetes remains the authorization source for API access; Podplane only standardises the group names and default bindings.
+The `platform-rbac` [component](reference/components.md) installs the default `ClusterRoleBinding` resources and admission policies. Kubernetes remains the authorization source for API access; Podplane only standardises the group names and default bindings.

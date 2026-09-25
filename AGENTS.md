@@ -20,7 +20,7 @@
 ## CLI Command & Flag Conventions
 
 Keep command behavior aligned with the command context model documented in
-[`docs/cli-overview.md#config-files--context`](docs/cli-overview.md#config-files--context).
+[`docs/reference/cli/overview.md#config-files--context`](docs/reference/cli/overview.md#config-files--context).
 
 - **Cluster config commands** use `-f, --cluster-config`, defaulting to `./podplane.cluster.jsonc`: `login`, `cluster *`, `install`, `uninstall`.
 - **OIDC server config commands** use `-f, --oidc-config`, defaulting to `./podplane.oidc.jsonc`: `oidc *`.
