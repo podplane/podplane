@@ -39,6 +39,7 @@ type Secret struct {
 type Store interface {
 	SetSecret(clusterID, path string, values map[string]string) error
 	CreateSecret(clusterID, path string, values map[string]string) (bool, error)
+	CompareAndSetSecret(clusterID, path string, version int, values map[string]string) (bool, error)
 	GetSecret(clusterID, path string) (map[string]string, bool, error)
 	ArchiveSecret(clusterID, path string) error
 	RestoreSecret(clusterID, path string) error
@@ -92,7 +93,7 @@ func NewFileStore(backend KeyringBackend, root string) *FileStore {
 func (s *FileStore) SetSecret(clusterID, path string, values map[string]string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.setSecret(clusterID, path, values, false)
+	_, err := s.setSecret(clusterID, path, values, nil)
 	return err
 }
 
@@ -101,12 +102,22 @@ func (s *FileStore) SetSecret(clusterID, path string, values map[string]string) 
 func (s *FileStore) CreateSecret(clusterID, path string, values map[string]string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.setSecret(clusterID, path, values, true)
+	version := 0
+	return s.setSecret(clusterID, path, values, &version)
 }
 
-// setSecret encrypts and atomically writes one fakevault secret. The caller
-// must hold s.mu.
-func (s *FileStore) setSecret(clusterID, path string, values map[string]string, create bool) (bool, error) {
+// CompareAndSetSecret writes a fakevault secret only when version matches the
+// current version. It reports whether the version matched.
+func (s *FileStore) CompareAndSetSecret(clusterID, path string, version int, values map[string]string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.setSecret(clusterID, path, values, &version)
+}
+
+// setSecret encrypts and atomically writes one fakevault secret. When version
+// is non-nil, the write proceeds only if it matches the current version. The
+// caller must hold s.mu.
+func (s *FileStore) setSecret(clusterID, path string, values map[string]string, version *int) (bool, error) {
 	clusterID, path, err := cleanClusterPath(clusterID, path)
 	if err != nil {
 		return false, err
@@ -122,7 +133,14 @@ func (s *FileStore) setSecret(clusterID, path string, values map[string]string, 
 	if err != nil {
 		return false, err
 	}
-	if create && ok {
+	currentVersion := 0
+	if ok {
+		currentVersion = current.Version
+		if currentVersion <= 0 {
+			currentVersion = 1
+		}
+	}
+	if version != nil && *version != currentVersion {
 		return false, nil
 	}
 	key, err := s.vaultKey(clusterID)
@@ -141,12 +159,12 @@ func (s *FileStore) setSecret(clusterID, path string, values map[string]string, 
 	if err != nil {
 		return false, fmt.Errorf("create fakevault AEAD: %w", err)
 	}
-	version := 1
-	if ok && current.Version > 0 {
-		version = current.Version + 1
+	nextVersion := 1
+	if ok {
+		nextVersion = currentVersion + 1
 	}
 	file := secretFile{
-		Version:    version,
+		Version:    nextVersion,
 		Algorithm:  "aes-256-gcm",
 		Nonce:      base64.StdEncoding.EncodeToString(nonce),
 		Ciphertext: base64.StdEncoding.EncodeToString(aead.Seal(nil, nonce, data, []byte(path))),

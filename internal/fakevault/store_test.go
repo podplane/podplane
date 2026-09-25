@@ -181,6 +181,32 @@ func TestFileStoreCreateSecretIsAtomic(t *testing.T) {
 	}
 }
 
+// TestFileStoreCompareAndSetSecret verifies only the current version can be
+// updated and that a rejected stale write leaves the winning value unchanged.
+func TestFileStoreCompareAndSetSecret(t *testing.T) {
+	store := NewFileStore(&testKeyring{}, t.TempDir())
+	path := "secret/data/apps/app/api-key"
+	if err := store.SetSecret("dev", path, map[string]string{"value": "first"}); err != nil {
+		t.Fatalf("SetSecret: %v", err)
+	}
+	matched, err := store.CompareAndSetSecret("dev", path, 1, map[string]string{"value": "second"})
+	if err != nil || !matched {
+		t.Fatalf("CompareAndSetSecret current = %v, %v; want true, nil", matched, err)
+	}
+	matched, err = store.CompareAndSetSecret("dev", path, 1, map[string]string{"value": "stale"})
+	if err != nil || matched {
+		t.Fatalf("CompareAndSetSecret stale = %v, %v; want false, nil", matched, err)
+	}
+	values, ok, err := store.GetSecret("dev", path)
+	if err != nil || !ok || values["value"] != "second" {
+		t.Fatalf("GetSecret after stale write = %#v, %v, %v", values, ok, err)
+	}
+	secrets, err := store.ListSecrets("dev")
+	if err != nil || len(secrets) != 1 || secrets[0].Version != 2 {
+		t.Fatalf("ListSecrets after update = %#v, %v", secrets, err)
+	}
+}
+
 // TestFileStoreDeleteClusterRemovesKey verifies deleting a local cluster
 // removes its files, keyring item, and process-local cached key.
 func TestFileStoreDeleteClusterRemovesKey(t *testing.T) {

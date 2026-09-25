@@ -19,6 +19,7 @@ import (
 type memoryStore struct {
 	secrets  map[string]map[string]string
 	archived map[string]bool
+	versions map[string]int
 }
 
 // rejectToken always rejects login JWTs for handler tests.
@@ -31,8 +32,12 @@ func (s *memoryStore) SetSecret(clusterID, path string, values map[string]string
 	if s.secrets == nil {
 		s.secrets = map[string]map[string]string{}
 	}
+	if s.versions == nil {
+		s.versions = map[string]int{}
+	}
 	key := clusterID + ":" + CleanPath(path)
 	s.secrets[key] = values
+	s.versions[key]++
 	delete(s.archived, key)
 	return nil
 }
@@ -47,6 +52,32 @@ func (s *memoryStore) CreateSecret(clusterID, path string, values map[string]str
 		return false, nil
 	}
 	s.secrets[key] = values
+	if s.versions == nil {
+		s.versions = map[string]int{}
+	}
+	s.versions[key] = 1
+	return true, nil
+}
+
+// CompareAndSetSecret stores a fakevault secret when version matches.
+func (s *memoryStore) CompareAndSetSecret(clusterID, path string, version int, values map[string]string) (bool, error) {
+	key := clusterID + ":" + CleanPath(path)
+	if _, ok := s.secrets[key]; !ok {
+		return false, nil
+	}
+	currentVersion := s.versions[key]
+	if currentVersion == 0 {
+		currentVersion = 1
+	}
+	if currentVersion != version {
+		return false, nil
+	}
+	if s.versions == nil {
+		s.versions = map[string]int{}
+	}
+	s.secrets[key] = values
+	s.versions[key] = currentVersion + 1
+	delete(s.archived, key)
 	return true, nil
 }
 
@@ -80,6 +111,7 @@ func (s *memoryStore) DeleteSecret(clusterID, path string) error {
 	key := clusterID + ":" + CleanPath(path)
 	delete(s.secrets, key)
 	delete(s.archived, key)
+	delete(s.versions, key)
 	return nil
 }
 
@@ -90,6 +122,7 @@ func (s *memoryStore) DeleteCluster(clusterID string) error {
 		if entryClusterID == clusterID {
 			delete(s.secrets, key)
 			delete(s.archived, key)
+			delete(s.versions, key)
 		}
 	}
 	return nil
@@ -103,7 +136,11 @@ func (s *memoryStore) ListSecrets(clusterID string) ([]Secret, error) {
 		if !ok || entryClusterID != clusterID {
 			continue
 		}
-		secrets = append(secrets, Secret{Path: path, Keys: sortedKeys(values), Archived: s.archived[key], Version: 1})
+		version := s.versions[key]
+		if version == 0 {
+			version = 1
+		}
+		secrets = append(secrets, Secret{Path: path, Keys: sortedKeys(values), Archived: s.archived[key], Version: version})
 	}
 	sort.Slice(secrets, func(i, j int) bool { return secrets[i].Path < secrets[j].Path })
 	return secrets, nil
@@ -384,6 +421,50 @@ func TestTrustedHandlerCreateOnlyWrite(t *testing.T) {
 	}
 	if response.Data.Data["value"] != "first" {
 		t.Fatalf("value = %q, want first", response.Data.Data["value"])
+	}
+}
+
+// TestTrustedHandlerCompareAndSetWrite verifies KV-v2 updates accept the
+// current version and reject a stale version without overwriting the value.
+func TestTrustedHandlerCompareAndSetWrite(t *testing.T) {
+	store := &memoryStore{}
+	handler := NewTrustedHandler(store)
+	path := "/vault/dev/v1/secret/data/apps/app/api-key"
+
+	create := httptest.NewRequest(http.MethodPut, path, bytes.NewBufferString(`{"options":{"cas":0},"data":{"value":"first"}}`))
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, create)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create status = %d, body = %s", createRec.Code, createRec.Body.String())
+	}
+
+	update := httptest.NewRequest(http.MethodPut, path, bytes.NewBufferString(`{"options":{"cas":1},"data":{"value":"second"}}`))
+	updateRec := httptest.NewRecorder()
+	handler.ServeHTTP(updateRec, update)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, body = %s", updateRec.Code, updateRec.Body.String())
+	}
+	var updateResponse struct {
+		Data struct {
+			Version int `json:"version"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(updateRec.Body.Bytes(), &updateResponse); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if updateResponse.Data.Version != 2 {
+		t.Fatalf("update version = %d, want 2", updateResponse.Data.Version)
+	}
+
+	stale := httptest.NewRequest(http.MethodPut, path, bytes.NewBufferString(`{"options":{"cas":1},"data":{"value":"stale"}}`))
+	staleRec := httptest.NewRecorder()
+	handler.ServeHTTP(staleRec, stale)
+	if staleRec.Code != http.StatusBadRequest {
+		t.Fatalf("stale update status = %d, want %d", staleRec.Code, http.StatusBadRequest)
+	}
+	values, ok, err := store.GetSecret("dev", "secret/data/apps/app/api-key")
+	if err != nil || !ok || values["value"] != "second" {
+		t.Fatalf("stored value after stale update = %#v, %v, %v", values, ok, err)
 	}
 }
 

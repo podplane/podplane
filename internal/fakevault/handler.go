@@ -222,7 +222,7 @@ func (h *handler) serveWrite(rw http.ResponseWriter, r *http.Request, clusterID,
 	if nestedData {
 		data = nested
 	}
-	create := false
+	var cas *int
 	if rawOptions, hasOptions := body["options"]; hasOptions {
 		options, ok := rawOptions.(map[string]any)
 		if !ok || !nestedData {
@@ -234,12 +234,13 @@ func (h *handler) serveWrite(rw http.ResponseWriter, r *http.Request, clusterID,
 			errorResponse(rw, http.StatusBadRequest, "cas is required")
 			return
 		}
-		cas, ok := rawCAS.(float64)
-		if !ok || cas != 0 {
-			errorResponse(rw, http.StatusBadRequest, "only cas=0 is supported")
+		rawVersion, ok := rawCAS.(float64)
+		if !ok || rawVersion < 0 || rawVersion != float64(int(rawVersion)) {
+			errorResponse(rw, http.StatusBadRequest, "cas must be a non-negative integer")
 			return
 		}
-		create = true
+		version := int(rawVersion)
+		cas = &version
 	}
 	if len(data) == 0 {
 		errorResponse(rw, http.StatusBadRequest, "secret data is required")
@@ -257,13 +258,19 @@ func (h *handler) serveWrite(rw http.ResponseWriter, r *http.Request, clusterID,
 			values[key] = fmt.Sprint(value)
 		}
 	}
-	if create {
-		created, err := h.store.CreateSecret(clusterID, path, values)
+	if cas != nil {
+		var matched bool
+		var err error
+		if *cas == 0 {
+			matched, err = h.store.CreateSecret(clusterID, path, values)
+		} else {
+			matched, err = h.store.CompareAndSetSecret(clusterID, path, *cas, values)
+		}
 		if err != nil {
 			errorResponse(rw, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if !created {
+		if !matched {
 			errorResponse(rw, http.StatusBadRequest, "check-and-set parameter did not match the current version")
 			return
 		}
