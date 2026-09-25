@@ -8,6 +8,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -56,6 +58,9 @@ func TestLocalStartRecommendedChecksOrderComponents(t *testing.T) {
 	if got, want := envoy.DependsOn, []string{"podplane-operator"}; len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("envoy-gateway dependencies = %v, want %v", got, want)
 	}
+	if envoy.Kind != "deployment/daemonset" {
+		t.Fatalf("envoy-gateway kind = %q, want deployment/daemonset", envoy.Kind)
+	}
 
 	ingress, ok := byKey["ingress"]
 	if !ok {
@@ -66,6 +71,42 @@ func TestLocalStartRecommendedChecksOrderComponents(t *testing.T) {
 	}
 	if ingress.Kind != "ingress" || !ingress.Required {
 		t.Fatalf("ingress = %#v, want required ingress check", ingress)
+	}
+}
+
+// TestReadEnvoyGatewayRequiresDataPlane verifies a ready control plane does
+// not make the component ready before its generated data plane is ready.
+func TestReadEnvoyGatewayRequiresDataPlane(t *testing.T) {
+	dir := t.TempDir()
+	script := `#!/bin/sh
+case "$*" in
+  *" get deployment envoy-gateway -o json")
+    printf '{"status":{"replicas":1,"readyReplicas":1,"updatedReplicas":1,"availableReplicas":1}}'
+    ;;
+  *" get daemonset platform-envoy-gateway -o json")
+    printf '{"status":{"desiredNumberScheduled":1,"numberReady":%s,"updatedNumberScheduled":1,"numberAvailable":%s}}' "$DATA_PLANE_READY" "$DATA_PLANE_READY"
+    ;;
+  *)
+    printf 'unexpected arguments: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake kubectl: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	t.Setenv("DATA_PLANE_READY", "0")
+	result := readEnvoyGateway(context.Background(), "", "")
+	if result.Ready || result.Status != StatusPending || result.Message != "data plane: 0/1 pods ready" {
+		t.Fatalf("readEnvoyGateway with unready data plane = %#v, want pending data plane", result)
+	}
+
+	t.Setenv("DATA_PLANE_READY", "1")
+	result = readEnvoyGateway(context.Background(), "", "")
+	if !result.Ready || result.Status != StatusReady || result.Message != "control plane and data plane ready" {
+		t.Fatalf("readEnvoyGateway with ready data plane = %#v, want ready", result)
 	}
 }
 

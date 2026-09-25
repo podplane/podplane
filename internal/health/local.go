@@ -34,7 +34,7 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 				Name:     "cilium",
 				Kind:     "daemonset",
 				Required: true,
-				Expected: 35 * time.Second,
+				Expected: 32 * time.Second,
 				Timeout:  3 * time.Minute,
 				Run: func(ctx context.Context) Result {
 					return readWorkload(ctx, opts.KubeContext, opts.Kubeconfig, "platform-cilium", "daemonset", "cilium")
@@ -48,7 +48,7 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 				Name:     "cilium",
 				Kind:     "daemonset",
 				Required: true,
-				Expected: 30 * time.Second,
+				Expected: 32 * time.Second,
 				Timeout:  3 * time.Minute,
 				Run: func(ctx context.Context) Result {
 					return readWorkload(ctx, opts.KubeContext, opts.Kubeconfig, "platform-cilium", "daemonset", "cilium")
@@ -72,7 +72,7 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 				Kind:      "deployment",
 				Required:  true,
 				DependsOn: []string{"secrets-store-csi-driver"},
-				Expected:  15 * time.Second,
+				Expected:  5 * time.Second,
 				Timeout:   3 * time.Minute,
 				Run: func(ctx context.Context) Result {
 					return readWorkload(ctx, opts.KubeContext, opts.Kubeconfig, "platform-podplane-operator", "deployment", "platform-podplane-operator")
@@ -81,7 +81,7 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 			{
 				Key:       "envoy-gateway",
 				Name:      "envoy-gateway",
-				Kind:      "deployment",
+				Kind:      "deployment/daemonset",
 				Required:  true,
 				DependsOn: []string{"podplane-operator"},
 				Expected:  20 * time.Second,
@@ -90,7 +90,7 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 					if err := ensureDeploymentReplicas(ctx, opts.KubeContext, opts.Kubeconfig, "platform-envoy-gateway", "envoy-gateway", 1); err != nil {
 						return Result{Err: fmt.Errorf("activate envoy-gateway: %w", err)}
 					}
-					return readWorkload(ctx, opts.KubeContext, opts.Kubeconfig, "platform-envoy-gateway", "deployment", "envoy-gateway")
+					return readEnvoyGateway(ctx, opts.KubeContext, opts.Kubeconfig)
 				},
 			},
 			{
@@ -123,6 +123,22 @@ func readSecretsStoreCSI(ctx context.Context, kubeContext, kubeconfig string) Re
 		return provider
 	}
 	return Result{Exists: true, Ready: true, Status: StatusReady, Message: "driver and OpenBao provider ready"}
+}
+
+// readEnvoyGateway reports ready only when both the control-plane Deployment
+// and generated data-plane DaemonSet are ready.
+func readEnvoyGateway(ctx context.Context, kubeContext, kubeconfig string) Result {
+	controlPlane := readWorkload(ctx, kubeContext, kubeconfig, "platform-envoy-gateway", "deployment", "envoy-gateway")
+	if !controlPlane.Ready {
+		controlPlane.Message = "control plane: " + controlPlane.Message
+		return controlPlane
+	}
+	dataPlane := readWorkload(ctx, kubeContext, kubeconfig, "platform-envoy-gateway", "daemonset", "platform-envoy-gateway")
+	if !dataPlane.Ready {
+		dataPlane.Message = "data plane: " + dataPlane.Message
+		return dataPlane
+	}
+	return Result{Exists: true, Ready: true, Status: StatusReady, Message: "control plane and data plane ready"}
 }
 
 // LocalIngressProxyCheck verifies that the local ingress URL is reachable after
