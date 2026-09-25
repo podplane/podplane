@@ -59,6 +59,44 @@ func readWorkload(ctx context.Context, kubeContext, kubeconfig, namespace, resou
 	return Result{Exists: true, Status: StatusPending, Message: message}
 }
 
+// ensureDeploymentReplicas scales a Deployment only when its desired replica
+// count differs from replicas.
+func ensureDeploymentReplicas(ctx context.Context, kubeContext, kubeconfig, namespace, name string, replicas int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	args := kubectl.Args(kubeContext, kubeconfig)
+	args = append(args, "-n", namespace, "get", "deployment", name, "-o", "json")
+	var stdout, stderr bytes.Buffer
+	cmd := execwrap.Command("kubectl", args...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return &kubectl.Error{Stage: "get deployment", Err: err, Stderr: stderr.String()}
+	}
+	var obj struct {
+		Spec struct {
+			Replicas *int `json:"replicas"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &obj); err != nil {
+		return fmt.Errorf("decode deployment spec: %w", err)
+	}
+	if obj.Spec.Replicas != nil && *obj.Spec.Replicas == replicas {
+		return nil
+	}
+
+	args = kubectl.Args(kubeContext, kubeconfig)
+	args = append(args, "-n", namespace, "scale", "deployment", name, fmt.Sprintf("--replicas=%d", replicas))
+	stderr.Reset()
+	cmd = execwrap.Command("kubectl", args...)
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return &kubectl.Error{Stage: "scale deployment", Err: err, Stderr: stderr.String()}
+	}
+	return nil
+}
+
 // workloadReady reports whether a workload status has reached its desired
 // ready/available count.
 func workloadReady(resource string, status workloadStatus) (bool, string) {

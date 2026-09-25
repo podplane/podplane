@@ -87,6 +87,9 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 				Expected:  20 * time.Second,
 				Timeout:   3 * time.Minute,
 				Run: func(ctx context.Context) Result {
+					if err := ensureDeploymentReplicas(ctx, opts.KubeContext, opts.Kubeconfig, "platform-envoy-gateway", "envoy-gateway", 1); err != nil {
+						return Result{Err: fmt.Errorf("activate envoy-gateway: %w", err)}
+					}
 					return readWorkload(ctx, opts.KubeContext, opts.Kubeconfig, "platform-envoy-gateway", "deployment", "envoy-gateway")
 				},
 			},
