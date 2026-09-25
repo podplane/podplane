@@ -19,6 +19,7 @@ Use the reference when you need exact CLI syntax, configuration options, or tech
 ## Application deployments
 
 - [Deployment Templates](templates.md) — resources, values, certificates, and image conventions for the built-in `web` and `worker` templates.
+- [Secrets Management](secrets.md) — provider configuration, workload bindings, backend paths, and Kubernetes Secret sync.
 
 ## Architecture and internals
 

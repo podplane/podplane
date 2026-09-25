@@ -24,6 +24,7 @@ Kubernetes RBAC controls secret metadata and lifecycle operations separately, in
 
 ## Learn more
 
-- [Secrets guide](../guides/secrets.md) — provider setup, workload bindings, lifecycle behavior, and Kubernetes Secret sync.
+- [Manage application secrets](../guides/manage-secrets.md) — create, mount, and manage application secrets.
+- [Secrets reference](../reference/secrets.md) — provider configuration, workload bindings, and Kubernetes Secret sync.
 - [`podplane secret` reference](../reference/cli/commands/secret.md)
 - [Cluster configuration](../reference/configuration.md)

@@ -17,7 +17,7 @@ podplane deploy web --name api \
   -e API_ORIGIN=https://api.example.com
 ```
 
-These values are stored in the rendered Deployment and Helm release metadata. Use [Podplane Secrets](secrets.md) for passwords, tokens, private keys, and other sensitive values.
+These values are stored in the rendered Deployment and Helm release metadata. Use the [application secrets guide](manage-secrets.md) for passwords, tokens, private keys, and other sensitive values.
 
 ## Routes and ports
 

@@ -13,7 +13,7 @@ Follow each guide in order, or jump directly to the task you need:
 1. [Install Podplane](installation.md) and its command-line dependencies.
 2. [Deploy an app locally](local-cluster.md) in a single-node local cluster.
 3. [Configure your app](configure-app.md) with templates, environment variables, secrets, logs, and routes.
-4. [Secrets](secrets.md) covers provider setup, workload bindings, lifecycle operations, and Kubernetes Secret sync.
+4. [Manage application secrets](manage-secrets.md) securely with an external secrets provider.
 5. [Create an AWS cluster](aws-cluster.md) and deploy the same application remotely.
 6. [Set up team and CI access](team-and-ci-access.md) with OIDC authentication for people and automation.
 7. [Role-based Access Control](rbac.md) explains Podplane's default groups and Kubernetes permissions.

@@ -24,4 +24,4 @@ podplane deps download --providers google
 - [Cloud provider support](./_index.md)
 - [Nstance Google Cloud provider](https://github.com/nstance-dev/nstance/blob/main/docs/providers/google-cloud.md)
 - [Air-gapped dependency preparation](../air-gapped-clusters.md)
-- [Google Secret Manager configuration](../../guides/secrets.md#cluster-operator-responsibilities)
+- [Google Secret Manager configuration](../../reference/secrets.md#cluster-operator-responsibilities)
