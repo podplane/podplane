@@ -1,7 +1,9 @@
 ---
 title: "Secrets"
-weight: 55
+weight: 40
 description: "How Podplane manages application secrets"
+aliases:
+  - /docs/secrets/
 ---
 
 # Secrets
@@ -161,5 +163,5 @@ Cluster admins should grant RBAC to the Podplane aggregated secrets API delibera
 
 ## Learn More
 
-- [podplane secret CLI reference](reference/cli/commands/secret.md) - command syntax and flags.
-- [Components](reference/components.md) - installing addon components such as the Secrets Store CSI Driver.
+- [podplane secret CLI reference](../reference/cli/commands/secret.md) - command syntax and flags.
+- [Components](../reference/components.md) - installing addon components such as the Secrets Store CSI Driver.

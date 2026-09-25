@@ -1,7 +1,10 @@
 ---
 title: "Templates"
-weight: 60
+linkTitle: "Deployment Templates"
+weight: 25
 description: "App deployment templates for web apps and background workers"
+aliases:
+  - /docs/templates/
 ---
 
 # Templates
@@ -50,7 +53,7 @@ Your app container serves plain HTTP on port 8080 by default — the Envoy sidec
 
 ### Template values
 
-Use [`podplane deploy`](reference/cli/commands/deploy.md) flags for universal inputs such as app name, optional image override, and environment variables.
+Use [`podplane deploy`](cli/commands/deploy.md) flags for universal inputs such as app name, optional image override, and environment variables.
 
 The web template also supports the ergonomic routing flags `--hostname` and `--path`. For non-standard external HTTPS ports, set `route.port` with `--set route.port=<port>`.
 
@@ -131,7 +134,7 @@ This is suitable for queue consumers, cron-like processors, or any workload that
 
 ### Template values
 
-Use [`podplane deploy`](reference/cli/commands/deploy.md) flags for universal inputs such as worker name, optional image override, and environment variables. Worker-specific configuration should be exposed as schema-backed template values and set with `--set`.
+Use [`podplane deploy`](cli/commands/deploy.md) flags for universal inputs such as worker name, optional image override, and environment variables. Worker-specific configuration should be exposed as schema-backed template values and set with `--set`.
 
 Set `certificates.client=true` to project the worker's SPIFFE credential and
 workload trust bundle at
@@ -153,7 +156,7 @@ podplane deploy worker \
 
 Every template chart must include `values.schema.json`. The schema is the contract for supported template values and is used by Podplane to validate common ergonomic flags before invoking Helm.
 
-`podplane deploy` keeps common flags for release name, image and environment overrides, simple secret bindings, routing shortcuts, Helm value overrides, namespace and Kubernetes context selection, readiness waiting, timeout, and approval. These apply to deploy itself rather than to any one template; see the [`deploy` reference](reference/cli/commands/deploy.md) for the complete list.
+`podplane deploy` keeps common flags for release name, image and environment overrides, simple secret bindings, routing shortcuts, Helm value overrides, namespace and Kubernetes context selection, readiness waiting, timeout, and approval. These apply to deploy itself rather than to any one template; see the [`deploy` reference](cli/commands/deploy.md) for the complete list.
 
 Template charts must put container image values under `images`. The `--image` flag maps to the app workload image, conventionally `images.app`; template-owned support images use sibling keys such as `images.envoy`. This gives Podplane one predictable place to inspect, prefetch, mirror, or override image references.
 

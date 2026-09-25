@@ -38,6 +38,6 @@ Trusting the workload CA proves that a certificate belongs to the cluster; appli
 
 ## Learn more
 
-- [Deployment templates](../templates.md#web) — serving certificates and optional SPIFFE identities in the `web` and `worker` templates.
+- [Deployment templates](../reference/templates.md#web) — serving certificates and optional SPIFFE identities in the `web` and `worker` templates.
 - [SPIFFE identity](https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/)
 - [Kubernetes Pod Certificates and ClusterTrustBundles](https://kubernetes.io/blog/2026/08/28/kubernetes-v1-37-pod-certificates-and-cluster-trust-bundles/)

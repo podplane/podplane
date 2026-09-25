@@ -16,6 +16,10 @@ Use the reference when you need exact CLI syntax, configuration options, or tech
 
 - [Configuration files](configuration.md) — cluster and OIDC configuration fields, defaults, and validation rules.
 
+## Application deployments
+
+- [Deployment Templates](templates.md) — resources, values, certificates, and image conventions for the built-in `web` and `worker` templates.
+
 ## Architecture and internals
 
 - [Architecture](architecture.md) — the layers and systems that make up Podplane.

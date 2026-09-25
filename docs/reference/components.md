@@ -35,7 +35,7 @@ The current component charts require Kubernetes 1.37 or later. This is also the 
     - `fluxcd-crds` for Flux CD
 - `gateway-api-crds` for ingress controllers using Gateway API
 - `platform-components` for Podplane component management. This chart creates the Flux source, platform namespaces, and HelmReleases for enabled components.
-- `platform-rbac` for default Podplane platform [RBAC](../rbac.md) and admission policies
+- `platform-rbac` for default Podplane platform [RBAC](../guides/rbac.md) and admission policies
 
 ### Provider-Specific Components
 

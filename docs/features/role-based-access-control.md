@@ -27,6 +27,6 @@ The default bindings come from the `platform-rbac` component and are present in 
 
 ## Learn more
 
-- [Podplane RBAC guide](../rbac.md)
+- [Podplane RBAC guide](../guides/rbac.md)
 - [Component management](../reference/components.md)
 - [Kubernetes RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)

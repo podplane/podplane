@@ -160,7 +160,7 @@ For example, if you are creating a staging cluster and discover that you also ne
 
 Podplane can deploy [Truster](https://truster.dev) for you with `podplane oidc create`, but you can also bring your own OIDC service, such as [Dex](https://dexidp.io), a corporate identity gateway, or a managed third-party identity provider. The important requirements are that the issuer lets you control which users can authenticate and lets you control which groups appear in the groups claim consumed by Podplane / Kubernetes RBAC.
 
-See [RBAC](rbac.md) for Podplane's default Kubernetes access groups.
+See [RBAC](guides/rbac.md) for Podplane's default Kubernetes access groups.
 
 ## Practical Starting Points
 

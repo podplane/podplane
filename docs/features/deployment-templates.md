@@ -32,6 +32,6 @@ Templates also understand Podplane's registry mirror and workload certificate co
 
 ## Learn more
 
-- [Templates guide](../templates.md) — values, resources, TLS behavior, and image conventions.
+- [Templates reference](../reference/templates.md) — values, resources, TLS behavior, and image conventions.
 - [`podplane deploy` reference](../reference/cli/commands/deploy.md)
 - [Helm charts](https://helm.sh/docs/topics/charts/)

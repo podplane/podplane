@@ -12,7 +12,7 @@ Use `podplane secret` to manage secret values for your applications in your Podp
 
 Using a secure secrets vault solution is recommended rather than putting those values in Helm values, manifests, shell history, or Kubernetes/etcd cluster state.
 
-For the broader system design, provider model, workload mounting flow, and Kubernetes Secret sync behavior, see [Secrets](../../../secrets.md).
+For the broader system design, provider model, workload mounting flow, and Kubernetes Secret sync behavior, see [Secrets](../../../guides/secrets.md).
 
 Secret values are encrypted locally by the CLI before they are sent to the
 cluster. Podplane stores them in the cluster's configured secrets provider, such
