@@ -17,6 +17,7 @@ var depsStatusCmd = &cobra.Command{
 	Long:  `Status checks if a new dependency version is available to download, and reports on the current cached versions. Generally you should not be running this directly.`,
 }
 
+// newDepsStatusCmd wires manifest checking and prints whether dependency updates are available.
 func newDepsStatusCmd(manager *deps.Manager, kind, arch string) *cobra.Command {
 	depsStatusCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		fmt.Println("Fetching latest dependency manifest...")

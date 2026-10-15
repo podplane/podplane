@@ -18,6 +18,8 @@ New cluster configs include a relative `$schema` reference to `./podplane.cluste
 
 ### Example
 
+This example uses an existing user-managed tunnel and Nstance-managed NAT.
+
 ```jsonc
 {
   "$schema": "./podplane.cluster.schema.json",
@@ -27,22 +29,23 @@ New cluster configs include a relative `$schema` reference to `./podplane.cluste
     "oidc": {
       "issuer_url": "https://auth.example.com"
     },
-    "acme": {
-      "server": "https://acme-v02.api.letsencrypt.org/directory",
-      "email": "platform-ops@example.com"
-    },
     "domains": [
       {
-        "zone": "internaltools.example.com",
-        "provider": {
-          "kind": "aws-route53",
-          "account": "123456789012",
-          "profile": "default",
-          "region": "us-east-1",
-          "hosted_zone_id": "Z0123456789"
-        }
+        "zone": "internaltools.example.com"
       }
     ],
+    "tunnel": {
+      "kind": "cloudflare",
+      // Replace the example tunnel ID and secret name with your own.
+      "id": "cbe15ed8-50dc-4e69-a1d0-9e1909ec4ce8",
+      "credential_secret": "tunnel-credentials"
+    },
+    // ACME is disabled because the tunnel provider supplies public TLS.
+    // Enable it only when using NLBs instead of a tunnel.
+    // "acme": {
+    //   "server": "https://acme-v02.api.letsencrypt.org/directory",
+    //   "email": "platform-ops@example.com"
+    // },
     "pools": {
       "control-plane": {
         "arch": "arm64",
@@ -69,36 +72,41 @@ New cluster configs include a relative `$schema` reference to `./podplane.cluste
           "v4cidr": "172.18.0.0/16",
           "v6cidr": "auto"
         },
+        // Public Nstance subnets keep outbound access independent of managed NAT.
+        // Nstance management APIs remain private.
         "zones": {
           "us-east-1a": [
-            { "v4cidr": "172.18.10.0/28", "v6cidr": "auto", "services": ["nat", "nlb"], "public": true },
-            { "v4cidr": "172.18.20.0/28", "v6cidr": "auto", "services": ["nstance"] },
-            { "v4cidr": "172.18.1.0/24", "v6cidr": "auto", "pool": "control-plane" },
-            { "v4cidr": "172.18.3.0/24", "v6cidr": "auto", "pool": "ingress" }
+            { "v4cidr": "172.18.10.0/28", "v6cidr": "auto", "services": ["nat"], "public": true },
+            { "v4cidr": "172.18.20.0/28", "v6cidr": "auto", "services": ["nstance"], "public": true },
+            { "v4cidr": "172.18.1.0/26", "v6cidr": "auto", "pool": "control-plane" },
+            { "v4cidr": "172.18.3.0/26", "v6cidr": "auto", "pool": "ingress" }
           ],
           "us-east-1b": [
-            { "v4cidr": "172.18.11.0/28", "v6cidr": "auto", "services": ["nat", "nlb"], "public": true },
-            { "v4cidr": "172.18.21.0/28", "v6cidr": "auto", "services": ["nstance"] },
-            { "v4cidr": "172.18.2.0/24", "v6cidr": "auto", "pool": "control-plane" },
-            { "v4cidr": "172.18.4.0/24", "v6cidr": "auto", "pool": "ingress" }
+            { "v4cidr": "172.18.11.0/28", "v6cidr": "auto", "services": ["nat"], "public": true },
+            { "v4cidr": "172.18.21.0/28", "v6cidr": "auto", "services": ["nstance"], "public": true },
+            { "v4cidr": "172.18.2.0/26", "v6cidr": "auto", "pool": "control-plane" },
+            { "v4cidr": "172.18.4.0/26", "v6cidr": "auto", "pool": "ingress" }
           ]
         },
-        "load_balancers": {
-          "main": {
-            "public": true,
-            "subnets": "public",
-            "listeners": [
-              { "port": 443, "pool": "ingress" }
-            ]
-          },
-          "kubernetes-api": {
-            "public": true,
-            "subnets": "public",
-            "listeners": [
-              { "port": 6443, "pool": "control-plane" }
-            ]
-          }
-        },
+        // NLB alternative: omit cluster.tunnel, enable this block, add "nlb" to the
+        // public NAT subnets' services, and enable api_load_balancer below.
+        // Choose tunnels or NLBs before creating the infrastructure.
+        // "load_balancers": {
+        //   "main": {
+        //     "public": true,
+        //     "subnets": "public",
+        //     "listeners": [
+        //       { "port": 443, "pool": "ingress" }
+        //     ]
+        //   },
+        //   "kubernetes-api": {
+        //     "public": true,
+        //     "subnets": "public",
+        //     "listeners": [
+        //       { "port": 6443, "pool": "control-plane" }
+        //     ]
+        //   }
+        // },
         "buckets": ["uploads", "assets"],
         "roles": {
           "app-storage": {
@@ -111,6 +119,18 @@ New cluster configs include a relative `$schema` reference to `./podplane.cluste
         }
       }
     ],
+    "nat": {
+      "mode": "nstance",
+      "groups": {
+        "nat": { "arch": "arm64", "instance_type": "t4g.small", "subnet_pool": "public" }
+      },
+      "tenants": {
+        "default": {
+          "group": "nat",
+          "instance_type_ladder": ["t4g.small", "t4g.medium", "t4g.large"]
+        }
+      }
+    },
     "secrets": {
       "default_provider": "aws-secrets-manager",
       "providers": {
@@ -126,7 +146,7 @@ New cluster configs include a relative `$schema` reference to `./podplane.cluste
     },
     "kubernetes": {
       "api_hostname": "k8s.example.com",
-      "api_load_balancer": "kubernetes-api",
+      // "api_load_balancer": "kubernetes-api",
       "cluster_cidr": ["100.64.0.0/10", "fd64::/48"],
       "service_cidr": ["198.18.0.0/15", "fdc6::/108"]
     },
@@ -171,21 +191,25 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.oidc.groups_claim` | Token claim used for group membership (default: `groups`) |
 | `cluster.oidc.signing_algs` | Allowed OIDC signing algorithms. Passed to kube-apiserver at runtime; vmconfig defaults to `["RS256"]` when omitted. |
 | `cluster.acme.server` | Optional ACME directory override. Defaults to the Let's Encrypt production directory. |
-| `cluster.acme.email` | Required ACME account email. Configuring `cluster.acme` enables operator-managed apex-and-wildcard ingress certificates for domains using a supported DNS provider; currently only AWS Route53 is enabled. Omit `cluster.acme` to retain operator-managed self-signed ingress certificates. Ingress certificates are separate from workload PKI: their bundles remain in the external secrets provider and reach Envoy data-plane Pods through Secrets Store CSI and the SDS sidecar, never ordinary Kubernetes TLS Secrets. |
+| `cluster.acme.email` | Required ACME account email. Configuring `cluster.acme` enables operator-managed apex-and-wildcard ingress certificates for supported DNS providers; currently AWS Route53. Without a tunnel, omitting ACME retains operator-managed self-signed certificates delivered through Secrets Store CSI and SDS. Tunnel mode uses node-local Nstance-issued certificates instead and rejects ACME. Neither path stores certificate keys in Kubernetes Secrets. |
 | `cluster.domains[]` | Array of domain configurations. The first domain is used as the default for ingress routing. |
 | `cluster.domains[].zone` | Exact ingress apex (e.g. `staging.example.com`); Podplane creates apex and wildcard DNS records. |
 | `cluster.domains[].load_balancer` | Named provider load balancer targeted by the apex and wildcard records. Defaults to `main`. |
 | `cluster.domains[].provider` | Optional DNS provider. Omit it for manual DNS management. |
-| `cluster.domains[].provider.kind` | DNS provider: `aws-route53`, `cloudflare`, `google-cloud-dns`, or `local`. Cluster Terraform generation currently supports `aws-route53`. |
+| `cluster.domains[].provider.kind` | DNS provider: `aws-route53`, `cloudflare`, `google-cloud-dns`, or `local`. Cluster Terraform generation manages Route53 on AWS and Cloud DNS on Google; tunnel DNS is user-managed. |
 | `cluster.domains[].provider.region` | AWS Route53 region for DNS-01. If omitted, Podplane can infer it when exactly one matching AWS provider exists. |
 | `cluster.domains[].provider.hosted_zone_id` | Optional explicit Route53 hosted zone ID. Use it to disambiguate or pin the exact hosted zone; otherwise, generated Terraform looks up the public hosted zone by domain name. |
 | `cluster.domains[].provider.role_arn` | Advanced Route53 role override. Managed AWS clusters generate and inject a least-privilege ACME role automatically. |
 | `cluster.domains[].provider.project` | Google Cloud project ID for Cloud DNS. |
-| `cluster.domains[].provider.hosted_zone_name` | Google Cloud DNS managed zone name for the domain (optional). |
+| `cluster.domains[].provider.hosted_zone_name` | Google Cloud DNS managed-zone resource name, required for managed Cloud DNS records. |
+| `cluster.tunnel` | Optional existing user-managed tunnel for both API and ingress, replacing NLBs. Podplane does not create or delete the tunnel. |
+| `cluster.tunnel.kind` | Tunnel provider. The first supported provider is `cloudflare`; its runtime image is resolved from the pinned VM manifest. |
+| `cluster.tunnel.id` | Existing tunnel identifier. For `cloudflare`, the UUID of a locally managed tunnel. |
+| `cluster.tunnel.credential_secret` | Existing secret's logical name, relative to the cluster's Nstance secrets prefix. Store the complete tunnel credentials JSON as its value; normal and wake connectors share this reference. Not a local file path or inline secret. |
 | `cluster.pools.<name>.arch` | CPU architecture for the pool's nodes. `amd64` or `arm64` |
 | `cluster.pools.<name>.instance_type` | Cloud provider instance type (e.g. `t4g.medium` for AWS, `n2-standard-2` for Google Cloud) |
 | `cluster.pools.<name>.size` | Minimum number of instances in the pool |
-| `cluster.pools.<name>.disk_size` | Root volume size in GB (default: `100`) |
+| `cluster.pools.<name>.disk_size` | Root disk size in GiB. Omit to use the provider's default. |
 | `cluster.providers[]` | Array of cloud provider configurations (supports multi-cloud). The available fields vary by `kind` - the fields below apply to `aws` and `google`. |
 | `cluster.providers[].kind` | Cloud provider - `aws`, `google`, or `proxmox` |
 | `cluster.providers[].region` | Provider region (e.g. `us-east-1` for AWS, `us-central1` for Google Cloud) |
@@ -208,14 +232,21 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.providers[].load_balancers.<name>.listeners[]` | Explicit listeners exposed by the load balancer. Domains require `443 -> 443`; a managed Kubernetes API requires `api_port -> 6443` targeting the `control-plane` pool. |
 | `cluster.providers[].load_balancers.<name>.listeners[].port` | External listener port. |
 | `cluster.providers[].load_balancers.<name>.listeners[].target_port` | Port on target VMs. Defaults to the external port. |
+| `cluster.providers[].load_balancers.<name>.listeners[].proxy_port` | AWS-only wake-proxy port. Defaults to `target_port`, then `port`; must be unique across listeners. Omit on Google Cloud. |
 | `cluster.providers[].load_balancers.<name>.listeners[].pool` | Pool whose VMs are registered with this listener's target group. |
 | `cluster.providers[].buckets` | Array of app-accessible object storage bucket names. Cloud bucket names are derived as `{cluster.id}-{name}`. |
 | `cluster.providers[].roles.<name>.buckets` | Array of bucket names this role can access |
 | `cluster.providers[].roles.<name>.permissions` | Resource access level - `read-write` or `read-only` (default: `read-write`) |
+| `cluster.nat.mode` | Egress implementation: cloud-provider NAT (`provider`) or Nstance-managed NAT VMs (`nstance`). Independent of tunnels/NLBs. |
+| `cluster.nat.groups.<name>` | NAT VM deployment settings: `arch`, starting `instance_type`, and public `subnet_pool`. Nstance manages the group size. |
+| `cluster.nat.tenants.default` | NAT deployment group and instance type ladder for the default Kubernetes tenant. Timing and utilization thresholds use Nstance defaults. |
+| `cluster.nat.tenants.default.group` | Name of the NAT deployment group. |
+| `cluster.nat.tenants.default.instance_type_ladder` | Ordered, unique scaling choices; must include the group's starting instance type. |
+| `cluster.nat.fixed_public_ipv4_count` | Optional number of fixed public IPv4 addresses to reserve per zone. Defaults to `0`. |
 | `cluster.kubernetes.api_hostname` | Required Kubernetes API hostname used by kubeconfig and the API server certificate. |
 | `cluster.spiffe.trust_domain` | Required immutable SPIFFE trust domain for workload certificates. New clusters persist the initial `cluster.kubernetes.api_hostname`; existing clusters must explicitly add a valid value before upgrading infrastructure or enabling the operator. It allows only lowercase ASCII letters, digits, `.`, `-`, and `_`, up to 255 bytes. |
-| `cluster.kubernetes.api_port` | External Kubernetes API port. Defaults to `6443`; the target port remains `6443`. |
-| `cluster.kubernetes.api_load_balancer` | Optional named provider load balancer. Omit it to manage API connectivity and DNS outside Podplane. |
+| `cluster.kubernetes.api_port` | External Kubernetes API port. Defaults to `6443` for NLB; tunnels require `443`. |
+| `cluster.kubernetes.api_load_balancer` | Optional named provider load balancer for NLB API connectivity and DNS. Omit in tunnel mode. |
 | `cluster.secrets.default_provider` | Default secrets provider name used by `podplane secret` and templates when `--provider` is omitted. |
 | `cluster.secrets.providers` | Named secrets providers. Only provider-selection metadata belongs here; credentials are configured on the operator deployment. |
 | `cluster.secrets.providers.<name>.kind` | Upstream Secrets Store CSI provider slug: `aws`, `gcp`, `vault`, or `openbao`. |
@@ -245,6 +276,41 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.components.source.ref.semver` | Git semver range to use for component Helm charts. Mutually exclusive with other `source.ref` selectors. |
 | `cluster.components.source.ref.commit` | Git commit to use for component Helm charts. Mutually exclusive with other `source.ref` selectors. |
 | `cluster.components.source.secretRef.name` | Optional Flux Git credentials Secret name in the `platform-components` namespace. Use this for private/enterprise components repos; Podplane wires the reference but does not create the Secret. |
+
+### Kubernetes API & Ingress, NAT, and sleep
+
+`cluster.tunnel` exposes both the Kubernetes API and ingress through the selected tunnel
+provider. Omit it to use the infrastructure provider's NLBs instead. Tunnel mode
+does not accept load-balancer settings. Switching between tunnels and NLBs requires
+deleting and redeploying the infrastructure.
+
+Create a locally managed tunnel, point the API and ingress apex/wildcard DNS records
+at it, and configure hostname-scoped HTTPS redirects with the tunnel provider before
+deployment. Store the complete credentials-file JSON in the cluster's secrets provider
+backend under `credential_secret` (relative to its configured prefix). Podplane does
+not create, modify or delete these provider resources and needs no tunnel-provider
+API token.
+
+Tunnel API endpoints use HTTPS port `443` and public CA roots; omit `--ca-cert`
+when logging in. NLB API endpoints default to `6443` with the Kubernetes CA.
+The API origin remains direct kube-apiserver `6443`, independent of Envoy.
+
+Do not configure `cluster.acme` with a tunnel: the provider supplies public-edge
+TLS. Each Envoy node gets one node-issued ingress certificate covering all
+configured apex/wildcard domains, localhost, loopbacks and its assigned IPs.
+Tunnel processes verify both the Kubernetes API and Envoy ingress against the Nstance
+cluster CA and the configured origin hostname.
+
+NAT is independent of tunnels/NLBs. Nstance-managed NAT requires public NAT
+and Nstance subnets in each zone. The Nstance Server VM needs outbound cloud API, storage
+and tunnel-provider access even when its managed NAT VMs are removed during sleep;
+public placement avoids that dependency without exposing its management APIs.
+Changing NAT mode preserves node subnets; changing their CIDRs is a separate migration.
+
+AWS/Google `recommended` clusters support [`cluster sleep`](cli/commands/cluster-sleep.md)
+and wake on API or ingress traffic.
+
+### Certificates and authentication
 
 Cluster infrastructure creates or adopts a dedicated `workload-ca-key` in AWS
 Secrets Manager, AWS SSM Parameter Store, or Google Secret Manager, even for

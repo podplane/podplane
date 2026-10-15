@@ -18,6 +18,7 @@ import (
 	"github.com/podplane/podplane/internal/clusterconfig"
 )
 
+// TestInterpolatePlatformComponentsMergesValues checks derived app values preserve existing HelmRelease values.
 func TestInterpolatePlatformComponentsMergesValues(t *testing.T) {
 	records := []*datafile.Record{
 		{Key: []byte("/registry/configmaps/default/ignored"), Value: []byte(`{"kind":"ConfigMap","metadata":{"name":"ignored"}}`)},
@@ -150,6 +151,7 @@ func TestInterpolateKubernetesAcceptsStrippedIPAddress(t *testing.T) {
 	}
 }
 
+// TestInterpolateComponentsSourceUpdatesGitRepository checks source URL, ref, and credentials replace seed defaults.
 func TestInterpolateComponentsSourceUpdatesGitRepository(t *testing.T) {
 	records := []*datafile.Record{
 		{Key: []byte(platformComponentsHelmReleaseKey), Value: []byte(`{"kind":"HelmRelease","metadata":{"name":"ignored"}}`)},
@@ -182,6 +184,7 @@ func TestInterpolateComponentsSourceUpdatesGitRepository(t *testing.T) {
 	}
 }
 
+// TestInterpolateComponentsSourceRemovesSecretRefWhenUnset checks stale credentials are removed and semver is applied.
 func TestInterpolateComponentsSourceRemovesSecretRefWhenUnset(t *testing.T) {
 	records := []*datafile.Record{
 		{Key: []byte(podplaneComponentsGitKey), Value: []byte(`{"apiVersion":"source.toolkit.fluxcd.io/v1","kind":"GitRepository","metadata":{"name":"podplane-components","namespace":"platform-components"},"spec":{"url":"https://github.com/podplane/components.git","secretRef":{"name":"stale"},"ref":{"branch":"main"}}}`)},
@@ -208,6 +211,7 @@ func TestInterpolateComponentsSourceRemovesSecretRefWhenUnset(t *testing.T) {
 	}
 }
 
+// TestRewriteSeedImagesPrefixesAllJSONImageFields checks container images are mirrored without changing non-JSON records.
 func TestRewriteSeedImagesPrefixesAllJSONImageFields(t *testing.T) {
 	records := []*datafile.Record{
 		{Key: []byte("/registry/deployments/platform-flux/source-controller"), Value: []byte(`{"apiVersion":"apps/v1","kind":"Deployment","spec":{"template":{"spec":{"initContainers":[{"image":"docker.io/library/busybox:1"}],"containers":[{"image":"ghcr.io/fluxcd/source-controller:v1.5.0"}],"ephemeralContainers":[{"image":"dev-registry.local/mirror/docker.io/library/alpine:3"}]}}}}`)},
@@ -236,6 +240,7 @@ func TestRewriteSeedImagesPrefixesAllJSONImageFields(t *testing.T) {
 	}
 }
 
+// TestRewriteImageFields checks recursive image rewriting leaves empty, mirrored, and unrelated values unchanged.
 func TestRewriteImageFields(t *testing.T) {
 	obj := map[string]any{
 		"image": "docker.io/library/top-level:1",
@@ -277,6 +282,7 @@ func TestRewriteImageFields(t *testing.T) {
 	}
 }
 
+// containerImage extracts an image from an indexed container list in a decoded pod spec.
 func containerImage(t *testing.T, podSpec map[string]any, field string, index int) string {
 	t.Helper()
 	items := podSpec[field].([]any)
@@ -332,6 +338,145 @@ platform:
 	apps := components["apps"].(map[string]any)
 	if apps["cilium"] == nil || apps["coredns"] == nil || apps["envoy-gateway"] == nil {
 		t.Fatalf("apps were not merged: %v", apps)
+	}
+}
+
+// TestWriteSnapshotNodeCertificates checks local and tunnel delivery and prevents
+// captured seed configuration or overrides from re-enabling ingress issuance.
+func TestWriteSnapshotNodeCertificates(t *testing.T) {
+	for _, mode := range []string{"local", "tunnel"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg, err := clusterconfig.NewDraftConfig("aws")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.Cluster.Domains = []clusterconfig.Domain{{Zone: "example.com"}, {Zone: "second.example.net"}}
+			if mode == "tunnel" {
+				cfg.Cluster.Tunnel = &clusterconfig.Tunnel{
+					Kind: "cloudflare",
+					ID:   "cbe15ed8-50dc-4e69-a1d0-9e1909ec4ce8", CredentialSecret: "tunnel-credentials",
+				}
+			} else {
+				cfg.Cluster.Providers = nil
+			}
+			raw, err := json.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			configPath := filepath.Join(dir, "cluster.jsonc")
+			if err := os.WriteFile(configPath, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			records := []*datafile.Record{
+				{Revision: 1, Key: []byte("_netsy"), Value: []byte(`{}`)},
+				{Revision: 2, Key: []byte(platformComponentsHelmReleaseKey), Value: []byte(`{"apiVersion":"helm.toolkit.fluxcd.io/v2","kind":"HelmRelease","metadata":{"name":"platform-components"},"spec":{"values":{"platform":{"components":{"values":{"podplane-operator":{"podplane":{"operator":{"config":{"ingressCertificates":{"domains":{"old.example":{}}},"workloadCertificates":{"caPath":"/workload/key"}}}}}}}}}}}`)},
+				{Revision: 3, Key: []byte(serviceCIDRKey), Value: []byte(`{"kind":"ServiceCIDR","spec":{"cidrs":["198.18.0.0/15"]}}`)},
+				{Revision: 4, Key: []byte(envoyGatewayKey), Value: []byte(`{"kind":"Gateway","spec":{"listeners":[{"name":"http","protocol":"HTTP","port":80}]}}`)},
+				{Revision: 5, Key: []byte(envoyProxyKey), Value: []byte(`{"kind":"EnvoyProxy","spec":{"provider":{"kubernetes":{"envoyDaemonSet":{"patch":{"value":{"spec":{"template":{"spec":{"containers":[{"name":"envoy"},{"name":"podplane-sds","args":["sds","--certificates-dir=/captured/certificates","--certificate=bundle-old=old.example"],"volumeMounts":[{"name":"ingress-certificates","mountPath":"/captured/certificates","readOnly":true}]}],"volumes":[{"name":"ingress-certificates","csi":{"driver":"secrets-store.csi.k8s.io"}}]}}}}}}}}}}`)},
+				{Revision: 6, Key: []byte(envoySPCKey), Value: []byte(`{"kind":"SecretProviderClass","spec":{"provider":"aws"}}`)},
+				{Revision: 7, Key: []byte("/registry/configmaps/platform-podplane-operator/platform-podplane-operator-config"), Value: []byte(`{"kind":"ConfigMap","data":{"config.json":"{\"ingress_certificates\":{\"domains\":{\"old.example\":{}}},\"certificates\":{\"ca_path\":\"/workload/key\"}}"}}`)},
+				{Revision: 8, Key: []byte("/registry/helm.toolkit.fluxcd.io/helmreleases/platform-podplane-operator/podplane-operator"), Value: []byte(`{"kind":"HelmRelease","spec":{"values":{"podplane":{"operator":{"config":{"ingressCertificates":{"domains":{"old.example":{}}}}}}}}}`)},
+			}
+			var seed bytes.Buffer
+			if err := datafile.WriteSnapshot(&seed, records, cfg.Cluster.ID); err != nil {
+				t.Fatal(err)
+			}
+			seedPath := filepath.Join(dir, "seed.netsy")
+			if err := os.WriteFile(seedPath, seed.Bytes(), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			if err := WriteSnapshot(&output, SnapshotOptions{
+				ClusterConfigPath: configPath, SeedPath: seedPath,
+				NodeIngressCertificate: mode == "local",
+				ValuesContent:          []byte(`{"platform":{"components":{"values":{"podplane-operator":{"podplane":{"operator":{"config":{"ingressCertificates":{"domains":{"override.example":{}}}}}}},"envoy-gateway":{"platform":{"envoyGateway":{"ingress":{"certificates":{"provider":"aws"}}}}}}}}}`),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			got, err := datafile.ReadSnapshot(bytes.NewReader(output.Bytes()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got[0].Key) != "_netsy" {
+				t.Fatal("bootstrap snapshot lost Netsy's initial record")
+			}
+			secretCount := 0
+			for i, record := range got {
+				if record.Revision != int64(i+1) {
+					t.Fatalf("bootstrap record %s has revision %d, want %d", record.Key, record.Revision, i+1)
+				}
+				obj := decodeTestObject(t, record)
+				switch string(record.Key) {
+				case platformComponentsHelmReleaseKey:
+					values := obj["spec"].(map[string]any)["values"].(map[string]any)
+					config := componentValues(values, "podplane-operator")["podplane"].(map[string]any)["operator"].(map[string]any)["config"].(map[string]any)
+					if config["ingressCertificates"] != nil || config["workloadCertificates"] == nil {
+						t.Fatalf("issuer/workload configuration = %v", config)
+					}
+					ingress := componentValues(values, "envoy-gateway")["platform"].(map[string]any)["envoyGateway"].(map[string]any)["ingress"].(map[string]any)
+					if ingress["certificates"].(map[string]any)["provider"] != "node" || len(ingress["domains"].([]any)) != 2 {
+						t.Fatalf("tunnel ingress values = %v", ingress)
+					}
+				case envoyGatewayKey:
+					listeners := obj["spec"].(map[string]any)["listeners"].([]any)
+					if len(listeners) != 5 {
+						t.Fatalf("listeners = %v", listeners)
+					}
+					for _, value := range listeners[1:] {
+						listener := value.(map[string]any)
+						ref := listener["tls"].(map[string]any)["certificateRefs"].([]any)[0].(map[string]any)
+						if ref["name"] != "node" {
+							t.Fatalf("certificate reference = %v", ref)
+						}
+					}
+				case envoyProxyKey:
+					containers, err := nestedSlice(obj, "test", "spec", "provider", "kubernetes", "envoyDaemonSet", "patch", "value", "spec", "template", "spec", "containers")
+					if err != nil {
+						t.Fatal(err)
+					}
+					args := containers[1].(map[string]any)["args"].([]any)
+					if len(args) != 2 || args[1] != "--node-certificate=example.com,second.example.net" {
+						t.Fatalf("SDS args = %v", args)
+					}
+					mount := containers[1].(map[string]any)["volumeMounts"].([]any)[0].(map[string]any)
+					if mount["mountPath"] != "/var/run/podplane/ingress-certificates" || mount["readOnly"] != true {
+						t.Fatalf("SDS mount = %v", mount)
+					}
+					volumes, err := nestedSlice(obj, "test", "spec", "provider", "kubernetes", "envoyDaemonSet", "patch", "value", "spec", "template", "spec", "volumes")
+					if err != nil {
+						t.Fatal(err)
+					}
+					volume := volumes[0].(map[string]any)
+					if volume["csi"] != nil || volume["hostPath"].(map[string]any)["path"] != "/opt/podplane/secrets/ingress" {
+						t.Fatalf("ingress volume = %v", volume)
+					}
+				case envoySPCKey:
+					t.Fatal("tunnel snapshot contains ingress CSI configuration")
+				case "/registry/secrets/platform-envoy-gateway/node":
+					secretCount++
+					if obj["type"] != "gateway.envoyproxy.io/sds" || len(obj["data"].(map[string]any)) != 2 {
+						t.Fatalf("SDS pointer = %v", obj)
+					}
+				case "/registry/configmaps/platform-podplane-operator/platform-podplane-operator-config":
+					var config map[string]any
+					if err := json.Unmarshal([]byte(obj["data"].(map[string]any)["config.json"].(string)), &config); err != nil {
+						t.Fatal(err)
+					}
+					if config["ingress_certificates"] != nil || config["certificates"] == nil {
+						t.Fatalf("seeded operator configuration = %v", config)
+					}
+				case "/registry/helm.toolkit.fluxcd.io/helmreleases/platform-podplane-operator/podplane-operator":
+					config := obj["spec"].(map[string]any)["values"].(map[string]any)["podplane"].(map[string]any)["operator"].(map[string]any)["config"].(map[string]any)
+					if config["ingressCertificates"] != nil {
+						t.Fatalf("captured operator Helm values = %v", config)
+					}
+				}
+			}
+			if secretCount != 1 {
+				t.Fatalf("shared SDS pointers = %d, want 1", secretCount)
+			}
+		})
 	}
 }
 

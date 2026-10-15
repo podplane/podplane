@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// TestFindFreePortUsesPreferredPortWhenAvailable checks an available preferred port is retained.
 func TestFindFreePortUsesPreferredPortWhenAvailable(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -28,6 +29,7 @@ func TestFindFreePortUsesPreferredPortWhenAvailable(t *testing.T) {
 	}
 }
 
+// TestFindFreePortFallsBackWhenPreferredPortIsBusy checks allocation avoids a listening port.
 func TestFindFreePortFallsBackWhenPreferredPortIsBusy(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -45,6 +47,7 @@ func TestFindFreePortFallsBackWhenPreferredPortIsBusy(t *testing.T) {
 	}
 }
 
+// TestFindFreePortSkipsReservedPreferredPort checks allocation avoids ports reserved by earlier forwards.
 func TestFindFreePortSkipsReservedPreferredPort(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

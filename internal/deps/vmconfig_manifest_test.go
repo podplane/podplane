@@ -11,6 +11,7 @@ import (
 	"testing"
 )
 
+// TestManifestBootMetadata verifies JSON boot metadata decodes into complete kernel and initrd entries.
 func TestManifestBootMetadata(t *testing.T) {
 	const raw = `{
 		"vmconfig": {
@@ -41,6 +42,7 @@ func TestManifestBootMetadata(t *testing.T) {
 	}
 }
 
+// TestDependencyParseDigest verifies supported checksums split correctly and malformed digests report errors.
 func TestDependencyParseDigest(t *testing.T) {
 	const validSHA256Hex = "56171987d3947707c3563db2f4001bccaf50fd63468611b9f3cbecb1375ee7ec"
 	const validSHA512Hex = "fa527f8a60f71e9f5d680cf7311b397d595fc95c36e059479b043a6accb9ef1c9eeacf7cd1b9feebe2145870f6da845e8a2a5171008c421f5c898a77d53725c3"
@@ -135,6 +137,7 @@ func TestDependencyParseDigest(t *testing.T) {
 	}
 }
 
+// TestDependencySHA256 verifies SHA-256 extraction rejects SHA-512 digests.
 func TestDependencySHA256(t *testing.T) {
 	const validHex = "56171987d3947707c3563db2f4001bccaf50fd63468611b9f3cbecb1375ee7ec"
 
@@ -159,6 +162,7 @@ func TestDependencySHA256(t *testing.T) {
 	}
 }
 
+// TestItemResolveURL verifies upstream URLs remain unchanged unless a cache proxy base is supplied.
 func TestItemResolveURL(t *testing.T) {
 	it := Item{
 		Name: "runc",
@@ -181,6 +185,7 @@ func TestItemResolveURL(t *testing.T) {
 	}
 }
 
+// TestManifestItemsFilterProvidersAndCachedState verifies install item selection respects providers and cache markers.
 func TestManifestItemsFilterProvidersAndCachedState(t *testing.T) {
 	manifest := &Manifest{VMConfig: VMConfig{Dependencies: map[string]Dependency{
 		"neutral": {Version: "1", Cached: true},
@@ -205,6 +210,7 @@ func TestManifestItemsFilterProvidersAndCachedState(t *testing.T) {
 	}
 }
 
+// itemNames returns sorted item names joined for test comparisons.
 func itemNames(items []Item) string {
 	names := make([]string, 0, len(items))
 	for _, item := range items {

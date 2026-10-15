@@ -91,6 +91,7 @@ type DownloadOptions struct {
 	SeedsManifestPath string
 }
 
+// pendingDownload records an artifact or image job and its originating manifest indexes.
 type pendingDownload struct {
 	Item           Item
 	Dest           string
@@ -103,6 +104,7 @@ type pendingDownload struct {
 	Kind           pendingDownloadKind
 }
 
+// pendingDownloadKind distinguishes file downloads from each image manifest source.
 type pendingDownloadKind string
 
 const (
@@ -533,6 +535,7 @@ func (m *Manager) loadSeedsManifest(ctx context.Context, client *http.Client, op
 	return seedsManifest, seedsSource, nil
 }
 
+// downloadPendingMessage summarizes queued artifact and image counts for progress output.
 func downloadPendingMessage(vmconfigPending, imagePending int) string {
 	if vmconfigPending == 0 {
 		return fmt.Sprintf("Populating image mirror store with %d images...", imagePending)
@@ -543,6 +546,7 @@ func downloadPendingMessage(vmconfigPending, imagePending int) string {
 	return fmt.Sprintf("Downloading %d vmconfig artifacts and populating image mirror store with %d images...", vmconfigPending, imagePending)
 }
 
+// downloadPending runs bounded downloads with per-registry limits and cancels on the first failure.
 func (m *Manager) downloadPending(pending []pendingDownload, concurrency int, client *http.Client, emit func(DownloadEvent)) error {
 	if concurrency <= 0 {
 		concurrency = defaultDownloadConcurrency
@@ -667,6 +671,7 @@ func (m *Manager) downloadPending(pending []pendingDownload, concurrency int, cl
 	return nil
 }
 
+// registryHostFromImage extracts an explicit registry host or defaults to Docker Hub.
 func registryHostFromImage(image string) string {
 	repo, _, _ := splitImageRef(image)
 	first := repo
@@ -679,6 +684,7 @@ func registryHostFromImage(image string) string {
 	return "docker.io"
 }
 
+// registryConcurrencySemaphores creates bounded channels for positive registry concurrency limits.
 func registryConcurrencySemaphores(overrides map[string]int) map[string]chan struct{} {
 	semaphores := make(map[string]chan struct{}, len(overrides))
 	for registry, limit := range overrides {

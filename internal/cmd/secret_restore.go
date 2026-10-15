@@ -20,11 +20,11 @@ func newSecretRestoreCmd(c *config.Config) *cobra.Command {
 			if err := secrets.ValidateKey(args[0]); err != nil {
 				return err
 			}
-			ctx, err := resolveSecretContext(c)
+			ctx, err := resolveSecretContext(cmd.Context(), c)
 			if err != nil {
 				return err
 			}
-			client := secrets.Client{Context: secretFlags.Context, Kubeconfig: secretFlags.Kubeconfig}
+			client := secrets.Client{Context: ctx.Context, Kubeconfig: secretFlags.Kubeconfig}
 			if _, err := client.Put(secrets.NewKeyspaceRequest(ctx.Namespace, ctx.KeyspaceName, args[0], "restore", nil)); err != nil {
 				return err
 			}

@@ -96,6 +96,7 @@ func RunHealthTaskProgress(ctx context.Context, checks []health.Check, progress 
 	}
 }
 
+// healthProgressPoller tracks check dependencies, readiness results, and elapsed check times.
 type healthProgressPoller struct {
 	ctx       context.Context
 	checks    []health.Check

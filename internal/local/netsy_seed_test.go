@@ -170,7 +170,20 @@ func TestEnsureInitialNetsySnapshotWritesSnapshot(t *testing.T) {
 		t.Fatal("platform-components HelmRelease not found")
 	}
 	values := release["spec"].(map[string]any)["values"].(map[string]any)
-	zot := values["platform"].(map[string]any)["components"].(map[string]any)["values"].(map[string]any)["zot-registry"].(map[string]any)
+	components := values["platform"].(map[string]any)["components"].(map[string]any)
+	componentValues := components["values"].(map[string]any)
+	ingress := componentValues["envoy-gateway"].(map[string]any)["platform"].(map[string]any)["envoyGateway"].(map[string]any)["ingress"].(map[string]any)
+	if ingress["certificates"].(map[string]any)["provider"] != "node" {
+		t.Fatalf("local ingress certificates = %v, want node provider", ingress["certificates"])
+	}
+	operator := componentValues["podplane-operator"].(map[string]any)["podplane"].(map[string]any)["operator"].(map[string]any)["config"].(map[string]any)
+	if operator["ingressCertificates"] != nil || operator["secrets"] == nil {
+		t.Fatalf("local operator config = %v, want secrets without ingress issuance", operator)
+	}
+	if components["apps"].(map[string]any)["secrets-store-csi-driver"].(map[string]any)["enabled"] != true {
+		t.Fatal("local secrets CSI driver must remain enabled")
+	}
+	zot := componentValues["zot-registry"].(map[string]any)
 	storage := zot["platform"].(map[string]any)["zotRegistry"].(map[string]any)["storage"].(map[string]any)
 	if got, want := storage["endpoint"], "https://10.0.2.15:19443/s3/cache"; got != want {
 		t.Fatalf("Zot storage endpoint = %v, want %v", got, want)
@@ -235,6 +248,7 @@ func TestGetSeedConfigReadsSavedValue(t *testing.T) {
 	}
 }
 
+// TestSeedConfigRejectsMissingConfig checks seed lookup fails when the cluster config is absent.
 func TestSeedConfigRejectsMissingConfig(t *testing.T) {
 	m := &Local{dataDir: t.TempDir(), clusterID: "dev"}
 	if _, err := m.SeedConfig(); err == nil {
@@ -254,6 +268,7 @@ func writeMinimalLocalClusterConfig(t *testing.T, dataDir, clusterID string) str
 	return path
 }
 
+// newTestLocalManager builds a cluster-scoped local manager with QEMU storage in the test directory.
 func newTestLocalManager(dataDir, clusterID string) *Local {
 	return &Local{
 		dataDir:   dataDir,

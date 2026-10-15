@@ -15,6 +15,7 @@ import (
 	"testing"
 )
 
+// TestMirrorRepoFromChartImagePreservesRenderedRepoPath verifies mirror paths retain registries and normalize Docker Hub shorthand.
 func TestMirrorRepoFromChartImagePreservesRenderedRepoPath(t *testing.T) {
 	tests := map[string]string{
 		"quay.io/cilium/cilium:v1.16.3@sha256:abc":                   "mirror/quay.io/cilium/cilium",
@@ -32,6 +33,7 @@ func TestMirrorRepoFromChartImagePreservesRenderedRepoPath(t *testing.T) {
 	}
 }
 
+// TestMirroredImageRef verifies mirrored references preserve source tags and digests.
 func TestMirroredImageRef(t *testing.T) {
 	tests := map[string]string{
 		"docker.io/library/caddy:2":           "zot.local/mirror/docker.io/library/caddy:2",
@@ -48,6 +50,7 @@ func TestMirroredImageRef(t *testing.T) {
 	}
 }
 
+// TestRegistryHostFromImage verifies explicit hosts and Docker Hub shorthand resolve correctly.
 func TestRegistryHostFromImage(t *testing.T) {
 	tests := map[string]string{
 		"public.ecr.aws/csi-components/csi-attacher:v4.9.0-eksbuild.3": "public.ecr.aws",
@@ -64,6 +67,7 @@ func TestRegistryHostFromImage(t *testing.T) {
 	}
 }
 
+// TestResolvedImageDropsTagAndAppendsDigest verifies digest pinning removes the source tag.
 func TestResolvedImageDropsTagAndAppendsDigest(t *testing.T) {
 	got := resolvedImage("quay.io/cilium/cilium:v1.16.3", "sha256:abc")
 	want := "quay.io/cilium/cilium@sha256:abc"
@@ -72,6 +76,7 @@ func TestResolvedImageDropsTagAndAppendsDigest(t *testing.T) {
 	}
 }
 
+// TestPopulateComponentsZotStoreRequiresImageSize verifies missing byte counts fail before image downloads.
 func TestPopulateComponentsZotStoreRequiresImageSize(t *testing.T) {
 	manifest := &ComponentsManifest{Components: Components{Images: []ComponentImage{{
 		Components: []string{"test"},
@@ -87,6 +92,7 @@ func TestPopulateComponentsZotStoreRequiresImageSize(t *testing.T) {
 	}
 }
 
+// TestExistingBlobCompleteChecksSizeAndDigest verifies both length and content determine blob reuse.
 func TestExistingBlobCompleteChecksSizeAndDigest(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte("blob contents")
@@ -122,6 +128,7 @@ func TestExistingBlobCompleteChecksSizeAndDigest(t *testing.T) {
 	}
 }
 
+// TestComponentImageCachedUsesLocalZotIndex verifies only the locally indexed tag is considered cached.
 func TestComponentImageCachedUsesLocalZotIndex(t *testing.T) {
 	destDir := t.TempDir()
 	body := []byte(`{"schemaVersion":2}`)
@@ -167,6 +174,7 @@ func TestComponentImageCachedUsesLocalZotIndex(t *testing.T) {
 	}
 }
 
+// TestComponentImageCachedRequiresPinnedChartDigest verifies child blobs alone cannot satisfy a chart-pinned index.
 func TestComponentImageCachedRequiresPinnedChartDigest(t *testing.T) {
 	destDir := t.TempDir()
 	childBody := []byte(`{"schemaVersion":2}`)
@@ -317,6 +325,7 @@ func TestComponentImageCachedRejectsDuplicateSameArchManifest(t *testing.T) {
 	}
 }
 
+// TestTaggedImageIndexPreservesMultiplePlatforms verifies one tag retains both platform manifests and repository descriptors.
 func TestTaggedImageIndexPreservesMultiplePlatforms(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repoDir, "blobs", "sha256"), 0o755); err != nil {
@@ -371,6 +380,7 @@ func TestTaggedImageIndexPreservesMultiplePlatforms(t *testing.T) {
 	}
 }
 
+// TestTaggedImageDescriptorPreservesOriginalDigest verifies tagging an existing index keeps its digest and children.
 func TestTaggedImageDescriptorPreservesOriginalDigest(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repoDir, "blobs", "sha256"), 0o755); err != nil {

@@ -97,6 +97,7 @@ func TestClusterDeleteNoApplyValidatesOnly(t *testing.T) {
 	}
 }
 
+// TestDeploySecretSetArgsUseSecretProviderBindingItems checks provider, mount path, and item values for secret bindings.
 func TestDeploySecretSetArgsUseSecretProviderBindingItems(t *testing.T) {
 	summary := config.ClusterSummary{
 		ID: "test-cluster",
@@ -124,6 +125,7 @@ func TestDeploySecretSetArgsUseSecretProviderBindingItems(t *testing.T) {
 	}
 }
 
+// TestDeploySecretSetArgsRequiresDefaultProvider checks secret bindings fail without a cached default provider.
 func TestDeploySecretSetArgsRequiresDefaultProvider(t *testing.T) {
 	_, err := deploySecretSetArgs(config.ClusterSummary{ID: "test-cluster"}, "app", []string{"github-private-key"})
 	if err == nil || !strings.Contains(err.Error(), "default secrets provider") {
@@ -131,6 +133,7 @@ func TestDeploySecretSetArgsRequiresDefaultProvider(t *testing.T) {
 	}
 }
 
+// TestSecretCommandUsesSingularName checks the secret command's public name and description.
 func TestSecretCommandUsesSingularName(t *testing.T) {
 	cmd := newSecretCmd(&config.Config{})
 	if got, want := cmd.Name(), "secret"; got != want {
@@ -141,6 +144,7 @@ func TestSecretCommandUsesSingularName(t *testing.T) {
 	}
 }
 
+// TestSilenceUsageAfterValidationSuppressesRuntimeUsage checks runtime failures do not print usage.
 func TestSilenceUsageAfterValidationSuppressesRuntimeUsage(t *testing.T) {
 	cmd := testUsageCommand(t)
 	cmd.SetArgs([]string{"run", "ok"})
@@ -157,6 +161,7 @@ func TestSilenceUsageAfterValidationSuppressesRuntimeUsage(t *testing.T) {
 	}
 }
 
+// TestSilenceUsageAfterValidationKeepsArgValidationUsage checks invalid arguments still print usage.
 func TestSilenceUsageAfterValidationKeepsArgValidationUsage(t *testing.T) {
 	cmd := testUsageCommand(t)
 	cmd.SetArgs([]string{"run"})
@@ -173,6 +178,7 @@ func TestSilenceUsageAfterValidationKeepsArgValidationUsage(t *testing.T) {
 	}
 }
 
+// testUsageCommand builds a failing command whose pre-run hook silences usage after argument validation.
 func testUsageCommand(t *testing.T) *cobra.Command {
 	t.Helper()
 	root := &cobra.Command{

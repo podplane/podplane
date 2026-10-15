@@ -6,6 +6,7 @@ package qemu
 
 import "testing"
 
+// TestNormalizeKernelCmdline checks bootloader tokens are removed and local boot defaults added.
 func TestNormalizeKernelCmdline(t *testing.T) {
 	raw := "BOOT_IMAGE=/boot/vmlinuz root=UUID=abc ro quiet $vt_handoff"
 	got := NormalizeKernelCmdline("arm64", raw)
@@ -15,6 +16,7 @@ func TestNormalizeKernelCmdline(t *testing.T) {
 	}
 }
 
+// TestNormalizeKernelCmdlinePreservesExistingConsoleAndRootwait checks explicit boot settings remain unchanged.
 func TestNormalizeKernelCmdlinePreservesExistingConsoleAndRootwait(t *testing.T) {
 	raw := "root=/dev/vda1 ro rootwait systemd.firstboot=off systemd.debug_shell systemd.default_debug_tty=ttyS0 console=ttyS0,115200n8"
 	got := NormalizeKernelCmdline("amd64", raw)

@@ -14,6 +14,7 @@ import (
 	"github.com/podplane/podplane/internal/clusterconfig"
 )
 
+// TestSetClusterSummary checks summary round-tripping and flattened persistence.
 func TestSetClusterSummary(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	c, err := Init()
@@ -61,6 +62,7 @@ func TestSetClusterSummary(t *testing.T) {
 	}
 }
 
+// TestClusterSummaryFromConfigStripsSecretsProviderDetails checks that only provider selection and kind are retained.
 func TestClusterSummaryFromConfigStripsSecretsProviderDetails(t *testing.T) {
 	cluster := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ID: "test-cluster",
@@ -90,6 +92,7 @@ func TestClusterSummaryFromConfigStripsSecretsProviderDetails(t *testing.T) {
 	}
 }
 
+// TestSetLocalClusterSummaryUsesScopedKey checks that local summaries do not collide with remote entries.
 func TestSetLocalClusterSummaryUsesScopedKey(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	c, err := Init()
@@ -109,6 +112,7 @@ func TestSetLocalClusterSummaryUsesScopedKey(t *testing.T) {
 	}
 }
 
+// TestClusterSummaryMissing checks that an unknown cluster returns an empty summary without error.
 func TestClusterSummaryMissing(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	c, err := Init()

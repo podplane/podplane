@@ -10,6 +10,7 @@ import (
 	"strings"
 )
 
+// Dependency describes a binary's version command, output parser, and minimum major version.
 type Dependency struct {
 	Binary       string
 	VersionArgs  []string
@@ -68,6 +69,7 @@ var Dependencies = map[string]Dependency{
 	"qemu-img":            qemuDependency("qemu-img"),
 }
 
+// qemuDependency configures QEMU version parsing with a minimum major version of nine.
 func qemuDependency(binary string) Dependency {
 	return Dependency{
 		Binary:      binary,

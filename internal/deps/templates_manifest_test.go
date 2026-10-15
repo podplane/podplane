@@ -6,6 +6,7 @@ package deps
 
 import "testing"
 
+// TestTemplateManifestDownloadImageIndexesFiltersByArch verifies selected and platform-neutral images are included.
 func TestTemplateManifestDownloadImageIndexesFiltersByArch(t *testing.T) {
 	manifest := &TemplatesManifest{Templates: Templates{Images: []TemplateImage{
 		{Image: "amd64", Platform: "linux/amd64"},
@@ -19,6 +20,7 @@ func TestTemplateManifestDownloadImageIndexesFiltersByArch(t *testing.T) {
 	}
 }
 
+// TestTemplateManifestResetAndMarkImageCached verifies template image cache markers can be cleared and restored.
 func TestTemplateManifestResetAndMarkImageCached(t *testing.T) {
 	manifest := &TemplatesManifest{Templates: Templates{Images: []TemplateImage{{Image: "caddy", Cached: true}}}}
 	manifest.ResetCached()
@@ -31,6 +33,7 @@ func TestTemplateManifestResetAndMarkImageCached(t *testing.T) {
 	}
 }
 
+// templateImageNamesAt returns image references at the selected template manifest indexes.
 func templateImageNamesAt(images []TemplateImage, indexes []int) []string {
 	names := make([]string, 0, len(indexes))
 	for _, index := range indexes {

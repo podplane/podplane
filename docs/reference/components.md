@@ -53,7 +53,7 @@ Recommended components which can also be installed via `podplane install` atop t
 
 - `agent-sandbox`: [Agent Sandbox](https://agent-sandbox.sigs.k8s.io/) controller for isolated, stateful singleton workloads such as AI agent runtimes
     - `agent-sandbox-crds`
-- `podplane-operator` for Podplane platform APIs and controllers. It signs workload and Service certificates, publishes the workload trust bundle, injects that CA into annotated API extension resources, and manages self-signed fallback and optional ACME ingress certificates.
+- `podplane-operator` for Podplane platform APIs and controllers. It grants the Podplane [RBAC](../guides/rbac.md) groups access to tenant namespaces, signs workload and Service certificates, publishes the workload trust bundle, injects that CA into annotated API extension resources, and manages self-signed fallback and optional ACME ingress certificates.
     - `podplane-operator-crds`
 - `secrets-store-csi-driver`: [Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/) for mounting provider-backed secrets into Pods. Provider-specific components are installed separately based on cluster configuration.
     - `secrets-store-csi-driver-crds`

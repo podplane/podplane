@@ -13,9 +13,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/nstance-dev/nstance/pkg/fakeserver"
+	"github.com/nstance-dev/nstance/v2/pkg/fakeserver"
 )
 
+// localNstanceStore persists fake Nstance keys beneath a local filesystem root.
 type localNstanceStore struct {
 	root string
 }
@@ -32,6 +33,7 @@ func newLocalNstanceStore(root string) (*localNstanceStore, error) {
 	return &localNstanceStore{root: root}, nil
 }
 
+// path resolves a store key beneath the root, rejecting empty and escaping paths.
 func (s *localNstanceStore) path(key string) (string, error) {
 	clean := filepath.Clean(strings.TrimPrefix(key, "/"))
 	if clean == "." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {

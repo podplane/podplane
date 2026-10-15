@@ -11,10 +11,11 @@ import (
 
 var clusterCmd = &cobra.Command{
 	Use:   "cluster",
-	Short: "Manage cluster infrastructure",
-	Long:  "Commands to generate OpenTofu/Terraform files and manage Podplane cluster infrastructure.",
+	Short: "Manage clusters",
+	Long:  "Commands to manage Podplane clusters and their infrastructure.",
 }
 
+// newClusterCmd groups cluster infrastructure lifecycle and sleep commands with fallback help.
 func newClusterCmd(c *config.Config) *cobra.Command {
 	clusterCmd.Run = func(cmd *cobra.Command, args []string) {
 		_ = cmd.Help()
@@ -22,5 +23,6 @@ func newClusterCmd(c *config.Config) *cobra.Command {
 	clusterCmd.AddCommand(newClusterCreateCmd(c))
 	clusterCmd.AddCommand(newClusterUpgradeCmd(c))
 	clusterCmd.AddCommand(newClusterDeleteCmd(c))
+	clusterCmd.AddCommand(newClusterSleepCmd(c))
 	return clusterCmd
 }

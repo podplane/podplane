@@ -196,6 +196,7 @@ func templateOCIReference(chart TemplateChart) (name.Reference, error) {
 	return name.ParseReference(value, name.WeakValidation)
 }
 
+// imageRefParts holds the repository, tag, and digest portions of an image reference.
 type imageRefParts struct {
 	repo   string
 	tag    string

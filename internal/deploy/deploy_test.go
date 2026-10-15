@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// TestHelmUpgradeInstallArgsWaitsForWorkloadReadiness checks Helm wait and timeout arguments.
 func TestHelmUpgradeInstallArgsWaitsForWorkloadReadiness(t *testing.T) {
 	t.Parallel()
 	got := helmUpgradeInstallArgs(Options{Name: "hello", ChartPath: "/charts/web", Wait: true, Timeout: 2 * time.Minute}, "/tmp/values.json")
@@ -16,6 +17,7 @@ func TestHelmUpgradeInstallArgsWaitsForWorkloadReadiness(t *testing.T) {
 	assertStringSlicesEqual(t, got, want)
 }
 
+// TestHelmUpgradeInstallArgsCanSkipWait checks omission of wait and timeout when waiting is disabled.
 func TestHelmUpgradeInstallArgsCanSkipWait(t *testing.T) {
 	t.Parallel()
 	got := helmUpgradeInstallArgs(Options{Name: "hello", ChartPath: "/charts/web", Timeout: 2 * time.Minute}, "/tmp/values.json")
@@ -23,6 +25,7 @@ func TestHelmUpgradeInstallArgsCanSkipWait(t *testing.T) {
 	assertStringSlicesEqual(t, got, want)
 }
 
+// TestHelmUpgradeInstallArgsIncludesOptionalFlags checks values, namespace, and Kubernetes connection arguments.
 func TestHelmUpgradeInstallArgsIncludesOptionalFlags(t *testing.T) {
 	t.Parallel()
 	got := helmUpgradeInstallArgs(Options{

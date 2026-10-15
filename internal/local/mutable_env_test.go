@@ -12,6 +12,7 @@ import (
 	"github.com/podplane/podplane/internal/clusterspec"
 )
 
+// TestStageMutableEnvIfChangedStagesWhenBaselineDiffers checks desired content is queued without recording delivery.
 func TestStageMutableEnvIfChangedStagesWhenBaselineDiffers(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
@@ -52,6 +53,7 @@ func TestStageMutableEnvIfChangedStagesWhenBaselineDiffers(t *testing.T) {
 	}
 }
 
+// TestStageMutableEnvIfChangedSkipsWhenBaselineMatches checks delivered content produces no pending update.
 func TestStageMutableEnvIfChangedSkipsWhenBaselineMatches(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
@@ -81,6 +83,7 @@ func TestStageMutableEnvIfChangedSkipsWhenBaselineMatches(t *testing.T) {
 	}
 }
 
+// TestWriteMutableEnvBaselineRecordsFirstBootWithoutStaging checks first-boot content is saved as the baseline.
 func TestWriteMutableEnvBaselineRecordsFirstBootWithoutStaging(t *testing.T) {
 	dataDir := t.TempDir()
 	manager := &Local{dataDir: dataDir}

@@ -71,6 +71,7 @@ func TestDeleteTerminatesDanglingInstancesAfterDestroy(t *testing.T) {
 	}
 }
 
+// fakeExecutor supplies Terraform outputs and records resource destruction.
 type fakeExecutor struct {
 	outputs   []byte
 	destroyed bool
@@ -87,6 +88,7 @@ func (f *fakeExecutor) Destroy(context.Context, string, bool) error {
 	return nil
 }
 
+// fakeProvider supplies instance lists and tracks termination and queued wait failures.
 type fakeProvider struct {
 	waitErrs   []error
 	remaining  []Instance

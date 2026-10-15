@@ -46,6 +46,7 @@ func confirmText(message string) (bool, error) {
 	return strings.EqualFold(strings.TrimSpace(line), "yes"), nil
 }
 
+// confirmModel tracks the yes/no selection, result, and available prompt width.
 type confirmModel struct {
 	message   string
 	selected  int

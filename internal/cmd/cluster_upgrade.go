@@ -53,7 +53,7 @@ func newClusterUpgradeCmd(c *config.Config) *cobra.Command {
 			dir := filepath.Dir(path)
 			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Minute)
 			defer cancel()
-			configuration, err := tfdeps.New(c.DepsCacheDir()).Upgrade(ctx, executor, dir)
+			configuration, err := tfdeps.New(c.DepsCacheDir()).Upgrade(ctx, executor, dir, cfg.Cluster.Providers[0].Kind)
 			if err != nil {
 				return err
 			}

@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newClusterDeleteCmd wires config validation, confirmation, and AWS infrastructure destruction.
 func newClusterDeleteCmd(c *config.Config) *cobra.Command {
 	var cfgPath string
 	var noApply bool

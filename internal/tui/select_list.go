@@ -58,15 +58,22 @@ type Item struct {
 // FilterValue returns the searchable value for the list item.
 func (i Item) FilterValue() string { return "" }
 
+// itemDelegate renders numbered selection rows without per-item update commands.
 type itemDelegate struct{}
 
-func (d itemDelegate) Height() int                             { return 1 }
-func (d itemDelegate) Spacing() int                            { return 0 }
+// Height reserves one terminal row per selection item.
+func (d itemDelegate) Height() int { return 1 }
+
+// Spacing leaves no blank rows between selection items.
+func (d itemDelegate) Spacing() int { return 0 }
+
+// Update leaves item-level messages to the enclosing list model.
 func (d itemDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
 var itemStyle = lipgloss.NewStyle().PaddingLeft(2)
 var selectedItemStyle = lipgloss.NewStyle().Foreground(ColorSecondary)
 
+// Render writes a numbered item label, highlighting the selected row.
 func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	i, ok := listItem.(Item)
 	if !ok {
@@ -85,6 +92,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	_, _ = fmt.Fprint(w, fn(str))
 }
 
+// model tracks the selection list, chosen key, and cancellation state.
 type model struct {
 	action   string
 	list     list.Model
@@ -92,10 +100,12 @@ type model struct {
 	quitting bool
 }
 
+// Init starts the selection list without an initial command.
 func (m model) Init() tea.Cmd {
 	return nil
 }
 
+// Update handles sizing, cancellation, and item submission while delegating navigation to the list.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -124,6 +134,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// View renders the list until selection or cancellation, then clears its output.
 func (m model) View() string {
 	if m.quitting || m.choice != "" {
 		// clears the window of selection output

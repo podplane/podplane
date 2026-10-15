@@ -6,10 +6,12 @@ package kubectl
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/podplane/podplane/internal/execwrap"
@@ -74,89 +76,47 @@ func SetContext(stdout io.Writer, sub string, clusterID string, local bool) erro
 	return cmd.Run()
 }
 
-// UserFromContext returns the kubeconfig user for the selected context. If
-// kubeContext is empty, the current context is used.
-func UserFromContext(kubeContext, kubeconfig string) (string, error) {
-	args := []string{"config", "view", "--raw", "--output=json"}
-	if kubeconfig != "" {
-		args = append(args, "--kubeconfig", kubeconfig)
-	}
-
-	var out bytes.Buffer
-	var errOut bytes.Buffer
-	cmd := execwrap.Command("kubectl", args...)
-	cmd.Stdout = &out
-	cmd.Stderr = &errOut
-	if err := cmd.Run(); err != nil {
-		stderr := strings.TrimSpace(errOut.String())
-		if stderr != "" {
-			return "", fmt.Errorf("read kubeconfig user: %w: %s", err, stderr)
-		}
-		return "", fmt.Errorf("read kubeconfig user: %w", err)
-	}
-
-	var cfg struct {
-		CurrentContext string `json:"current-context"`
-		Contexts       []struct {
-			Name    string `json:"name"`
-			Context struct {
-				User string `json:"user"`
-			} `json:"context"`
-		} `json:"contexts"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &cfg); err != nil {
-		return "", fmt.Errorf("parse kubeconfig: %w", err)
-	}
-
-	name := strings.TrimSpace(kubeContext)
-	if name == "" {
-		name = strings.TrimSpace(cfg.CurrentContext)
-	}
-	if name == "" {
-		return "", fmt.Errorf("no kubeconfig context selected; pass --context or select a current context")
-	}
-
-	for _, context := range cfg.Contexts {
-		if context.Name == name {
-			return context.Context.User, nil
-		}
-	}
-	return "", fmt.Errorf("kubeconfig context %q not found", name)
+// Context identifies a selected kubeconfig context and its referenced resources.
+type Context struct {
+	Name      string `json:"-"`
+	Cluster   string `json:"cluster"`
+	User      string `json:"user"`
+	Namespace string `json:"namespace"`
 }
 
-// ClusterIDFromContext returns a kubeconfig context's Podplane cluster ID and
-// whether it is a local Podplane cluster context. If kubeContext is empty, the
-// current context is used.
-func ClusterIDFromContext(kubeContext, kubeconfig string) (string, bool, error) {
-	args := []string{"config", "view", "--raw", "--output=json"}
-	if kubeconfig != "" {
-		args = append(args, "--kubeconfig", kubeconfig)
+// ResolveContext reads the explicit or current kubeconfig context once. Callers
+// use its Name for subsequent requests rather than resolving the current context again.
+func ResolveContext(ctx context.Context, kubeContext, kubeconfig string) (Context, error) {
+	if err := ctx.Err(); err != nil {
+		return Context{}, err
 	}
+	args := append(Args(strings.TrimSpace(kubeContext), kubeconfig), "config", "view", "--output=json")
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	cmd := execwrap.Command("kubectl", args...)
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
 	cmd.Stdout = &out
 	cmd.Stderr = &errOut
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return Context{}, ctx.Err()
+		}
 		stderr := strings.TrimSpace(errOut.String())
 		if stderr != "" {
-			return "", false, fmt.Errorf("read kubeconfig: %w: %s", err, stderr)
+			return Context{}, fmt.Errorf("read kubeconfig: %w: %s", err, stderr)
 		}
-		return "", false, fmt.Errorf("read kubeconfig: %w", err)
+		return Context{}, fmt.Errorf("read kubeconfig: %w", err)
 	}
 
 	var cfg struct {
 		CurrentContext string `json:"current-context"`
 		Contexts       []struct {
-			Name    string `json:"name"`
-			Context struct {
-				Cluster string `json:"cluster"`
-			} `json:"context"`
+			Name    string  `json:"name"`
+			Context Context `json:"context"`
 		} `json:"contexts"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &cfg); err != nil {
-		return "", false, fmt.Errorf("parse kubeconfig: %w", err)
+		return Context{}, fmt.Errorf("parse kubeconfig: %w", err)
 	}
 
 	name := strings.TrimSpace(kubeContext)
@@ -164,20 +124,47 @@ func ClusterIDFromContext(kubeContext, kubeconfig string) (string, bool, error) 
 		name = strings.TrimSpace(cfg.CurrentContext)
 	}
 	if name == "" {
-		return "", false, fmt.Errorf("no kubeconfig context selected; pass --context or select a current context")
+		return Context{}, fmt.Errorf("no kubeconfig context selected; pass --context or select a current context")
 	}
 
-	for _, context := range cfg.Contexts {
-		if context.Name != name {
+	for _, entry := range cfg.Contexts {
+		if entry.Name != name {
 			continue
 		}
-		if strings.HasPrefix(context.Context.Cluster, "podplane-local-") {
-			return strings.TrimPrefix(context.Context.Cluster, "podplane-local-"), true, nil
-		}
-		if clusterID := strings.TrimPrefix(context.Context.Cluster, "podplane-"); clusterID != context.Context.Cluster {
-			return clusterID, false, nil
-		}
-		return name, false, nil
+		entry.Context.Name = entry.Name
+		return entry.Context, nil
 	}
-	return "", false, fmt.Errorf("kubeconfig context %q not found", name)
+	return Context{}, fmt.Errorf("kubeconfig context %q not found", name)
+}
+
+// ClusterID returns the Podplane cluster ID and whether it is local. For other
+// clusters it retains the context name as the ID, matching cached-summary lookup.
+func (c Context) ClusterID() (string, bool) {
+	if id, ok := strings.CutPrefix(c.Cluster, "podplane-local-"); ok {
+		return id, true
+	}
+	if id, ok := strings.CutPrefix(c.Cluster, "podplane-"); ok {
+		return id, false
+	}
+	return c.Name, false
+}
+
+// UserFromContext returns the kubeconfig user for the explicit or current context.
+func UserFromContext(kubeContext, kubeconfig string) (string, error) {
+	selected, err := ResolveContext(context.Background(), kubeContext, kubeconfig)
+	if err != nil {
+		return "", err
+	}
+	return selected.User, nil
+}
+
+// ClusterIDFromContext returns the cluster ID and local status for the explicit
+// or current context. Call ResolveContext when subsequent requests need to pin its name.
+func ClusterIDFromContext(kubeContext, kubeconfig string) (string, bool, error) {
+	selected, err := ResolveContext(context.Background(), kubeContext, kubeconfig)
+	if err != nil {
+		return "", false, err
+	}
+	id, local := selected.ClusterID()
+	return id, local, nil
 }

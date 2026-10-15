@@ -63,9 +63,10 @@ func (m *Local) ensureInitialNetsySnapshot(clusterConfigPath, depsBaseURL, zotRe
 	}
 	var data bytes.Buffer
 	if err := netsyseed.WriteSnapshot(&data, netsyseed.SnapshotOptions{
-		ClusterConfigPath: clusterConfigPath,
-		SeedPath:          seedPath,
-		ValuesContent:     valuesContent,
+		ClusterConfigPath:      clusterConfigPath,
+		SeedPath:               seedPath,
+		ValuesContent:          valuesContent,
+		NodeIngressCertificate: true,
 	}); err != nil {
 		return err
 	}

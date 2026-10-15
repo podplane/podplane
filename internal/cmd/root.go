@@ -27,6 +27,7 @@ var rootCmd = &cobra.Command{
 	Long:  `podplane is the official CLI of the Podplane Kubernetes distribution & PaaS <https://podplane.dev>`,
 }
 
+// init configures Cobra ordering and hook traversal and registers global output flags.
 func init() {
 	cobra.EnableCommandSorting = false
 	cobra.EnableTraverseRunHooks = true
@@ -36,6 +37,7 @@ func init() {
 	pflags.BoolVar(&flagVersion, "version", false, "Show version information")
 }
 
+// NewRootCmd wires command groups, logging, version output, and default help behavior.
 func NewRootCmd(c *config.Config) *cobra.Command {
 	// Create logger
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{

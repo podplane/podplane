@@ -16,14 +16,15 @@ type Certificate struct {
 	TTL          int
 }
 
-// Certificates returns the certificate templates required by Podplane VMs.
-func Certificates(netsyClusterIDTemplate, apiHostname string, apiServiceIPs []string) []Certificate {
+// Certificates returns the certificate templates required by Podplane VMs,
+// including node-local ingress when ingressDomains is nonempty.
+func Certificates(netsyClusterIDTemplate, apiHostname string, apiServiceIPs, ingressDomains []string) []Certificate {
 	apiServerIPs := append(defaultIP(), apiServiceIPs...)
 	apiServerDNS := append(defaultDNS(), "kube-apiserver.podplane.internal")
 	if apiHostname != "" {
 		apiServerDNS = append(apiServerDNS, apiHostname)
 	}
-	return []Certificate{
+	certificates := []Certificate{
 		clientCertificateWithCN("front-proxy.client", "front-proxy-client"),
 		{
 			Name:         "kube-apiserver.client",
@@ -59,10 +60,18 @@ func Certificates(netsyClusterIDTemplate, apiHostname string, apiServiceIPs []st
 		netsyCertificate("netsy.client", "client", netsyClusterIDTemplate),
 		netsyCertificate("netsy.server", "server", netsyClusterIDTemplate),
 	}
+	if len(ingressDomains) > 0 {
+		cert := serverCertificate("ingress.server")
+		for _, domain := range ingressDomains {
+			cert.DNS = append(cert.DNS, domain, "*."+domain)
+		}
+		certificates = append(certificates, cert)
+	}
+	return certificates
 }
 
 // CertificateFiles returns the certificate template names required by kind.
-func CertificateFiles(kind string) []string {
+func CertificateFiles(kind string, ingress bool) []string {
 	names := []string{
 		"kube2iam.client",
 		"kubelet.client",
@@ -78,6 +87,9 @@ func CertificateFiles(kind string) []string {
 			"netsy.client",
 			"netsy.server",
 		)
+	}
+	if ingress && (kind == "knc" || kind == "knd") {
+		names = append(names, "ingress.server")
 	}
 	return names
 }

@@ -27,7 +27,7 @@ func TestBuildPlatformComponentsValuesLocalDomain(t *testing.T) {
 			},
 		}},
 	}}
-	values, err := buildPlatformComponentsValues(cfg)
+	values, err := buildPlatformComponentsValues(cfg, true)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -40,19 +40,8 @@ func TestBuildPlatformComponentsValuesLocalDomain(t *testing.T) {
 		t.Fatalf("domain default = %v, want %v", got, want)
 	}
 	delivery := ingress["certificates"].(map[string]any)
-	if got, want := delivery["keyPrefix"], "local"; got != want {
-		t.Fatalf("certificates.keyPrefix = %v, want %v", got, want)
-	}
-	for key, want := range map[string]any{
-		"provider":      "openbao",
-		"address":       "https://10.0.2.15:19443/vault/local",
-		"mountPath":     "secret",
-		"authMountPath": "podplane",
-		"caCertPath":    "/var/run/podplane/secrets-providers/local-fakevault/ca.crt",
-	} {
-		if got := delivery[key]; got != want {
-			t.Fatalf("certificates.%s = %v, want %v", key, got, want)
-		}
+	if len(delivery) != 1 || delivery["provider"] != "node" {
+		t.Fatalf("local certificate delivery = %v, want node provider only", delivery)
 	}
 }
 
@@ -61,7 +50,7 @@ func TestBuildPlatformComponentsValuesAWSProviderEnablesEBSCSI(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		Providers: []clusterconfig.Provider{{Kind: "aws"}},
 	}}
-	values, err := buildPlatformComponentsValues(cfg)
+	values, err := buildPlatformComponentsValues(cfg, false)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -91,7 +80,7 @@ func TestBuildPlatformComponentsValuesSecretsProvidersEnableCSIComponents(t *tes
 			"local-fakevault":     {Kind: "openbao", CACert: "-----BEGIN CERTIFICATE-----\nlocal\n-----END CERTIFICATE-----", AuthPath: "auth/podplane", OperatorRole: "podplane-operator"},
 		}},
 	}}
-	values, err := buildPlatformComponentsValues(cfg)
+	values, err := buildPlatformComponentsValues(cfg, false)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -225,7 +214,7 @@ func TestBuildPlatformComponentsValuesGCPWorkloadCAContract(t *testing.T) {
 			"google-secret-manager": {Kind: "gcp", KeyPrefix: "shared", ProjectID: "project-1"},
 		}},
 	}}
-	values, err := buildPlatformComponentsValues(cfg)
+	values, err := buildPlatformComponentsValues(cfg, false)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -253,7 +242,7 @@ func TestBuildPlatformComponentsValuesVaultWorkloadCAContract(t *testing.T) {
 		}},
 		Domains: []clusterconfig.Domain{{Zone: "example.com"}},
 	}}
-	values, err := buildPlatformComponentsValues(cfg)
+	values, err := buildPlatformComponentsValues(cfg, false)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -279,7 +268,7 @@ func TestBuildPlatformComponentsValuesRegistryMirror(t *testing.T) {
 			},
 		},
 	}}
-	values, err := buildPlatformComponentsValues(cfg)
+	values, err := buildPlatformComponentsValues(cfg, false)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -313,7 +302,7 @@ func TestBuildPlatformComponentsValuesZotRegistry(t *testing.T) {
 			Region:  "us-east-1",
 		}},
 	}}
-	values, err := buildPlatformComponentsValues(cfg)
+	values, err := buildPlatformComponentsValues(cfg, false)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -322,6 +311,9 @@ func TestBuildPlatformComponentsValuesZotRegistry(t *testing.T) {
 		t.Fatalf("registryHostname = %v, want %v", got, want)
 	}
 	storage := zotRegistry["storage"].(map[string]any)
+	if got, want := storage["driver"], "s3"; got != want {
+		t.Fatalf("storage.driver = %v, want %v", got, want)
+	}
 	if got, want := storage["bucket"], "test-cluster-123456789012-registry"; got != want {
 		t.Fatalf("storage.bucket = %v, want %v", got, want)
 	}
@@ -346,6 +338,32 @@ func TestBuildPlatformComponentsValuesZotRegistry(t *testing.T) {
 	}
 }
 
+// TestBuildPlatformComponentsValuesZotRegistryGoogle renders GCS-backed storage
+// in the bucket generated for the Google project.
+func TestBuildPlatformComponentsValuesZotRegistryGoogle(t *testing.T) {
+	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+		ID:       "test-cluster",
+		OIDC:     clusterconfig.OIDC{IssuerURL: "https://auth.example.com"},
+		Registry: clusterconfig.Registry{Hostname: "registry.example.com"},
+		Providers: []clusterconfig.Provider{{
+			Kind:    "google",
+			Project: "test-project",
+			Region:  "us-central1",
+		}},
+	}}
+	values, err := buildPlatformComponentsValues(cfg, false)
+	if err != nil {
+		t.Fatalf("buildPlatformComponentsValues error = %v", err)
+	}
+	storage := componentValues(values, "zot-registry")["platform"].(map[string]any)["zotRegistry"].(map[string]any)["storage"].(map[string]any)
+	if got, want := storage["driver"], "gcs"; got != want {
+		t.Fatalf("storage.driver = %v, want %v", got, want)
+	}
+	if got, want := storage["bucket"], "test-cluster-test-project-registry"; got != want {
+		t.Fatalf("storage.bucket = %v, want %v", got, want)
+	}
+}
+
 // TestBuildPlatformComponentsValuesZotRegistryLocalBucket renders local object storage.
 func TestBuildPlatformComponentsValuesZotRegistryLocalBucket(t *testing.T) {
 	caPath := filepath.Join(t.TempDir(), "oidc-ca.pem")
@@ -357,7 +375,7 @@ func TestBuildPlatformComponentsValuesZotRegistryLocalBucket(t *testing.T) {
 		OIDC:     clusterconfig.OIDC{IssuerURL: "https://oidc.localhost", CACert: caPath},
 		Registry: clusterconfig.Registry{Hostname: "dev-registry.local"},
 	}}
-	values, err := buildPlatformComponentsValues(cfg)
+	values, err := buildPlatformComponentsValues(cfg, false)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -398,7 +416,7 @@ func TestBuildPlatformComponentsValuesUsesSelfSignedForUnsupportedDomain(t *test
 			{Zone: "cloudflare.example.com", Provider: &clusterconfig.DomainProvider{Kind: "cloudflare"}},
 		},
 	}}
-	values, err := buildPlatformComponentsValues(cfg)
+	values, err := buildPlatformComponentsValues(cfg, false)
 	if err != nil {
 		t.Fatalf("buildPlatformComponentsValues error = %v", err)
 	}
@@ -423,7 +441,7 @@ func TestBuildPlatformComponentsValuesAmbiguousAWSRegion(t *testing.T) {
 		Providers: []clusterconfig.Provider{{Kind: "aws", Region: "us-east-1"}, {Kind: "aws", Region: "us-west-2"}},
 		Domains:   []clusterconfig.Domain{{Zone: "example.com", Provider: &clusterconfig.DomainProvider{Kind: "aws-route53"}}},
 	}}
-	if _, err := buildPlatformComponentsValues(cfg); err == nil {
+	if _, err := buildPlatformComponentsValues(cfg, false); err == nil {
 		t.Fatalf("expected ambiguous AWS provider error")
 	}
 }

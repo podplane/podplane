@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// TestTaskProgressSmallTerminalShowsResizePrompt checks size guidance and the plain-output escape hint.
 func TestTaskProgressSmallTerminalShowsResizePrompt(t *testing.T) {
 	m := taskProgressModel{width: MinTUIWidth - 1, height: MinTUIHeight, tui: true}
 
@@ -27,6 +28,7 @@ func TestTaskProgressSmallTerminalShowsResizePrompt(t *testing.T) {
 	}
 }
 
+// TestTaskProgressSmallTerminalPDisablesTUI checks switching to plain output in an undersized terminal.
 func TestTaskProgressSmallTerminalPDisablesTUI(t *testing.T) {
 	m := taskProgressModel{width: MinTUIWidth - 1, height: MinTUIHeight, tui: true}
 
@@ -40,6 +42,7 @@ func TestTaskProgressSmallTerminalPDisablesTUI(t *testing.T) {
 	}
 }
 
+// TestTaskProgressDoneViewShowsFrozenClusterStartDuration checks readiness bullets and a fixed completion duration.
 func TestTaskProgressDoneViewShowsFrozenClusterStartDuration(t *testing.T) {
 	now := time.Now()
 	m := testTaskProgressModel([]TaskProgressItem{
@@ -74,6 +77,7 @@ func TestTaskProgressDoneViewShowsFrozenClusterStartDuration(t *testing.T) {
 	}
 }
 
+// TestTaskProgressRemainingCountsDownFromFullPlan checks elapsed progress against all planned task durations.
 func TestTaskProgressRemainingCountsDownFromFullPlan(t *testing.T) {
 	m := testTaskProgressModel([]TaskProgressItem{
 		{Key: "first", Name: "first", Expected: 30 * time.Second},
@@ -98,6 +102,7 @@ func TestTaskProgressRemainingCountsDownFromFullPlan(t *testing.T) {
 	}
 }
 
+// TestTaskProgressCompletionOnlyDecreasesRemaining checks countdown behavior after early and late completions.
 func TestTaskProgressCompletionOnlyDecreasesRemaining(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
@@ -138,6 +143,7 @@ func TestTaskProgressCompletionOnlyDecreasesRemaining(t *testing.T) {
 	}
 }
 
+// TestTaskProgressRemainingCanGoNegativeForOvertime checks capped progress and negative remaining time for slow tasks.
 func TestTaskProgressRemainingCanGoNegativeForOvertime(t *testing.T) {
 	m := testTaskProgressModel([]TaskProgressItem{
 		{Key: "slow", Name: "slow", Expected: 30 * time.Second},
@@ -157,6 +163,7 @@ func TestTaskProgressRemainingCanGoNegativeForOvertime(t *testing.T) {
 	}
 }
 
+// TestTaskProgressOmittedItemsDoNotContributeToRemaining checks removal of omitted tasks from timing and counts.
 func TestTaskProgressOmittedItemsDoNotContributeToRemaining(t *testing.T) {
 	m := testTaskProgressModel([]TaskProgressItem{
 		{Key: "omitted", Name: "omitted", Expected: 30 * time.Second},
@@ -178,6 +185,7 @@ func TestTaskProgressOmittedItemsDoNotContributeToRemaining(t *testing.T) {
 	}
 }
 
+// testTaskProgressModel initializes pending progress rows for the supplied test plan.
 func testTaskProgressModel(items []TaskProgressItem) taskProgressModel {
 	m := taskProgressModel{items: items, rows: map[string]taskProgressRow{}}
 	for _, item := range items {

@@ -6,6 +6,7 @@ package deps
 
 import "net/http"
 
+// newDownloadHTTPClient clones the default transport with connection limits matching download concurrency.
 func newDownloadHTTPClient(concurrency int) *http.Client {
 	if concurrency <= 0 {
 		concurrency = defaultDownloadConcurrency

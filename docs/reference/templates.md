@@ -32,6 +32,10 @@ Deploy requires a cached cluster summary for the selected kubeconfig context. `p
 
 Under the hood deploy runs `helm upgrade --install --wait --timeout 2m` by default, so Helm waits for rendered resources to become ready before printing chart notes. Use `--wait=false` to skip readiness waiting or `--timeout` to allow more time.
 
+Both templates run Pods with restricted [Pod Security](../guides/pod-security.md) settings: a non-root user, the `RuntimeDefault` seccomp profile, no privilege escalation, and all Linux capabilities dropped. The `worker` template also uses a read-only root filesystem with a writable `/tmp`.
+
+If your image must run as root, opt out with `--set podSecurityContext.runAsNonRoot=false`. If `podplane deploy` times out because of these settings, it explains which container could not start and how to fix it.
+
 ## `web`
 
 The `web` template deploys a web application with ingress routing and two separate TLS layers. Envoy Gateway terminates browser-facing ingress TLS, while the web Pod uses an operator-signed Service certificate for encrypted gateway-to-workload traffic.
@@ -70,6 +74,8 @@ Template-specific values can be set with `--set` e.g.:
 | `route.port` | `443` | External HTTPS port for the browser-facing route URL |
 | `certificates.server` | `sidecar` | Terminate service TLS in the Envoy `sidecar` or `direct` in the app |
 | `certificates.client` | `false` | Project a ServiceAccount SPIFFE identity and workload trust bundle |
+| `podSecurityContext` | non-root, `RuntimeDefault` seccomp, `fsGroup: 65532` | Pod security context |
+| `containerSecurityContext` | no privilege escalation, drop `ALL` capabilities | App container security context |
 
 Kubernetes projects the serving key and certificate chain together at
 `/var/run/secrets/podplane/server-certificate/credential-bundle.pem`. The

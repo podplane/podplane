@@ -232,6 +232,7 @@ func (m *Manifest) InstallItems(filters ...ItemFilter) []Item {
 	return items
 }
 
+// itemFilterFromArgs returns the first optional filter or an unrestricted zero value.
 func itemFilterFromArgs(filters []ItemFilter) ItemFilter {
 	if len(filters) == 0 {
 		return ItemFilter{}

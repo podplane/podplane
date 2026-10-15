@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// TestFilesystemPathsIncludesBootPartitionRelativeFallback verifies both guest and boot-relative paths.
 func TestFilesystemPathsIncludesBootPartitionRelativeFallback(t *testing.T) {
 	got := filesystemPaths("/boot/vmlinuz-6.12.85+deb13-cloud-arm64")
 	want := []string{"boot/vmlinuz-6.12.85+deb13-cloud-arm64", "vmlinuz-6.12.85+deb13-cloud-arm64"}
@@ -17,6 +18,7 @@ func TestFilesystemPathsIncludesBootPartitionRelativeFallback(t *testing.T) {
 	}
 }
 
+// TestFilesystemPathsRejectsEmptyPath verifies the filesystem root yields no file candidates.
 func TestFilesystemPathsRejectsEmptyPath(t *testing.T) {
 	if got := filesystemPaths("/"); len(got) != 0 {
 		t.Fatalf("filesystemPaths() = %#v, want empty", got)

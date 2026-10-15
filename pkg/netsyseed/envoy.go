@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -27,7 +28,7 @@ const (
 // interpolateEnvoyIngress replaces captured ingress-domain configuration with
 // configuration derived from the target cluster and synthesizes the
 // non-sensitive SDS reference Secrets intentionally omitted from generic seeds.
-func interpolateEnvoyIngress(records []*datafile.Record, cfg *clusterconfig.ClusterConfig) ([]*datafile.Record, error) {
+func interpolateEnvoyIngress(records []*datafile.Record, cfg *clusterconfig.ClusterConfig, nodeCertificate bool) ([]*datafile.Record, error) {
 	if len(cfg.Cluster.Domains) == 0 {
 		return records, nil
 	}
@@ -50,7 +51,7 @@ func interpolateEnvoyIngress(records []*datafile.Record, cfg *clusterconfig.Clus
 	if gateway == nil && proxy == nil && spc == nil {
 		return records, nil
 	}
-	if gateway == nil || proxy == nil || spc == nil {
+	if gateway == nil || proxy == nil || (spc == nil && !nodeCertificate) {
 		return nil, fmt.Errorf("podplane seed file contains incomplete Envoy ingress resources")
 	}
 
@@ -58,14 +59,18 @@ func interpolateEnvoyIngress(records []*datafile.Record, cfg *clusterconfig.Clus
 	for i, domain := range cfg.Cluster.Domains {
 		domains[i] = domain.Zone
 	}
-	if err := rewriteEnvoyGateway(gateway, domains); err != nil {
+	if err := rewriteEnvoyGateway(gateway, domains, nodeCertificate); err != nil {
 		return nil, err
 	}
-	if err := rewriteEnvoyProxy(proxy, domains); err != nil {
+	if err := rewriteEnvoyProxy(proxy, domains, nodeCertificate); err != nil {
 		return nil, err
 	}
-	if err := rewriteEnvoySPC(spc, cfg, domains); err != nil {
-		return nil, err
+	if nodeCertificate {
+		records = slices.DeleteFunc(records, func(record *datafile.Record) bool { return record == spc })
+	} else {
+		if err := rewriteEnvoySPC(spc, cfg, domains); err != nil {
+			return nil, err
+		}
 	}
 
 	var revision int64
@@ -76,18 +81,21 @@ func interpolateEnvoyIngress(records []*datafile.Record, cfg *clusterconfig.Clus
 	}
 	for _, domain := range domains {
 		revision++
-		record, err := envoySDSSecretRecord(domain, revision, cfg.Cluster.ID)
+		record, err := envoySDSSecretRecord(domain, revision, cfg.Cluster.ID, nodeCertificate)
 		if err != nil {
 			return nil, err
 		}
 		records = append(records, record)
+		if nodeCertificate {
+			break
+		}
 	}
 	return records, nil
 }
 
 // rewriteEnvoyGateway replaces captured HTTPS listeners with listeners for the
 // target cluster's domains while preserving non-HTTPS listeners.
-func rewriteEnvoyGateway(record *datafile.Record, domains []string) error {
+func rewriteEnvoyGateway(record *datafile.Record, domains []string, nodeCertificate bool) error {
 	obj, err := decodeEnvoyRecord(record, "Gateway")
 	if err != nil {
 		return err
@@ -112,6 +120,9 @@ func rewriteEnvoyGateway(record *datafile.Record, domains []string) error {
 	}
 	for _, domain := range domains {
 		bundle := envoyBundleName(domain)
+		if nodeCertificate {
+			bundle = "node"
+		}
 		suffix := envoyListenerSuffix(domain)
 		kept = append(kept,
 			envoyHTTPSListener("https-"+suffix, domain, bundle),
@@ -144,10 +155,28 @@ func envoyHTTPSListener(name, hostname, bundle string) map[string]any {
 
 // rewriteEnvoyProxy replaces captured SDS certificate arguments with arguments
 // for the target cluster's domains.
-func rewriteEnvoyProxy(record *datafile.Record, domains []string) error {
+func rewriteEnvoyProxy(record *datafile.Record, domains []string, nodeCertificate bool) error {
 	obj, err := decodeEnvoyRecord(record, "EnvoyProxy")
 	if err != nil {
 		return err
+	}
+	if nodeCertificate {
+		volumes, err := nestedSlice(obj, envoyProxyKey, "spec", "provider", "kubernetes", "envoyDaemonSet", "patch", "value", "spec", "template", "spec", "volumes")
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, value := range volumes {
+			volume, ok := value.(map[string]any)
+			if ok && stringValue(volume["name"]) == "ingress-certificates" {
+				delete(volume, "csi")
+				volume["hostPath"] = map[string]any{"path": "/opt/podplane/secrets/ingress", "type": "Directory"}
+				found = true
+			}
+		}
+		if !found {
+			return fmt.Errorf("record at %s does not contain the ingress-certificates volume", envoyProxyKey)
+		}
 	}
 	containers, err := nestedSlice(obj, envoyProxyKey, "spec", "provider", "kubernetes", "envoyDaemonSet", "patch", "value", "spec", "template", "spec", "containers")
 	if err != nil {
@@ -158,18 +187,35 @@ func rewriteEnvoyProxy(record *datafile.Record, domains []string) error {
 		if !ok || stringValue(container["name"]) != "podplane-sds" {
 			continue
 		}
+		mounts, _ := container["volumeMounts"].([]any)
+		for _, entry := range mounts {
+			mount, ok := entry.(map[string]any)
+			if ok && stringValue(mount["name"]) == "ingress-certificates" {
+				mount["mountPath"] = "/var/run/podplane/ingress-certificates"
+			}
+		}
 		args, ok := container["args"].([]any)
 		if !ok {
 			return fmt.Errorf("record at %s has malformed podplane-sds args", envoyProxyKey)
 		}
 		kept := make([]any, 0, len(args)+len(domains))
-		for _, arg := range args {
-			if !strings.HasPrefix(stringValue(arg), "--certificate=") {
-				kept = append(kept, arg)
+		for i := 0; i < len(args); i++ {
+			arg := stringValue(args[i])
+			if arg == "--certificates-dir" {
+				i++
+				continue
 			}
+			if strings.HasPrefix(arg, "--certificates-dir=") || strings.HasPrefix(arg, "--certificate=") || strings.HasPrefix(arg, "--domain-certificate=") || strings.HasPrefix(arg, "--node-certificate=") {
+				continue
+			}
+			kept = append(kept, args[i])
 		}
-		for _, domain := range domains {
-			kept = append(kept, "--certificate="+envoyBundleName(domain)+"="+domain)
+		if nodeCertificate {
+			kept = append(kept, "--node-certificate="+strings.Join(domains, ","))
+		} else {
+			for _, domain := range domains {
+				kept = append(kept, "--domain-certificate="+envoyBundleName(domain)+"="+domain)
+			}
 		}
 		container["args"] = kept
 		return encodeEnvoyRecord(record, obj)
@@ -184,7 +230,7 @@ func rewriteEnvoySPC(record *datafile.Record, cfg *clusterconfig.ClusterConfig, 
 	if err != nil {
 		return err
 	}
-	delivery, err := ingressCertificateDeliveryValues(cfg)
+	delivery, err := ingressCertificateDeliveryValues(cfg, false)
 	if err != nil {
 		return err
 	}
@@ -242,9 +288,12 @@ func rewriteEnvoySPC(record *datafile.Record, cfg *clusterconfig.ClusterConfig, 
 }
 
 // envoySDSSecretRecord constructs the non-sensitive SDS reference Secret record
-// for one ingress domain.
-func envoySDSSecretRecord(domain string, revision int64, leaderID string) (*datafile.Record, error) {
+// for one ingress domain or the shared node-local certificate.
+func envoySDSSecretRecord(domain string, revision int64, leaderID string, nodeCertificate bool) (*datafile.Record, error) {
 	bundle := envoyBundleName(domain)
+	if nodeCertificate {
+		bundle = "node"
+	}
 	obj := map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Secret",
@@ -274,7 +323,7 @@ func envoySDSSecretRecord(domain string, revision int64, leaderID string) (*data
 		return nil, fmt.Errorf("encode Envoy SDS Secret for domain %s: %w", domain, err)
 	}
 	return &datafile.Record{
-		Revision: revision, Key: []byte(envoySecretBase + strings.TrimPrefix(bundle, "bundle-")), Value: value,
+		Revision: revision, Key: []byte("/registry/secrets/platform-envoy-gateway/" + bundle), Value: value,
 		Created: true, CreateRevision: revision, Version: 1, LeaderID: leaderID,
 	}, nil
 }

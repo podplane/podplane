@@ -131,11 +131,13 @@ func (m *ComponentsManifest) DownloadImageIndexes(filter ComponentImageFilter) [
 	return indexes
 }
 
+// nameSelector matches normalized names or an explicit all selection.
 type nameSelector struct {
 	all    bool
 	values map[string]bool
 }
 
+// newNameSelector parses comma-separated names, ignoring case and surrounding space.
 func newNameSelector(values []string) nameSelector {
 	selected := nameSelector{values: map[string]bool{}}
 	for _, value := range values {
@@ -154,6 +156,7 @@ func newNameSelector(values []string) nameSelector {
 	return selected
 }
 
+// includes reports whether a normalized name is selected.
 func (s nameSelector) includes(name string) bool {
 	if s.all {
 		return true
@@ -161,6 +164,7 @@ func (s nameSelector) includes(name string) bool {
 	return s.values[strings.ToLower(strings.TrimSpace(name))]
 }
 
+// includesAny matches unscoped entries or entries with at least one selected name.
 func (s nameSelector) includesAny(values []string) bool {
 	if len(values) == 0 {
 		return true

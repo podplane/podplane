@@ -19,6 +19,7 @@ These options are available on all commands:
 
 - [podplane cluster create](cluster-create.md) – Generate cluster configuration and deploy infrastructure.
 - [podplane cluster upgrade](cluster-upgrade.md) – Upgrade cluster infrastructure dependencies.
+- [podplane cluster sleep](cluster-sleep.md) – Submit a sleep request to a sleep-capable cluster.
 - [podplane cluster delete](cluster-delete.md) – Remove deployed cluster infrastructure.
 
 ## OIDC Commands

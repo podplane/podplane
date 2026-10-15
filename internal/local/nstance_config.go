@@ -15,12 +15,13 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/nstance-dev/nstance/pkg/fakeserver"
+	"github.com/nstance-dev/nstance/v2/pkg/fakeserver"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/clusterspec"
 )
 
+// nstanceAgentUserData carries CA trust, registration credentials, and server addresses for first boot.
 type nstanceAgentUserData struct {
 	CACert                 string
 	RegistrationNonceJWT   string
@@ -77,7 +78,6 @@ func configureLocalNstance(ctx context.Context, dataDir, clusterID, instanceID, 
 	// the registration nonce, matching real Nstance server behavior.
 	tenantConfig := podplaneRuntimeConfig(clusterID, LocalKubernetesAPIHostname(clusterID), apiServiceIPs, map[string]string{
 		"mutable.env":          mutableEnv,
-		"ca.pub":               "",
 		"ca.crt":               string(nstanceCACertPEM),
 		"service-accounts.pub": serviceAccountPub,
 		"service-accounts.key": serviceAccountKey,
@@ -202,7 +202,7 @@ func podplaneRuntimeConfig(clusterID, apiHostname string, apiServiceIPs []string
 		files[name] = fakeserver.FileConfig{Kind: "string", Template: content}
 	}
 	certs := map[string]fakeserver.CertificateConfig{}
-	for _, cert := range clusterspec.Certificates("{{ .Vars.NetsyClusterID }}", apiHostname, apiServiceIPs) {
+	for _, cert := range clusterspec.Certificates("{{ .Vars.NetsyClusterID }}", apiHostname, apiServiceIPs, []string{clusterID + ".localhost"}) {
 		certCN := cert.CN
 		certs[cert.Name] = fakeserver.CertificateConfig{
 			Kind:         cert.Kind,
@@ -214,7 +214,7 @@ func podplaneRuntimeConfig(clusterID, apiHostname string, apiServiceIPs []string
 			TTL:          cert.TTL,
 		}
 	}
-	for _, name := range clusterspec.CertificateFiles("knc") {
+	for _, name := range clusterspec.CertificateFiles("knc", true) {
 		files[name+".crt"] = fakeserver.FileConfig{
 			Kind:     "certificate",
 			Template: name,

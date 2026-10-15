@@ -6,6 +6,7 @@ package local
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -45,6 +46,7 @@ const (
 	proxyResponseHeaderTimeout = 0 // unbounded: kube-apiserver "watch" requests are long-lived
 )
 
+// localIngressTargetKind distinguishes app ingress from Kubernetes API routing.
 type localIngressTargetKind string
 
 const (
@@ -52,6 +54,7 @@ const (
 	localIngressTargetKubernetesAPI localIngressTargetKind = "kubernetes-api"
 )
 
+// localIngressTarget identifies a cluster backend and the TLS server name to forward.
 type localIngressTarget struct {
 	clusterID  string
 	kind       localIngressTargetKind
@@ -172,6 +175,7 @@ type upgradeAwareTransport struct {
 	http1 *http.Transport
 }
 
+// RoundTrip uses HTTP/1.1 for protocol upgrades and the HTTP/2 transport otherwise.
 func (t *upgradeAwareTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	if r.Header.Get("Upgrade") != "" {
 		return t.http1.RoundTrip(r)
@@ -192,7 +196,7 @@ func (t *upgradeAwareTransport) RoundTrip(r *http.Request) (*http.Response, erro
 //   - long-lived streaming endpoints (kube-apiserver watches, log streaming,
 //     `kubectl exec`/`kubectl port-forward` upgrades) are flushed
 //     frame-by-frame rather than buffered.
-func localIngressProxy(runtimeDir string) http.Handler {
+func localIngressProxy(runtimeDir string, roots *x509.CertPool) http.Handler {
 	var (
 		mu    sync.RWMutex
 		cache = map[localIngressTarget]*cachedProxy{}
@@ -218,7 +222,7 @@ func localIngressProxy(runtimeDir string) http.Handler {
 		}
 		u := &url.URL{Scheme: "https", Host: target}
 		proxy := httputil.NewSingleHostReverseProxy(u)
-		proxy.Transport = newUpstreamTransport(key.serverName)
+		proxy.Transport = newUpstreamTransport(key.serverName, roots)
 		// Flush each upstream write immediately so streaming endpoints
 		// (kube-apiserver watches, `kubectl logs -f`) don't get buffered
 		// inside the proxy.
@@ -275,14 +279,15 @@ func localIngressProxy(runtimeDir string) http.Handler {
 // conservatively disables it when a custom TLSClientConfig is supplied. SPDY
 // upgrades use a separate HTTP/1.1 transport. HTTP/2 multiplexing remains the
 // key robustness lever for bursts such as helm's parallel CRD applies.
-func newUpstreamTransport(serverName string) http.RoundTripper {
+func newUpstreamTransport(serverName string, roots *x509.CertPool) http.RoundTripper {
 	return &upgradeAwareTransport{
-		http2: newUpstreamHTTPTransport(serverName, true),
-		http1: newUpstreamHTTPTransport(serverName, false),
+		http2: newUpstreamHTTPTransport(serverName, roots, true),
+		http1: newUpstreamHTTPTransport(serverName, roots, false),
 	}
 }
 
-func newUpstreamHTTPTransport(serverName string, enableHTTP2 bool) *http.Transport {
+// newUpstreamHTTPTransport verifies local TLS connections against roots with optional HTTP/2 negotiation.
+func newUpstreamHTTPTransport(serverName string, roots *x509.CertPool, enableHTTP2 bool) *http.Transport {
 	nextProtos := []string{"http/1.1"}
 	if enableHTTP2 {
 		nextProtos = []string{"h2", "http/1.1"}
@@ -294,11 +299,9 @@ func newUpstreamHTTPTransport(serverName string, enableHTTP2 bool) *http.Transpo
 			KeepAlive: proxyKeepAlive,
 		}).DialContext,
 		TLSClientConfig: &tls.Config{
-			//nolint:gosec // upstream is loopback QEMU hostfwd to VM TLS endpoints:
-			// kube-apiserver uses fake Nstance CA; ingress may use in-cluster/self-signed local certs.
-			InsecureSkipVerify: true,
-			ServerName:         serverName,
-			NextProtos:         nextProtos,
+			RootCAs:    roots,
+			ServerName: serverName,
+			NextProtos: nextProtos,
 		},
 		ForceAttemptHTTP2:     enableHTTP2,
 		MaxIdleConns:          proxyMaxIdleConns,

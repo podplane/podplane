@@ -12,6 +12,7 @@ import (
 	"github.com/podplane/podplane/internal/vm"
 )
 
+// Options supplies the architecture, cluster identity, and storage roots for a QEMU manager.
 type Options struct {
 	// Arch is the target architecture, e.g. "amd64" or "arm64".
 	Arch string

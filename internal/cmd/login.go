@@ -69,6 +69,9 @@ token when running as a service in GitHub Actions or Buildkite.`,
 			if err != nil {
 				return err
 			}
+			if cluster.UsesPublicAPIRoots() && loginCACert != "" {
+				return fmt.Errorf("tunnel API exposure uses public CA roots; omit --ca-cert")
+			}
 			kubeAPICAPath, err := c.ResolveCACert("cluster-ca", loginCACert)
 			if err != nil {
 				return fmt.Errorf("resolve kubernetes api ca cert: %w", err)

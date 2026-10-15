@@ -6,6 +6,7 @@ package execwrap
 
 import "testing"
 
+// TestVersionCheck checks major-version requirements and malformed version handling.
 func TestVersionCheck(t *testing.T) {
 	tests := []struct {
 		name         string

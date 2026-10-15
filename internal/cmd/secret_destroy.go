@@ -23,7 +23,7 @@ func newSecretDestroyCmd(c *config.Config) *cobra.Command {
 			if err := secrets.ValidateKey(args[0]); err != nil {
 				return err
 			}
-			ctx, err := resolveSecretContext(c)
+			ctx, err := resolveSecretContext(cmd.Context(), c)
 			if err != nil {
 				return err
 			}
@@ -36,7 +36,7 @@ func newSecretDestroyCmd(c *config.Config) *cobra.Command {
 					return fmt.Errorf("destroy cancelled")
 				}
 			}
-			client := secrets.Client{Context: secretFlags.Context, Kubeconfig: secretFlags.Kubeconfig}
+			client := secrets.Client{Context: ctx.Context, Kubeconfig: secretFlags.Kubeconfig}
 			if err := client.Delete(ctx.Namespace, ctx.KeyspaceName, args[0], true); err != nil {
 				return err
 			}

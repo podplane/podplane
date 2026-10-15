@@ -21,6 +21,7 @@ func ConfirmConfigPath(path string, originDir string, fileSet string, defaultDir
 	return confirmNewConfigDirectoryAt(path, originDir, fileSet, defaultDirName)
 }
 
+// confirmNewConfigDirectoryAt creates empty targets or prompts to retain or relocate non-empty targets.
 func confirmNewConfigDirectoryAt(path string, originDir string, fileSet string, defaultDirName string) (string, error) {
 	dir := filepath.Dir(path)
 	empty, err := directoryEmpty(dir)
@@ -75,6 +76,7 @@ func directoryEmpty(dir string) (bool, error) {
 	return len(entries) == 0, nil
 }
 
+// validateOutputDirectory accepts nonblank directory paths that are missing or readable.
 func validateOutputDirectory(originDir string) tui.InputValidator {
 	return func(value string) error {
 		name := strings.TrimSpace(value)
@@ -93,6 +95,7 @@ func validateOutputDirectory(originDir string) tui.InputValidator {
 	}
 }
 
+// resolveOutputDirectory trims and cleans a path, resolving relative paths against originDir.
 func resolveOutputDirectory(originDir string, path string) string {
 	path = strings.TrimSpace(path)
 	if filepath.IsAbs(path) {

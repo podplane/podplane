@@ -36,6 +36,7 @@ var (
 	depsDownloadSkipComponentsGit  bool
 )
 
+// init registers manifest overrides and dependency filtering, dry-run, and skip flags.
 func init() {
 	depsDownloadCmd.Flags().BoolVar(&depsDownloadDryRun, "dry-run", false,
 		"Print what would be downloaded without actually downloading anything")
@@ -61,6 +62,7 @@ func init() {
 		"Skip cloning or fetching the Git source declared by the components manifest")
 }
 
+// newDepsDownloadCmd wires filtered dependency downloads with dry-run output or progress reporting.
 func newDepsDownloadCmd(manager *deps.Manager, kind, arch string) *cobra.Command {
 	depsDownloadCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		archs := []string{arch}

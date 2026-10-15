@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestLogsArgsUsesAppSelectorAndFollowsSelectedContainer checks selection and follow arguments for one container.
 func TestLogsArgsUsesAppSelectorAndFollowsSelectedContainer(t *testing.T) {
 	t.Parallel()
 	got := logsArgs(LogsOptions{Name: "hello", Container: "hello-container"})
@@ -15,6 +16,7 @@ func TestLogsArgsUsesAppSelectorAndFollowsSelectedContainer(t *testing.T) {
 	assertStringSlicesEqual(t, got, want)
 }
 
+// TestLogsArgsCanFollowAllContainersWithPrefixes checks prefixed output when following all containers.
 func TestLogsArgsCanFollowAllContainersWithPrefixes(t *testing.T) {
 	t.Parallel()
 	got := logsArgs(LogsOptions{Name: "hello", AllContainers: true})
@@ -22,6 +24,7 @@ func TestLogsArgsCanFollowAllContainersWithPrefixes(t *testing.T) {
 	assertStringSlicesEqual(t, got, want)
 }
 
+// TestLogsArgsIncludesKubeContextFlags checks context, kubeconfig, and namespace argument placement.
 func TestLogsArgsIncludesKubeContextFlags(t *testing.T) {
 	t.Parallel()
 	got := logsArgs(LogsOptions{Name: "hello", Namespace: "apps", Context: "dev", Kubeconfig: "/tmp/kubeconfig", Container: "hello-container"})
@@ -29,6 +32,7 @@ func TestLogsArgsIncludesKubeContextFlags(t *testing.T) {
 	assertStringSlicesEqual(t, got, want)
 }
 
+// assertStringSlicesEqual fails the test when ordered command arguments differ.
 func assertStringSlicesEqual(t *testing.T, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {

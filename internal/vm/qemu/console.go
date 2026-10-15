@@ -42,6 +42,7 @@ func (m *Qemu) Console() error {
 	return nil
 }
 
+// withRawTerminal runs fn in raw mode when file is a terminal, then restores its state.
 func withRawTerminal(file *os.File, fn func() error) error {
 	fd := int(file.Fd())
 	if !term.IsTerminal(fd) {
@@ -57,6 +58,7 @@ func withRawTerminal(file *os.File, fn func() error) error {
 	return fn()
 }
 
+// attachConsole relays terminal and socket traffic until either direction finishes.
 func attachConsole(conn net.Conn, stdin io.Reader, stdout io.Writer) error {
 	errCh := make(chan error, 2)
 	go func() {
@@ -75,6 +77,7 @@ func attachConsole(conn net.Conn, stdin io.Reader, stdout io.Writer) error {
 	return err
 }
 
+// copyConsoleInput forwards input bytes until EOF or the Ctrl-] detach key.
 func copyConsoleInput(dst io.Writer, src io.Reader) error {
 	buf := make([]byte, 1)
 	for {
@@ -96,6 +99,7 @@ func copyConsoleInput(dst io.Writer, src io.Reader) error {
 	}
 }
 
+// ignoreConsoleError identifies normal console termination and closed-connection errors.
 func ignoreConsoleError(err error) bool {
 	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 		return true

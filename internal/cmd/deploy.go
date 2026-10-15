@@ -47,6 +47,7 @@ var (
 	deployAutoApprove bool
 )
 
+// init registers deployment values, Kubernetes selection, readiness, and approval flags.
 func init() {
 	deployCmd.Flags().StringVar(&deployName, "name", "", "Name of the app deployment")
 	deployCmd.Flags().StringVar(&deployImage, "image", "", "Container image to deploy")
@@ -64,13 +65,15 @@ func init() {
 	_ = deployCmd.MarkFlagRequired("name")
 }
 
+// newDeployCmd wires cached cluster metadata, template dependencies, and values into app deployment.
 func newDeployCmd(c *config.Config) *cobra.Command {
 	deployCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
-		clusterID, local, err := kubectl.ClusterIDFromContext(deployContext, deployKubeconfig)
+		selected, err := kubectl.ResolveContext(cmd.Context(), deployContext, deployKubeconfig)
 		if err != nil {
 			return err
 		}
+		clusterID, local := selected.ClusterID()
 		clusterSummary, err := c.ClusterSummary(clusterID, local)
 		if err != nil {
 			return err
@@ -84,7 +87,7 @@ func newDeployCmd(c *config.Config) *cobra.Command {
 		if err != nil {
 			return fmt.Errorf("resolve template chart: %w", err)
 		}
-		if err := ensureTemplateDependencies(chart.Template.Dependencies.Components); err != nil {
+		if err := ensureTemplateDependencies(chart.Template.Dependencies.Components, selected.Name, deployKubeconfig); err != nil {
 			return err
 		}
 		mirrorSetArgs := deploy.TemplateMirrorSetArgs(chart.Images, args[0], clusterSummary, deployImage, deploySet)
@@ -103,7 +106,7 @@ func newDeployCmd(c *config.Config) *cobra.Command {
 			RuntimeDirectory: c.RuntimeDirectory(),
 			Set:              append(append(mirrorSetArgs, secretSetArgs...), deploySet...),
 			Namespace:        deployNamespace,
-			Context:          deployContext,
+			Context:          selected.Name,
 			Kubeconfig:       deployKubeconfig,
 			Wait:             deployWait,
 			Timeout:          deployTimeout,
@@ -149,7 +152,7 @@ func deploySecretSetArgs(summary config.ClusterSummary, bindingName string, keys
 // ensureTemplateDependencies enables any missing component dependencies for a
 // template, waits for required CRD HelmReleases, and leaves app components to
 // continue reconciling while the app deploy proceeds.
-func ensureTemplateDependencies(required []string) error {
+func ensureTemplateDependencies(required []string, kubeContext, kubeconfig string) error {
 	seen := map[string]bool{}
 	componentsRequired := []string{}
 	for _, value := range required {
@@ -167,7 +170,7 @@ func ensureTemplateDependencies(required []string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cfg, err := components.Read(ctx, deployContext, deployKubeconfig)
+	cfg, err := components.Read(ctx, kubeContext, kubeconfig)
 	if err != nil {
 		return err
 	}
@@ -190,7 +193,7 @@ func ensureTemplateDependencies(required []string) error {
 		return fmt.Errorf("deploy cancelled")
 	}
 
-	if err := components.SetEnabled(ctx, deployContext, deployKubeconfig, plan.Apps, plan.CRDs, true); err != nil {
+	if err := components.SetEnabled(ctx, kubeContext, kubeconfig, plan.Apps, plan.CRDs, true); err != nil {
 		return err
 	}
 
@@ -203,7 +206,7 @@ func ensureTemplateDependencies(required []string) error {
 	}
 	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer waitCancel()
-	if err := runComponentStatusProgress(waitCtx, "Installing template dependencies", deployContext, deployKubeconfig, componentItems, requiredBeforeDeploy); err != nil {
+	if err := runComponentStatusProgress(waitCtx, "Installing template dependencies", kubeContext, kubeconfig, componentItems, requiredBeforeDeploy); err != nil {
 		return err
 	}
 	if len(plan.Apps) > 0 {

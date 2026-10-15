@@ -40,6 +40,7 @@ func ResolveCACert(spec, cacheDir string) (string, error) {
 	}
 }
 
+// cachePEM stores inline certificate bytes under their SHA-256 digest unless already cached.
 func cachePEM(cacheDir string, pem []byte) (string, error) {
 	sum := sha256.Sum256(pem)
 	path := filepath.Join(cacheDir, hex.EncodeToString(sum[:])+".pem")
@@ -55,6 +56,7 @@ func cachePEM(cacheDir string, pem []byte) (string, error) {
 	return path, nil
 }
 
+// cacheURL downloads a certificate response once and caches it under the URL's SHA-256 digest.
 func cacheURL(cacheDir, u string) (string, error) {
 	sum := sha256.Sum256([]byte(u))
 	path := filepath.Join(cacheDir, hex.EncodeToString(sum[:])+".pem")

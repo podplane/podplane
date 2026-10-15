@@ -43,6 +43,7 @@ func TestDeleteCancelled(t *testing.T) {
 	}
 }
 
+// fakeExecutor records whether the OIDC delete workflow requested resource destruction.
 type fakeExecutor struct {
 	destroyed bool
 }

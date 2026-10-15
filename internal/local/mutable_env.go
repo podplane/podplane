@@ -13,13 +13,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/nstance-dev/nstance/pkg/fakeserver"
+	"github.com/nstance-dev/nstance/v2/pkg/fakeserver"
 )
 
 const (
 	localMutableEnvFilename = "mutable.env"
 )
 
+// localPendingFile records content queued for delivery to a fake Nstance instance.
 type localPendingFile struct {
 	Filename     string    `json:"filename"`
 	Content      []byte    `json:"content"`

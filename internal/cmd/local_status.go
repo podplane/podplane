@@ -22,6 +22,7 @@ var localStatusCmd = &cobra.Command{
 	Long:  `Check the local cluster VM status.`,
 }
 
+// newLocalStatusCmd wires local VM status reporting in human-readable or JSON form.
 func newLocalStatusCmd(c *config.Config) *cobra.Command {
 	localStatusCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		// Create local cluster manager and check the VM status

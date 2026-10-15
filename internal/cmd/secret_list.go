@@ -19,11 +19,11 @@ func newSecretListCmd(c *config.Config) *cobra.Command {
 		Short: "List secret provider keys without showing their values",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, err := resolveSecretContext(c)
+			ctx, err := resolveSecretContext(cmd.Context(), c)
 			if err != nil {
 				return err
 			}
-			client := secretapi.Client{Context: secretFlags.Context, Kubeconfig: secretFlags.Kubeconfig}
+			client := secretapi.Client{Context: ctx.Context, Kubeconfig: secretFlags.Kubeconfig}
 			keyspace, err := client.Get(ctx.Namespace, ctx.KeyspaceName)
 			if err != nil {
 				return err

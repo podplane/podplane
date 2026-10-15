@@ -31,10 +31,12 @@ type codeStore struct {
 	codes map[string]*authCode
 }
 
+// newCodeStore creates an empty authorization code store.
 func newCodeStore() *codeStore {
 	return &codeStore{codes: map[string]*authCode{}}
 }
 
+// put stores authorization state under a code while holding the store lock.
 func (s *codeStore) put(code string, c *authCode) {
 	s.mu.Lock()
 	s.codes[code] = c

@@ -19,6 +19,7 @@ import (
 
 const methodList = "LIST"
 
+// handler serves the local Vault-compatible API with secret storage and scoped login tokens.
 type handler struct {
 	store     Store
 	validator func(context.Context, string, string, string) error
@@ -33,11 +34,13 @@ func NewTrustedHandler(store Store) http.Handler {
 	return &handler{store: store, trusted: true, tokens: make(map[string]token)}
 }
 
+// token records a login token's cluster scope and expiration.
 type token struct {
 	ClusterID string
 	ExpiresAt time.Time
 }
 
+// loginRequest carries the Kubernetes JWT and requested Vault auth role.
 type loginRequest struct {
 	JWT  string `json:"jwt"`
 	Role string `json:"role"`

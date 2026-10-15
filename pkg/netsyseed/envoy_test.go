@@ -19,7 +19,7 @@ import (
 func TestInterpolateEnvoyIngressReplacesCapturedDomains(t *testing.T) {
 	records := []*datafile.Record{
 		{Revision: 1, Key: []byte(envoyGatewayKey), Value: []byte(`{"apiVersion":"gateway.networking.k8s.io/v1","kind":"Gateway","spec":{"listeners":[{"name":"http","protocol":"HTTP","port":80},{"name":"https-old","protocol":"HTTPS","hostname":"old.example","tls":{"certificateRefs":[{"name":"bundle-old"}]}}]}}`)},
-		{Revision: 2, Key: []byte(envoyProxyKey), Value: []byte(`{"apiVersion":"gateway.envoyproxy.io/v1alpha1","kind":"EnvoyProxy","spec":{"provider":{"kubernetes":{"envoyDaemonSet":{"patch":{"value":{"spec":{"template":{"spec":{"containers":[{"name":"envoy"},{"name":"podplane-sds","args":["sds","--socket=/var/run/podplane-sds/sds.sock","--certificate=bundle-old=old.example"]}]}}}}}}}}}}`)},
+		{Revision: 2, Key: []byte(envoyProxyKey), Value: []byte(`{"apiVersion":"gateway.envoyproxy.io/v1alpha1","kind":"EnvoyProxy","spec":{"provider":{"kubernetes":{"envoyDaemonSet":{"patch":{"value":{"spec":{"template":{"spec":{"containers":[{"name":"envoy"},{"name":"podplane-sds","args":["sds","--certificates-dir","/captured/certificates","--socket=/var/run/podplane-sds/sds.sock","--domain-certificate=bundle-old=old.example"],"volumeMounts":[{"name":"ingress-certificates","mountPath":"/captured/certificates","readOnly":true}]}]}}}}}}}}}}`)},
 		{Revision: 3, Key: []byte(envoySPCKey), Value: []byte(`{"apiVersion":"secrets-store.csi.x-k8s.io/v1","kind":"SecretProviderClass","spec":{"provider":"openbao","parameters":{"objects":"stale"}}}`)},
 	}
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
@@ -36,7 +36,7 @@ func TestInterpolateEnvoyIngressReplacesCapturedDomains(t *testing.T) {
 		},
 	}}
 
-	got, err := interpolateEnvoyIngress(records, cfg)
+	got, err := interpolateEnvoyIngress(records, cfg, false)
 	if err != nil {
 		t.Fatalf("interpolateEnvoyIngress error = %v", err)
 	}
@@ -69,9 +69,16 @@ func TestInterpolateEnvoyIngressReplacesCapturedDomains(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := containers[1].(map[string]any)["args"].([]any)
+	if len(args) != 4 || args[0] != "sds" || args[1] != "--socket=/var/run/podplane-sds/sds.sock" {
+		t.Fatalf("SDS args = %v, want default certificate directory and preserved socket", args)
+	}
+	mount := containers[1].(map[string]any)["volumeMounts"].([]any)[0].(map[string]any)
+	if mount["mountPath"] != "/var/run/podplane/ingress-certificates" || mount["readOnly"] != true {
+		t.Fatalf("SDS mount = %v", mount)
+	}
 	wantArgs := []string{
-		"--certificate=bundle-a78c69f84ef791b5c46df59d=alpha.example",
-		"--certificate=bundle-42120140cb0aa293717fc6c3=second.example.net",
+		"--domain-certificate=bundle-a78c69f84ef791b5c46df59d=alpha.example",
+		"--domain-certificate=bundle-42120140cb0aa293717fc6c3=second.example.net",
 	}
 	for i, want := range wantArgs {
 		if got := args[len(args)-2+i]; got != want {
@@ -127,7 +134,7 @@ func TestEnvoyBundleNameMatchesHelmHelper(t *testing.T) {
 func TestInterpolateEnvoyIngressLeavesMinimalSeedUnchanged(t *testing.T) {
 	records := []*datafile.Record{{Revision: 1, Key: []byte(platformComponentsHelmReleaseKey), Value: []byte(`{}`)}}
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{Domains: []clusterconfig.Domain{{Zone: "example.com"}}}}
-	got, err := interpolateEnvoyIngress(records, cfg)
+	got, err := interpolateEnvoyIngress(records, cfg, false)
 	if err != nil {
 		t.Fatalf("interpolateEnvoyIngress error = %v", err)
 	}

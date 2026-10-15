@@ -5,6 +5,7 @@
 package clusterconfig
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,8 +13,8 @@ import (
 	"github.com/tailscale/hujson"
 )
 
-// Load reads a .cluster.jsonc file from disk, strips comments, and unmarshals
-// it into a ClusterConfig.
+// Load reads a .cluster.jsonc file from disk, strips comments, and decodes
+// it into a ClusterConfig, rejecting unknown fields.
 func Load(path string) (*ClusterConfig, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -24,7 +25,9 @@ func Load(path string) (*ClusterConfig, error) {
 		return nil, fmt.Errorf("parse cluster config %s: %w", path, err)
 	}
 	cfg := &ClusterConfig{}
-	if err := json.Unmarshal(standardized, cfg); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(standardized))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("parse cluster config %s: %w", path, err)
 	}
 	if cfg.Cluster.ID == "" {

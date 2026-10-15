@@ -12,6 +12,7 @@ import (
 
 	"github.com/podplane/podplane/internal/components"
 	"github.com/podplane/podplane/internal/config"
+	"github.com/podplane/podplane/internal/kubectl"
 	"github.com/podplane/podplane/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -22,6 +23,7 @@ var (
 	uninstallAutoApprove bool
 )
 
+// newUninstallCmd wires guarded addon removal by disabling its platform-components entry.
 func newUninstallCmd(_ *config.Config) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "uninstall <component>",
@@ -43,7 +45,11 @@ first if you have not yet logged in.`,
 
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
-			cfg, err := components.Read(ctx, uninstallContext, uninstallKubeconfig)
+			selected, err := kubectl.ResolveContext(ctx, uninstallContext, uninstallKubeconfig)
+			if err != nil {
+				return err
+			}
+			cfg, err := components.Read(ctx, selected.Name, uninstallKubeconfig)
 			if err != nil {
 				return err
 			}
@@ -73,7 +79,7 @@ first if you have not yet logged in.`,
 				return fmt.Errorf("uninstall cancelled")
 			}
 
-			if err := components.SetEnabled(ctx, uninstallContext, uninstallKubeconfig, []string{name}, nil, false); err != nil {
+			if err := components.SetEnabled(ctx, selected.Name, uninstallKubeconfig, []string{name}, nil, false); err != nil {
 				return err
 			}
 

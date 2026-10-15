@@ -227,6 +227,7 @@ func includedTaskProgressItems(items []TaskProgressItem) []TaskProgressItem {
 	return included
 }
 
+// taskProgressRow records a task's display state, timing, omission, and failure.
 type taskProgressRow struct {
 	item      TaskProgressItem
 	status    string
@@ -238,6 +239,7 @@ type taskProgressRow struct {
 	err       error
 }
 
+// taskProgressModel tracks background task events and adaptive terminal progress rendering.
 type taskProgressModel struct {
 	title        string
 	subtitle     string
@@ -256,14 +258,18 @@ type taskProgressModel struct {
 	animation    int
 }
 
+// taskProgressEventMsg delivers a task progress event to the update loop.
 type taskProgressEventMsg TaskProgressEvent
 
+// taskProgressDoneMsg reports the background task's final error.
 type taskProgressDoneMsg struct {
 	err error
 }
 
+// taskProgressClosedMsg signals that all queued task events have been consumed.
 type taskProgressClosedMsg struct{}
 
+// taskProgressTickMsg advances the progress display's repaint animation.
 type taskProgressTickMsg struct{}
 
 // Init starts the background task, event reader, and repaint ticker.

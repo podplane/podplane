@@ -9,12 +9,14 @@ type SeedsManifest struct {
 	Seeds Seeds `json:"seeds"`
 }
 
+// Seeds groups named snapshots with their release and component versions.
 type Seeds struct {
 	Version    string                  `json:"version"`
 	Components string                  `json:"components"`
 	Snapshots  map[string]SeedSnapshot `json:"snapshots"`
 }
 
+// SeedSnapshot describes a local or remote snapshot and its integrity and cache metadata.
 type SeedSnapshot struct {
 	Path   string `json:"path,omitempty"`
 	URL    string `json:"url,omitempty"`

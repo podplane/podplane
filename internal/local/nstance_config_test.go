@@ -7,12 +7,18 @@ package local
 import (
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/podplane/podplane/internal/deps"
+	"github.com/podplane/podplane/internal/vm/qemu"
 )
 
+// TestConfigureLocalNstancePreparesBootstrap checks trust, nonce, runtime files, and unregistered instance state.
 func TestConfigureLocalNstancePreparesBootstrap(t *testing.T) {
 	dataDir := t.TempDir()
 	bootstrap, err := configureLocalNstance(
@@ -51,6 +57,30 @@ func TestConfigureLocalNstancePreparesBootstrap(t *testing.T) {
 	if !ok || mutableEnv["template"] != "OIDC_CA_CERT='test'\n" {
 		t.Fatalf("tenant mutable.env = %#v", files["mutable.env"])
 	}
+	ingress, ok := files["ingress.server.crt"].(map[string]any)
+	if !ok || ingress["kind"] != "certificate" || ingress["template"] != "ingress.server" {
+		t.Fatalf("tenant ingress certificate = %#v", files["ingress.server.crt"])
+	}
+	key := ingress["key"].(map[string]any)
+	if key["source"] != "agent" || key["name"] != "ingress.server" {
+		t.Fatalf("ingress key = %v, want agent-owned ingress.server key", key)
+	}
+	// The v2 agent validates the entire patch before committing it. An empty
+	// or malformed static key/certificate would block every runtime file.
+	for name, value := range files {
+		ext := filepath.Ext(name)
+		file := value.(map[string]any)
+		if file["kind"] != "string" || (ext != ".pub" && ext != ".key" && ext != ".crt") {
+			continue
+		}
+		template, ok := file["template"].(string)
+		if !ok {
+			t.Fatalf("static file %s has no string content", name)
+		}
+		if block, _ := pem.Decode([]byte(template)); block == nil {
+			t.Fatalf("static file %s is not valid PEM", name)
+		}
+	}
 
 	instance := readFakeNstanceInstanceState(t, dataDir, "knc123")
 	if instance.Hostname != "" || instance.IPv4 != "" || instance.IPv6 != "" || instance.Registered {
@@ -58,6 +88,7 @@ func TestConfigureLocalNstancePreparesBootstrap(t *testing.T) {
 	}
 }
 
+// TestConfigureLocalNstancePreservesRegisteredInstanceIdentity checks reconfiguration preserves registered addresses and nonce.
 func TestConfigureLocalNstancePreservesRegisteredInstanceIdentity(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
@@ -117,6 +148,7 @@ func TestConfigureLocalNstancePreservesRegisteredInstanceIdentity(t *testing.T) 
 	}
 }
 
+// fakeNstanceInstanceState decodes persisted instance identity and registration fields for assertions.
 type fakeNstanceInstanceState struct {
 	TenantID     string `json:"tenant_id"`
 	InstanceID   string `json:"instance_id"`
@@ -128,6 +160,7 @@ type fakeNstanceInstanceState struct {
 	Registered   bool   `json:"registered"`
 }
 
+// readFakeNstanceInstanceState loads a fake server instance record, failing on read or decode errors.
 func readFakeNstanceInstanceState(t *testing.T, dataDir, instanceID string) fakeNstanceInstanceState {
 	t.Helper()
 	instancePath := filepath.Join(dataDir, "nstance-fake", "fakeserver", "instances", instanceID, "instance.json")
@@ -142,6 +175,7 @@ func readFakeNstanceInstanceState(t *testing.T, dataDir, instanceID string) fake
 	return instance
 }
 
+// readFakeNstanceTenantState loads a tenant's persisted runtime configuration for assertions.
 func readFakeNstanceTenantState(t *testing.T, dataDir, tenantID string) map[string]any {
 	t.Helper()
 	tenantPath := filepath.Join(dataDir, "nstance-fake", "fakeserver", "tenants", tenantID, "runtime.json")
@@ -156,8 +190,8 @@ func readFakeNstanceTenantState(t *testing.T, dataDir, tenantID string) map[stri
 	return tenant
 }
 
-// TestPodplaneRuntimeConfigIncludesKubeAPISANs verifies public, internal, and Service addresses.
-func TestPodplaneRuntimeConfigIncludesKubeAPISANs(t *testing.T) {
+// TestPodplaneRuntimeConfigIncludesNodeSANs verifies API and ingress certificate addresses.
+func TestPodplaneRuntimeConfigIncludesNodeSANs(t *testing.T) {
 	cfg := podplaneRuntimeConfig("cluster-a", "cluster-a.k8s.localhost", []string{"198.18.0.1", "fdc6::1"}, nil)
 	cert := cfg.Certificates["kube-apiserver.server"]
 	for _, want := range []string{"cluster-a.k8s.localhost", "kube-apiserver.podplane.internal"} {
@@ -169,5 +203,52 @@ func TestPodplaneRuntimeConfigIncludesKubeAPISANs(t *testing.T) {
 		if !slices.Contains(cert.IP, want) {
 			t.Fatalf("kube-apiserver.server IP SANs = %v, want %s", cert.IP, want)
 		}
+	}
+	ingress := cfg.Certificates["ingress.server"]
+	for _, want := range []string{"cluster-a.localhost", "*.cluster-a.localhost", "localhost", "{{ .Instance.Hostname }}"} {
+		if !slices.Contains(ingress.DNS, want) {
+			t.Fatalf("ingress.server DNS SANs = %v, want %s", ingress.DNS, want)
+		}
+	}
+	for _, want := range []string{"127.0.0.1", "::1", "{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}"} {
+		if !slices.Contains(ingress.IP, want) {
+			t.Fatalf("ingress.server IP SANs = %v, want %s", ingress.IP, want)
+		}
+	}
+}
+
+// TestStartRefusesMixedNstanceMajorVersions checks only 2.x agents proceed past startup compatibility validation.
+func TestStartRefusesMixedNstanceMajorVersions(t *testing.T) {
+	for _, version := range []string{"", "1.3.4", "v1.3.4", "3.0.0", "2.0.0", "v2.0.0"} {
+		t.Run(version, func(t *testing.T) {
+			dir := t.TempDir()
+			cache := filepath.Join(dir, "deps")
+			manager := deps.NewManager("", cache)
+			manifest := deps.Manifest{VMConfig: deps.VMConfig{
+				Dependencies: map[string]deps.Dependency{"nstance-agent": {Version: version}},
+			}}
+			raw, err := json.Marshal(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.WriteCachedManifest("knc", "arm64", raw); err != nil {
+				t.Fatal(err)
+			}
+			local := &Local{
+				dataDir: dir, runtimeDir: dir, clusterID: "demo", instanceKind: "knc", arch: "arm64", depsCacheDir: cache,
+				vm: qemu.NewQemu(qemu.Options{DataDir: dir, RuntimeDir: dir, ClusterID: "demo", Arch: "arm64"}),
+			}
+			// Accepted versions proceed to the missing component cache, where the
+			// callback stops startup without downloading or starting a guest.
+			want := "requires a Nstance 2.x agent"
+			if version == "2.0.0" || version == "v2.0.0" {
+				want = "failed to download component image deps"
+			}
+			if _, err := local.Start(StartOptions{
+				RunDownloadProgress: func(func(func(deps.DownloadEvent)) error) error { return os.ErrNotExist },
+			}); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("mixed-version startup: %v", err)
+			}
+		})
 	}
 }

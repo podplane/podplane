@@ -109,6 +109,10 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to verify deps: %w", err)
 	}
+	agent := manifest.VMConfig.Dependencies["nstance-agent"]
+	if !strings.HasPrefix(strings.TrimPrefix(agent.Version, "v"), "2.") {
+		return "", fmt.Errorf("local server requires a Nstance 2.x agent, but the VM manifest pins %q; download a compatible vmconfig manifest and recreate existing 1.x VMs before starting", agent.Version)
+	}
 	registryEntries, registryReadErr := os.ReadDir(depsManager.RegistryCacheDir())
 	if registryReadErr != nil || len(registryEntries) == 0 {
 		download := func(progress func(deps.DownloadEvent)) error {
@@ -747,6 +751,7 @@ func (m *Local) WriteLocalClusterConfig(clusterID, oidcIssuerURL, oidcCACertPath
 	return path, nil
 }
 
+// localVaultServerURLForConfig derives the cluster Vault URL reachable through the VM's HTTPS forward.
 func (m *Local) localVaultServerURLForConfig(clusterID string) (string, error) {
 	if m.vm == nil {
 		return "", fmt.Errorf("local VM manager is required to derive Vault endpoint")
@@ -824,6 +829,7 @@ func LocalRegistryHostname(clusterID string) string {
 	return fmt.Sprintf("%s-registry.local", clusterID)
 }
 
+// replaceAddrHost replaces the host of a valid host:port address, leaving invalid or empty inputs unchanged.
 func replaceAddrHost(addr, host string) string {
 	if addr == "" || host == "" {
 		return addr

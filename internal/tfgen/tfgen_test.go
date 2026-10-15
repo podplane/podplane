@@ -655,3 +655,92 @@ func TestNstanceModuleSourceIsLocal(t *testing.T) {
 		t.Fatalf("nstanceModuleSource = %q", got)
 	}
 }
+
+// TestGenerateClusterDiskSize checks both clouds preserve disk overrides and defaults.
+func TestGenerateClusterDiskSize(t *testing.T) {
+	for _, kind := range []string{"aws", "google"} {
+		t.Run(kind, func(t *testing.T) {
+			cfg, err := clusterconfig.NewDraftConfig(kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == "google" {
+				cfg.Cluster.Providers[0].Project = "example-project"
+				secrets := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]
+				secrets.ProjectID = "example-project"
+				cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider] = secrets
+			}
+			opts := testClusterOptions()
+			opts.VMConfigManifests = nil
+			for _, target := range RequiredVMTargets(cfg) {
+				raw, err := json.Marshal(sampleVMConfigManifest(target.Kind, target.Arch))
+				if err != nil {
+					t.Fatal(err)
+				}
+				opts.VMConfigManifests = append(opts.VMConfigManifests, VMConfigManifest{
+					Kind: target.Kind, Arch: target.Arch, Filename: target.Kind + ".json", JSON: raw,
+				})
+			}
+			for _, size := range []int{0, 64} {
+				pool := cfg.Cluster.Pools["control-plane"]
+				pool.DiskSize = size
+				cfg.Cluster.Pools["control-plane"] = pool
+				files, err := GenerateCluster(filepath.Join(t.TempDir(), "cluster.jsonc"), cfg, opts)
+				if err != nil {
+					t.Fatalf("disk_size %d: %v", size, err)
+				}
+				got := fileContents(files)["podplane.cluster.main.tf"]
+				field := "VolumeSize = "
+				if kind == "google" {
+					field = "DiskSizeGb = "
+				}
+				if size == 0 && strings.Contains(got, field) || size == 64 && !strings.Contains(got, field+"64") {
+					t.Fatalf("disk_size %d: incorrect %s setting in generated Terraform:\n%s", size, field, got)
+				}
+			}
+		})
+	}
+}
+
+// TestWriteClusterRejectsUnrenderedInputsWithoutWriting checks unsupported settings leave existing Terraform and directory contents intact.
+func TestWriteClusterRejectsUnrenderedInputsWithoutWriting(t *testing.T) {
+	for _, feature := range []string{"nat", "tunnel", "google", "proxy"} {
+		t.Run(feature, func(t *testing.T) {
+			cfg, err := clusterconfig.NewDraftConfig("aws")
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := &cfg.Cluster.Providers[0]
+			switch feature {
+			case "nat":
+				cfg.Cluster.NAT = &clusterconfig.NAT{Mode: "provider"}
+			case "tunnel":
+				cfg.Cluster.Tunnel = &clusterconfig.Tunnel{
+					Kind: "cloudflare",
+					ID:   "cbe15ed8-50dc-4e69-a1d0-9e1909ec4ce8", CredentialSecret: "tunnel-credentials",
+				}
+			case "google":
+				p.Kind, p.Region, p.Project = "google", "us-central1", "test-project"
+				p.Zones = map[string][]clusterconfig.Subnet{"us-central1-a": p.Zones["us-east-1a"]}
+			case "proxy":
+				p.LoadBalancers = map[string]clusterconfig.LoadBalancer{"api": {Public: true, Subnets: "public", Listeners: []clusterconfig.Listener{{Port: 6443, Pool: "control-plane", ProxyPort: new(16443)}}}}
+			}
+			dir := t.TempDir()
+			path := filepath.Join(dir, "podplane.cluster.main.tf")
+			if err := os.WriteFile(path, []byte("existing stack"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := WriteCluster(filepath.Join(dir, "cluster.jsonc"), cfg, testClusterOptions()); err == nil || !strings.Contains(err.Error(), "cannot be represented by this Terraform generator") {
+				t.Fatalf("unsafe generation: %v", err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil || string(got) != "existing stack" {
+				t.Fatalf("existing stack was changed: %q, %v", got, err)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("generation wrote unsupported files: %v, %v", entries, err)
+			}
+		})
+	}
+}

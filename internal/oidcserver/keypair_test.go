@@ -15,6 +15,7 @@ import (
 	"testing"
 )
 
+// TestLoadOrCreateKeypair_GeneratesAndPersists checks that subsequent loads reuse the generated private key.
 func TestLoadOrCreateKeypair_GeneratesAndPersists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "oidc-key.pem")
@@ -36,6 +37,7 @@ func TestLoadOrCreateKeypair_GeneratesAndPersists(t *testing.T) {
 	}
 }
 
+// TestHandler_ConstructsWithoutError checks handler creation with a generated signing key.
 func TestHandler_ConstructsWithoutError(t *testing.T) {
 	dir := t.TempDir()
 	key, err := LoadOrCreateKeypair(filepath.Join(dir, "k.pem"))
@@ -47,6 +49,7 @@ func TestHandler_ConstructsWithoutError(t *testing.T) {
 	}
 }
 
+// TestHandler_UsesValidatedClientIDAsAudience checks token audience selection and rejection of unknown clients.
 func TestHandler_UsesValidatedClientIDAsAudience(t *testing.T) {
 	dir := t.TempDir()
 	key, err := LoadOrCreateKeypair(filepath.Join(dir, "k.pem"))
@@ -90,6 +93,7 @@ func TestHandler_UsesValidatedClientIDAsAudience(t *testing.T) {
 	}
 }
 
+// decodeJWTPart decodes a base64url JWT segment into a JSON object or fails the test.
 func decodeJWTPart(t *testing.T, part string) map[string]any {
 	t.Helper()
 	raw, err := base64.RawURLEncoding.DecodeString(part)

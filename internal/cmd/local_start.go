@@ -37,6 +37,7 @@ var localStartCmd = &cobra.Command{
 	Long:  `Create and start a local cluster VM`,
 }
 
+// init registers VM resources, startup log and console options, and initial component selection.
 func init() {
 	localStartCmd.Flags().StringVarP(&localStartCPUs, "cpus", "c", "2", "CPU cores to allocate to the VM (default 2)")
 	localStartCmd.Flags().StringVarP(&localStartMemory, "memory", "m", "4G", "Memory to allocate to the VM (default 4G)")

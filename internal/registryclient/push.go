@@ -46,10 +46,12 @@ func Push(ctx context.Context, opts Options) (string, error) {
 	if opts.StoreRoot == "" {
 		return "", fmt.Errorf("registry store root is required")
 	}
-	clusterID, local, err := kubectl.ClusterIDFromContext(opts.Context, opts.Kubeconfig)
+	selected, err := kubectl.ResolveContext(ctx, opts.Context, opts.Kubeconfig)
 	if err != nil {
 		return "", err
 	}
+	opts.Context = selected.Name
+	clusterID, local := selected.ClusterID()
 	summary, err := opts.Config.ClusterSummary(clusterID, local)
 	if err != nil {
 		return "", err

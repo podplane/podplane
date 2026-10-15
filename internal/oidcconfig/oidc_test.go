@@ -12,6 +12,7 @@ import (
 	"testing"
 )
 
+// TestLoadValidAWSConfig checks loading an AWS server configuration containing JSONC comments.
 func TestLoadValidAWSConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "podplane.oidc.jsonc")
 	if err := os.WriteFile(path, []byte(`{
@@ -46,6 +47,7 @@ func TestLoadValidAWSConfig(t *testing.T) {
 	}
 }
 
+// TestValidateRejectsGoogleProvider checks rejection of unsupported Google Cloud infrastructure.
 func TestValidateRejectsGoogleProvider(t *testing.T) {
 	err := Validate(&Config{OIDC: OIDC{
 		Provider: Provider{Kind: "google", Region: "us-central1"},
@@ -55,6 +57,7 @@ func TestValidateRejectsGoogleProvider(t *testing.T) {
 	}
 }
 
+// TestValidateRequiresEncryptionKeyForGitHub checks the GitHub connector's encryption secret requirement.
 func TestValidateRequiresEncryptionKeyForGitHub(t *testing.T) {
 	cfg := NewDraftConfig("aws")
 	cfg.OIDC.Connector.Kind = "github"
@@ -64,6 +67,7 @@ func TestValidateRequiresEncryptionKeyForGitHub(t *testing.T) {
 	}
 }
 
+// TestSchemaJSONIsValidJSON checks the embedded schema's title and absence of generated-copy metadata.
 func TestSchemaJSONIsValidJSON(t *testing.T) {
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(SchemaJSON), &schema); err != nil {
@@ -77,6 +81,7 @@ func TestSchemaJSONIsValidJSON(t *testing.T) {
 	}
 }
 
+// TestWriteAddsDefaultLocalSchemaRef checks default schema output without mutating the caller's config.
 func TestWriteAddsDefaultLocalSchemaRef(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "podplane.oidc.jsonc")
@@ -100,6 +105,7 @@ func TestWriteAddsDefaultLocalSchemaRef(t *testing.T) {
 	}
 }
 
+// TestWriteSchemaWritesLocalSchemaFile checks the generated schema's source attribution.
 func TestWriteSchemaWritesLocalSchemaFile(t *testing.T) {
 	dir := t.TempDir()
 	if err := WriteSchema(dir); err != nil {

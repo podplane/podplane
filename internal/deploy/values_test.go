@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+// TestWithValuesFileIncludesRouteWhenSet checks generated image, environment, and route values.
 func TestWithValuesFileIncludesRouteWhenSet(t *testing.T) {
 	t.Parallel()
 	err := withValuesFile("example.com/app:latest", map[string]string{"FOO": "bar"}, "hello.example.com", "/api", 8443, func(valuesPath string) error {
@@ -59,6 +60,7 @@ func TestWithValuesFileIncludesRouteWhenSet(t *testing.T) {
 	}
 }
 
+// TestWithValuesFileOmitsRouteWhenUnset checks omission of unspecified route values.
 func TestWithValuesFileOmitsRouteWhenUnset(t *testing.T) {
 	t.Parallel()
 	err := withValuesFile("example.com/app:latest", nil, "", "", 0, func(valuesPath string) error {
@@ -80,6 +82,7 @@ func TestWithValuesFileOmitsRouteWhenUnset(t *testing.T) {
 	}
 }
 
+// TestWithValuesFileOmitsImageWhenUnset checks omission of images when no image override is supplied.
 func TestWithValuesFileOmitsImageWhenUnset(t *testing.T) {
 	t.Parallel()
 	err := withValuesFile("", nil, "", "", 0, func(valuesPath string) error {

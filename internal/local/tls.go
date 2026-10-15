@@ -219,6 +219,7 @@ func ensureLocalOIDCCertificate(dataDir string, hosts ...string) (caCertFile, ce
 	return caCertFile, certFile, keyFile, nil
 }
 
+// loadOrCreateLocalOIDCCA loads a parseable CA pair or creates and persists a new self-signed RSA CA.
 func loadOrCreateLocalOIDCCA(certFile, keyFile string) (*rsa.PrivateKey, *x509.Certificate, error) {
 	certPEM, certErr := os.ReadFile(certFile)
 	keyPEM, keyErr := os.ReadFile(keyFile)
@@ -273,6 +274,7 @@ func loadOrCreateLocalOIDCCA(certFile, keyFile string) (*rsa.PrivateKey, *x509.C
 	return key, cert, nil
 }
 
+// writePEMFile encodes DER as a PEM block and writes it with the requested permissions.
 func writePEMFile(path, blockType string, der []byte, perm os.FileMode) error {
 	pemBytes := pem.EncodeToMemory(&pem.Block{Type: blockType, Bytes: der})
 	if pemBytes == nil {

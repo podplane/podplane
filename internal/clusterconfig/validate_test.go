@@ -6,6 +6,8 @@ package clusterconfig
 
 import (
 	"encoding/json"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -240,7 +242,7 @@ func TestValidateDomainsAndListeners(t *testing.T) {
 	cfg = validManagedConfig()
 	cfg.Cluster.Providers[0].LoadBalancers["kubernetes-api"] = LoadBalancer{
 		Public: true, Subnets: "public",
-		Listeners: []Listener{{Port: 443, TargetPort: 6443, Pool: "control-plane"}},
+		Listeners: []Listener{{Port: 443, TargetPort: 6443, ProxyPort: new(16443), Pool: "control-plane"}},
 	}
 	cfg.Cluster.Kubernetes.APILoadBalancer = "kubernetes-api"
 	cfg.Cluster.Kubernetes.APIPort = 443
@@ -251,7 +253,7 @@ func TestValidateDomainsAndListeners(t *testing.T) {
 	cfg = validManagedConfig()
 	cfg.Cluster.Providers[0].LoadBalancers["kubernetes-api"] = LoadBalancer{
 		Public: true, Subnets: "public",
-		Listeners: []Listener{{Port: 6443, Pool: "control-plane"}},
+		Listeners: []Listener{{Port: 6443, ProxyPort: new(16443), Pool: "control-plane"}},
 	}
 	cfg.Cluster.Kubernetes.APIHostname = "example.com"
 	cfg.Cluster.Kubernetes.APILoadBalancer = "kubernetes-api"
@@ -399,4 +401,188 @@ func validManagedConfig() *ClusterConfig {
 			},
 		}},
 	}}
+}
+
+// networkContractConfig builds an AWS or Google fixture with cluster-wide exposure and NAT settings.
+func networkContractConfig(t *testing.T, kind, exposure string) *ClusterConfig {
+	t.Helper()
+	cfg, err := NewDraftConfig("aws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Cluster.Seed = Seed{Name: "recommended", Version: "v2.0.0", Digest: "sha512:" + strings.Repeat("0", 128)}
+	cfg.Cluster.Kubernetes.APILoadBalancer = "api"
+	p := &cfg.Cluster.Providers[0]
+	p.LoadBalancers = map[string]LoadBalancer{
+		"api":     {Public: true, Subnets: "public", Listeners: []Listener{{Port: 6443, Pool: "control-plane"}}},
+		"ingress": {Public: true, Subnets: "public", Listeners: []Listener{{Port: 443, Pool: "control-plane"}}},
+	}
+	if exposure == "tunnel" {
+		p.LoadBalancers = nil
+		cfg.Cluster.Kubernetes.APILoadBalancer = ""
+		cfg.Cluster.Tunnel = &Tunnel{
+			Kind: "cloudflare",
+			ID:   "cbe15ed8-50dc-4e69-a1d0-9e1909ec4ce8", CredentialSecret: "tunnel-credentials",
+		}
+	}
+	cfg.Cluster.NAT = &NAT{
+		Mode:    "provider",
+		Groups:  map[string]NATGroup{"nat": {Arch: "arm64", InstanceType: "small", SubnetPool: "public"}},
+		Tenants: map[string]TenantNAT{"default": {Group: "nat", InstanceTypeLadder: []string{"small", "medium", "large"}}},
+	}
+	if kind == "google" {
+		p.Kind, p.Region, p.Project = "google", "us-central1", "example-project"
+		p.Zones = map[string][]Subnet{"us-central1-a": p.Zones["us-east-1a"]}
+	}
+	return cfg
+}
+
+// TestNetworkingContractsRoundTrip checks routing and NAT combinations survive persistence with correct API trust.
+func TestNetworkingContractsRoundTrip(t *testing.T) {
+	for _, provider := range []string{"aws", "google"} {
+		for _, exposure := range []string{"nlb", "tunnel"} {
+			for _, nat := range []string{"provider", "nstance"} {
+				t.Run(provider+"/"+exposure+"/"+nat, func(t *testing.T) {
+					cfg := networkContractConfig(t, provider, exposure)
+					cfg.Cluster.NAT.Mode = nat
+					if nat == "nstance" {
+						for zone, subnets := range cfg.Cluster.Providers[0].Zones {
+							subnets[1].Public = true
+							cfg.Cluster.Providers[0].Zones[zone] = subnets
+						}
+					}
+					if err := Validate(cfg); err != nil {
+						t.Fatal(err)
+					}
+					path := filepath.Join(t.TempDir(), "cluster.jsonc")
+					if err := Write(path, cfg); err != nil {
+						t.Fatal(err)
+					}
+					got, err := Load(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(got.Cluster, cfg.Cluster) {
+						t.Fatal("networking contracts changed during round trip")
+					}
+					want := "https://example-cluster.k8s.local:6443"
+					if exposure == "tunnel" {
+						want = "https://example-cluster.k8s.local:443"
+					}
+					if got.ResolvedKubernetesAPIURL() != want || got.UsesPublicAPIRoots() != (exposure == "tunnel") {
+						t.Fatalf("wrong API endpoint/trust: %s, public=%v", got.ResolvedKubernetesAPIURL(), got.UsesPublicAPIRoots())
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestNetworkingContractsRejectUnsafeConfigurations checks routing collisions and invalid tunnel and NAT settings.
+func TestNetworkingContractsRejectUnsafeConfigurations(t *testing.T) {
+	for _, test := range []struct {
+		name, exposure, want string
+		change               func(*ClusterConfig)
+	}{
+		{"tunnel with ACME", "tunnel", "cluster.acme cannot be combined with cluster.tunnel", func(c *ClusterConfig) {
+			c.Cluster.Domains = []Domain{{Zone: "example.com", Provider: &DomainProvider{Kind: "aws-route53"}}}
+			c.Cluster.Registry.Hostname = "registry.example.com"
+			c.Cluster.ACME = &ACME{Email: "ops@example.com"}
+		}},
+		{"tunnel with NLB", "tunnel", "cannot be combined", func(c *ClusterConfig) {
+			c.Cluster.Providers[0].LoadBalancers = map[string]LoadBalancer{
+				"ingress": {Public: true, Subnets: "public", Listeners: []Listener{{Port: 443, Pool: "control-plane"}}},
+			}
+		}},
+		{"API on workers", "nlb", "for pool \"control-plane\"", func(c *ClusterConfig) {
+			c.Cluster.Pools["worker"] = Pool{Arch: "arm64", InstanceType: "small", Size: 1}
+			lb := c.Cluster.Providers[0].LoadBalancers["api"]
+			lb.Listeners[0].Pool = "worker"
+			c.Cluster.Providers[0].LoadBalancers["api"] = lb
+		}},
+		{"wrong edge port", "tunnel", "443", func(c *ClusterConfig) {
+			c.Cluster.Kubernetes.APIPort = 6443
+		}},
+		{"proxy collision", "nlb", "collides", func(c *ClusterConfig) {
+			lb := c.Cluster.Providers[0].LoadBalancers["ingress"]
+			lb.Listeners[0].ProxyPort = new(6443)
+			c.Cluster.Providers[0].LoadBalancers["ingress"] = lb
+		}},
+		{"default proxy collision with remapped target", "nlb", "collides", func(c *ClusterConfig) {
+			c.Cluster.Kubernetes.APIPort = 34443
+			lb := c.Cluster.Providers[0].LoadBalancers["api"]
+			lb.Listeners[0].Port = 34443
+			lb.Listeners[0].TargetPort = 6443
+			c.Cluster.Providers[0].LoadBalancers["api"] = lb
+			lb = c.Cluster.Providers[0].LoadBalancers["ingress"]
+			lb.Listeners[0].ProxyPort = new(6443)
+			c.Cluster.Providers[0].LoadBalancers["ingress"] = lb
+		}},
+		{"server collision", "nlb", "server port", func(c *ClusterConfig) {
+			lb := c.Cluster.Providers[0].LoadBalancers["ingress"]
+			lb.Listeners[0].ProxyPort = new(8992)
+			c.Cluster.Providers[0].LoadBalancers["ingress"] = lb
+		}},
+		{"private nst", "nlb", "public/direct", func(c *ClusterConfig) { c.Cluster.NAT.Mode = "nstance" }},
+		{"negative count", "nlb", "non-negative", func(c *ClusterConfig) { c.Cluster.NAT.FixedPublicIPv4Count = -1 }},
+		{"unowned group", "nlb", "owning tenant", func(c *ClusterConfig) { c.Cluster.NAT.Groups["unused"] = NATGroup{Arch: "arm64"} }},
+		{"duplicate ladder", "nlb", "duplicate", func(c *ClusterConfig) {
+			n := c.Cluster.NAT.Tenants["default"]
+			n.InstanceTypeLadder = []string{"small", "small"}
+			c.Cluster.NAT.Tenants["default"] = n
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := networkContractConfig(t, "aws", test.exposure)
+			test.change(cfg)
+			if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("got %v, want %q", err, test.want)
+			}
+		})
+	}
+	cfg := networkContractConfig(t, "google", "nlb")
+	lb := cfg.Cluster.Providers[0].LoadBalancers["api"]
+	lb.Listeners[0].TargetPort = 8443
+	cfg.Cluster.Providers[0].LoadBalancers["api"] = lb
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "must be equal") {
+		t.Fatalf("Google accepted unequal ports: %v", err)
+	}
+}
+
+// TestNATRejectsFixedSizeAndCapacityMetadata checks JSON decoding rejects unsupported NAT group fields.
+func TestNATRejectsFixedSizeAndCapacityMetadata(t *testing.T) {
+	for _, field := range []string{"size", "throughput", "pps"} {
+		var cfg ClusterConfig
+		raw := `{"cluster":{"nat":{"mode":"nstance","groups":{"nat":{"` + field + `":1}}}}}`
+		if err := json.Unmarshal([]byte(raw), &cfg); err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("accepted %s: %v", field, err)
+		}
+	}
+}
+
+// TestNATDeploymentChoices checks fixed address count and instance ladder settings.
+func TestNATDeploymentChoices(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		policy TenantNAT
+		count  int
+		valid  bool
+	}{
+		{"fixed count", TenantNAT{}, 2, true},
+		{"ladder missing starting type", TenantNAT{InstanceTypeLadder: []string{"medium", "large"}}, 0, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := networkContractConfig(t, "aws", "nlb")
+			policy := test.policy
+			policy.Group = "nat"
+			if policy.InstanceTypeLadder == nil {
+				policy.InstanceTypeLadder = []string{"small", "large"}
+			}
+			cfg.Cluster.NAT.Tenants["default"] = policy
+			cfg.Cluster.NAT.FixedPublicIPv4Count = test.count
+			if err := Validate(cfg); (err == nil) != test.valid {
+				t.Fatalf("valid=%v, got %v", test.valid, err)
+			}
+		})
+	}
 }

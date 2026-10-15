@@ -11,6 +11,7 @@ import (
 	"testing"
 )
 
+// TestSetCredentialHelperCreatesDockerConfig checks creation of a Podplane registry helper entry.
 func TestSetCredentialHelperCreatesDockerConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	setDockerInstalled(t, true)
@@ -36,6 +37,7 @@ func TestSetCredentialHelperCreatesDockerConfig(t *testing.T) {
 	}
 }
 
+// TestSetCredentialHelperUpdatesExistingDockerConfig checks preservation of auths and unrelated helpers.
 func TestSetCredentialHelperUpdatesExistingDockerConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -79,6 +81,7 @@ func TestSetCredentialHelperUpdatesExistingDockerConfig(t *testing.T) {
 	}
 }
 
+// TestSetCredentialHelperPreservesExistingHelperForHostname checks that a configured helper is not replaced.
 func TestSetCredentialHelperPreservesExistingHelperForHostname(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -111,6 +114,7 @@ func TestSetCredentialHelperPreservesExistingHelperForHostname(t *testing.T) {
 	}
 }
 
+// TestSetCredentialHelperSkipsWhenDockerMissing checks that missing Docker causes a successful no-op.
 func TestSetCredentialHelperSkipsWhenDockerMissing(t *testing.T) {
 	setDockerInstalled(t, false)
 

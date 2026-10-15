@@ -31,7 +31,7 @@ func newSecretDeleteCmd(c *config.Config) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, err := resolveSecretContext(c)
+			ctx, err := resolveSecretContext(cmd.Context(), c)
 			if err != nil {
 				return err
 			}
@@ -55,7 +55,7 @@ func newSecretDeleteCmd(c *config.Config) *cobra.Command {
 					return fmt.Errorf("destroy cancelled")
 				}
 			}
-			client := secrets.Client{Context: secretFlags.Context, Kubeconfig: secretFlags.Kubeconfig}
+			client := secrets.Client{Context: ctx.Context, Kubeconfig: secretFlags.Kubeconfig}
 			if err := client.Delete(ctx.Namespace, ctx.KeyspaceName, key, secretFlags.Destroy); err != nil {
 				return err
 			}

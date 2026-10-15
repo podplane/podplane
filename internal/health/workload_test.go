@@ -12,6 +12,7 @@ import (
 	"testing"
 )
 
+// TestEnsureDeploymentReplicas checks scaling from zero and avoiding redundant scale requests.
 func TestEnsureDeploymentReplicas(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

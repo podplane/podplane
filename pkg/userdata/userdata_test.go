@@ -12,6 +12,7 @@ import (
 	"github.com/podplane/podplane/internal/deps"
 )
 
+// sampleManifest builds a pinned Debian ARM64 manifest with runc and vmconfig dependencies.
 func sampleManifest() *deps.Manifest {
 	return &deps.Manifest{
 		VMConfig: deps.VMConfig{
@@ -48,6 +49,7 @@ func sampleManifest() *deps.Manifest {
 	}
 }
 
+// baseVars builds valid rendering inputs with a dependency mirror and provider-specific SSM setting.
 func baseVars(provider string) *TemplateVars {
 	v := &TemplateVars{
 		Manifest:      sampleManifest(),
@@ -68,6 +70,7 @@ func baseVars(provider string) *TemplateVars {
 	return v
 }
 
+// TestRender_Local_HasDebianPasswordLine checks local bootstrap credentials, environment, nonce, and scripts.
 func TestRender_Local_HasDebianPasswordLine(t *testing.T) {
 	v := baseVars("local")
 	v.Nonce = "nonce.jwt.value"
@@ -155,6 +158,7 @@ func TestRender_Local_HasDebianPasswordLine(t *testing.T) {
 	}
 }
 
+// TestRender_AWS_NoDebianPasswordLine checks AWS uses SSM and server connectivity checks without local setup.
 func TestRender_AWS_NoDebianPasswordLine(t *testing.T) {
 	v := baseVars("aws")
 	out, err := v.Render()
@@ -213,6 +217,54 @@ func TestRenderManifest(t *testing.T) {
 			t.Fatalf("rendered userdata missing %q:\n%s", want, out)
 		}
 	}
+	if strings.Contains(out, "mutable.env") || strings.Contains(out, "REGISTRY_BUCKET=") || strings.Contains(out, "NETSY_BUCKET=") {
+		t.Fatal("managed-node userdata must leave runtime configuration to the agent")
+	}
+}
+
+// TestRenderNST verifies nst settings are provisioned without agent interpolation.
+func TestRenderNST(t *testing.T) {
+	manifest := sampleManifest()
+	manifest.VMConfig.Kind = "nst"
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Render(raw, Options{
+		ProviderKind: "aws",
+		ServerEnv: map[string]string{
+			"NSTANCE_SERVER_SHARD": "zone-a", "NSTANCE_SERVER_STORAGE": "s3",
+			"NSTANCE_SERVER_BUCKET": "cluster-state", "NSTANCE_SLEEP_ENABLED": "true",
+			"NSTANCE_TUNNEL_ENABLED": "false", "REGISTRY_BUCKET": "cluster-images",
+			"REGISTRY_HOSTNAME": "registry.example.com",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, ok := strings.Cut(out, "<<'SERVER_ENV'\n")
+	if !ok {
+		t.Fatal("missing immutable environment")
+	}
+	env, _, _ = strings.Cut(env, "\nSERVER_ENV")
+	for _, want := range []string{"NSTANCE_SERVER_BUCKET='cluster-state'", "REGISTRY_BUCKET='cluster-images'", "NSTANCE_TUNNEL_ENABLED='false'"} {
+		if !strings.Contains(env, want) {
+			t.Fatalf("immutable environment missing %q", want)
+		}
+	}
+	if strings.Contains(out, "/opt/nstance-agent/") || strings.Contains(out, "{{") {
+		t.Fatal("NST userdata must not depend on agent delivery or interpolation")
+	}
+	if strings.Contains(out, "hostnamectl") || strings.Contains(out, "cloud-init query") {
+		t.Fatal("NST userdata must leave provider identity detection to vmconfig and preserve the hostname")
+	}
+	_, identity, _ := strings.Cut(out, "<<'USERDATA_ENV'\n")
+	identity, _, _ = strings.Cut(identity, "\nUSERDATA_ENV")
+	for _, name := range []string{"PROVIDER_KIND", "AWS_ACCOUNT_ID", "GOOGLE_PROJECT_ID"} {
+		if strings.Count(identity, name+"=") != 1 {
+			t.Fatalf("userdata must write %s exactly once", name)
+		}
+	}
 }
 
 // TestRenderRejectsInvalidManifest verifies malformed and
@@ -226,6 +278,7 @@ func TestRenderRejectsInvalidManifest(t *testing.T) {
 	}
 }
 
+// TestRender_NoDepsMirrorURL_UsesOriginalURLs checks downloads retain upstream URLs without a mirror.
 func TestRender_NoDepsMirrorURL_UsesOriginalURLs(t *testing.T) {
 	v := baseVars("aws")
 	v.DepsMirrorURL = "" // production: no mirror
@@ -243,6 +296,7 @@ func TestRender_NoDepsMirrorURL_UsesOriginalURLs(t *testing.T) {
 	}
 }
 
+// TestRender_WithDepsMirrorURL_UsesMirrorURLs checks downloads use mirror artifact paths instead of upstream URLs.
 func TestRender_WithDepsMirrorURL_UsesMirrorURLs(t *testing.T) {
 	v := baseVars("local")
 	out, err := v.Render()
@@ -259,6 +313,7 @@ func TestRender_WithDepsMirrorURL_UsesMirrorURLs(t *testing.T) {
 	}
 }
 
+// TestValidate_MissingProvider checks rendering rejects an empty provider kind.
 func TestValidate_MissingProvider(t *testing.T) {
 	v := baseVars("local")
 	v.Provider.Kind = ""
@@ -267,6 +322,7 @@ func TestValidate_MissingProvider(t *testing.T) {
 	}
 }
 
+// TestValidate_InvalidProvider checks rendering rejects an unknown provider kind.
 func TestValidate_InvalidProvider(t *testing.T) {
 	v := baseVars("notreal")
 	if _, err := v.Render(); err == nil {
@@ -274,6 +330,7 @@ func TestValidate_InvalidProvider(t *testing.T) {
 	}
 }
 
+// TestValidate_MissingManifest checks rendering requires a dependency manifest.
 func TestValidate_MissingManifest(t *testing.T) {
 	v := baseVars("local")
 	v.Manifest = nil
@@ -282,6 +339,7 @@ func TestValidate_MissingManifest(t *testing.T) {
 	}
 }
 
+// TestValidate_MissingClusterID checks rendering requires a cluster identity.
 func TestValidate_MissingClusterID(t *testing.T) {
 	v := baseVars("local")
 	v.Cluster.ID = ""
@@ -290,6 +348,7 @@ func TestValidate_MissingClusterID(t *testing.T) {
 	}
 }
 
+// TestRender_DevManifest_WaitsForSyncedVMConfigBeforeScripts checks dev bootstrap waits for scripts while downloading other dependencies.
 func TestRender_DevManifest_WaitsForSyncedVMConfigBeforeScripts(t *testing.T) {
 	v := baseVars("local")
 	// Simulate --vmconfig dev manifest: vmconfig has no URL/digest.
@@ -325,6 +384,7 @@ func TestRender_DevManifest_WaitsForSyncedVMConfigBeforeScripts(t *testing.T) {
 	}
 }
 
+// TestRender_DevManifest_RsyncBootstrapIsLocalOnly checks rsync installation is limited to local dev manifests.
 func TestRender_DevManifest_RsyncBootstrapIsLocalOnly(t *testing.T) {
 	v := baseVars("aws")
 	// Simulate --vmconfig dev manifest: vmconfig has no URL/digest.

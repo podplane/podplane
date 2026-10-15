@@ -7,6 +7,7 @@ package local
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"math/big"
@@ -15,6 +16,7 @@ import (
 	"time"
 )
 
+// TestLocalServerCertificateCoversHosts checks certificates cover ingress and Kubernetes API names.
 func TestLocalServerCertificateCoversHosts(t *testing.T) {
 	certFile := writeTestCertificate(t, []string{"dev.localhost", "*.dev.localhost", "dev.k8s.localhost"})
 
@@ -23,6 +25,7 @@ func TestLocalServerCertificateCoversHosts(t *testing.T) {
 	}
 }
 
+// TestLocalServerCertificateCoversHostsRejectsMissingHost checks a missing API hostname invalidates coverage.
 func TestLocalServerCertificateCoversHostsRejectsMissingHost(t *testing.T) {
 	certFile := writeTestCertificate(t, []string{"dev.localhost", "*.dev.localhost"})
 
@@ -31,7 +34,8 @@ func TestLocalServerCertificateCoversHostsRejectsMissingHost(t *testing.T) {
 	}
 }
 
-func writeTestCertificate(t *testing.T, dnsNames []string) string {
+// testServerCertificate generates a self-signed RSA server certificate for the supplied DNS names.
+func testServerCertificate(t *testing.T, dnsNames []string) tls.Certificate {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -58,8 +62,15 @@ func writeTestCertificate(t *testing.T, dnsNames []string) string {
 	if err != nil {
 		t.Fatalf("CreateCertificate: %v", err)
 	}
+	return tls.Certificate{Certificate: [][]byte{certDER}, PrivateKey: key}
+}
+
+// writeTestCertificate writes a temporary self-signed RSA server certificate for the supplied DNS names.
+func writeTestCertificate(t *testing.T, dnsNames []string) string {
+	t.Helper()
+	cert := testServerCertificate(t, dnsNames)
 	certFile := filepath.Join(t.TempDir(), "cert.pem")
-	if err := writePEMFile(certFile, "CERTIFICATE", certDER, 0o644); err != nil {
+	if err := writePEMFile(certFile, "CERTIFICATE", cert.Certificate[0], 0o644); err != nil {
 		t.Fatalf("writePEMFile: %v", err)
 	}
 	return certFile

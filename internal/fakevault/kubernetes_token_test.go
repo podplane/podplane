@@ -102,6 +102,7 @@ func TestKubernetesTokenValidatorRejectsMismatchedRole(t *testing.T) {
 	}
 }
 
+// testKubernetesTokenValidator creates a validator backed by an authenticated test JWKS server.
 func testKubernetesTokenValidator(t *testing.T, key *rsa.PrivateKey) *KubernetesTokenValidator {
 	t.Helper()
 	set, err := testJWKS(key)
@@ -152,6 +153,7 @@ func testServiceAccountJWT(key *rsa.PrivateKey) (string, error) {
 	return testServiceAccountJWTForSubject(key, "system:serviceaccount:default:default")
 }
 
+// testServiceAccountJWTForSubject signs an hour-long service account JWT with the supplied subject.
 func testServiceAccountJWTForSubject(key *rsa.PrivateKey, subject string) (string, error) {
 	now := time.Now()
 	tok, err := jwt.NewBuilder().

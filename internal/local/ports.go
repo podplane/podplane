@@ -12,6 +12,7 @@ import (
 	"github.com/podplane/podplane/internal/vm"
 )
 
+// localVMPortForward defines a guest TCP mapping and where to record its allocated host port.
 type localVMPortForward struct {
 	SetPort         func(*portState, int)
 	HostBindAddress string

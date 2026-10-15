@@ -16,12 +16,14 @@ type TemplatesManifest struct {
 	Templates Templates `json:"templates"`
 }
 
+// Templates groups charts and rendered images for a template release.
 type Templates struct {
 	Version string          `json:"version"`
 	Charts  []TemplateChart `json:"charts"`
 	Images  []TemplateImage `json:"images"`
 }
 
+// TemplateChart describes a chart source, dependencies, and cached layer metadata.
 type TemplateChart struct {
 	Name             string               `json:"name"`
 	Version          string               `json:"version"`
@@ -34,10 +36,12 @@ type TemplateChart struct {
 	ChartLayerDigest string               `json:"chartLayerDigest,omitempty"`
 }
 
+// TemplateDependencies lists platform components required by a template chart.
 type TemplateDependencies struct {
 	Components []string `json:"components,omitempty"`
 }
 
+// TemplateImage describes a rendered image, its platform, and template ownership.
 type TemplateImage struct {
 	Image     string            `json:"image"`
 	Digest    string            `json:"digest"`

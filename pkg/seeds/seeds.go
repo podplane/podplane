@@ -25,6 +25,7 @@ const (
 	None        = "none"
 )
 
+// ResolveOptions identifies a published seed and its download cache and verification settings.
 type ResolveOptions struct {
 	Context  context.Context
 	Name     string
@@ -34,6 +35,7 @@ type ResolveOptions struct {
 	CacheDir string
 }
 
+// ResolveClusterOptions supplies the cluster config and cache used to resolve its seed.
 type ResolveClusterOptions struct {
 	Context           context.Context
 	ClusterConfigPath string
@@ -41,6 +43,7 @@ type ResolveClusterOptions struct {
 	CacheDir          string
 }
 
+// Seed identifies a configured snapshot by name, version, and digest.
 type Seed struct {
 	Name    string
 	Version string

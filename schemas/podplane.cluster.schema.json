@@ -27,6 +27,16 @@
           "required": ["registry"],
           "properties": { "registry": { "required": ["hostname"] } }
         }
+      }, {
+        "if": { "required": ["tunnel"] },
+        "then": {
+          "not": { "required": ["acme"] },
+          "properties": {
+            "providers": {
+              "items": { "properties": { "load_balancers": { "maxProperties": 0 } } }
+            }
+          }
+        }
       }],
       "properties": {
         "id": {
@@ -46,6 +56,7 @@
           "description": "DNS zones and providers used by cluster ingress and certificate automation.",
           "items": { "$ref": "#/$defs/domain" }
         },
+        "tunnel": { "$ref": "#/$defs/tunnel" },
         "registry": { "$ref": "#/$defs/registry" },
         "pools": {
           "type": "object",
@@ -54,14 +65,65 @@
         },
         "providers": {
           "type": "array",
-          "description": "Cloud provider infrastructure configuration. Cluster create currently supports AWS.",
+          "description": "AWS or Google Cloud infrastructure configuration.",
           "items": { "$ref": "#/$defs/provider" }
         },
         "secrets": { "$ref": "#/$defs/secrets" },
         "spiffe": { "$ref": "#/$defs/spiffe" },
         "kubernetes": { "$ref": "#/$defs/kubernetes" },
         "seed": { "$ref": "#/$defs/seed" },
-        "components": { "$ref": "#/$defs/components" }
+        "components": { "$ref": "#/$defs/components" },
+        "nat": { "$ref": "#/$defs/nat" }
+      }
+    },
+    "tunnel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "credential_secret"],
+      "description": "Existing user-managed tunnel for both Kubernetes API and ingress, replacing provider NLBs. The runtime image comes from the pinned VM manifest. The tunnel provider supplies public TLS; omit cluster.acme. Origins use Nstance-issued node certificates; Envoy receives its ingress bundle locally through SDS, without operator ingress issuance. Users own tunnel creation, credentials, DNS and edge redirects. Switching between tunnels and NLBs requires infrastructure deletion and redeployment.",
+      "properties": {
+        "kind": { "const": "cloudflare", "description": "Tunnel provider identifier." },
+        "id": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "Existing tunnel identifier. For cloudflare, the UUID of a locally managed tunnel." },
+        "credential_secret": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "Existing secret's logical name, relative to the cluster's Nstance secrets prefix. For cloudflare, store the complete credentials-file JSON as the secret value. Normal and wake connectors share this reference; never put credential contents or a local file path here." }
+      }
+    },
+    "nat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "description": "Provider-managed or Nstance-managed NAT for the default Kubernetes tenant. Mode changes preserve node subnet identity.",
+      "properties": {
+        "mode": { "enum": ["provider", "nstance"] },
+        "fixed_public_ipv4_count": { "type": "integer", "minimum": 0, "default": 0 },
+        "groups": { "type": "object", "additionalProperties": { "$ref": "#/$defs/natGroup" } },
+        "tenants": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "default": { "$ref": "#/$defs/tenantNAT" } }
+        }
+      },
+      "if": { "properties": { "mode": { "const": "nstance" } } },
+      "then": { "required": ["groups", "tenants"], "properties": { "groups": { "minProperties": 1 }, "tenants": { "required": ["default"] } } }
+    },
+    "natGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["arch", "instance_type", "subnet_pool"],
+      "description": "Deployment only. No fixed size, throughput or PPS capacity; Nstance derives size from populated node subnets.",
+      "properties": {
+        "arch": { "enum": ["amd64", "arm64"] },
+        "instance_type": { "type": "string", "minLength": 1 },
+        "subnet_pool": { "type": "string", "minLength": 1 }
+      }
+    },
+    "tenantNAT": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group", "instance_type_ladder"],
+      "description": "NAT deployment group and scaling choices. Timing and utilization thresholds use Nstance defaults.",
+      "properties": {
+        "group": { "type": "string", "minLength": 1 },
+        "instance_type_ladder": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
       }
     },
     "oidc": {
@@ -145,7 +207,7 @@
         "hosted_zone_id": { "type": "string", "description": "Optional explicit Route53 hosted zone ID. Use it to disambiguate or pin the exact hosted zone; otherwise, generated Terraform looks up the public hosted zone by domain name." },
         "role_arn": { "type": "string", "description": "IAM role ARN used for DNS automation." },
         "project": { "type": "string", "description": "Google Cloud project ID." },
-        "hosted_zone_name": { "type": "string", "description": "Provider-specific hosted zone name." }
+        "hosted_zone_name": { "type": "string", "description": "Google Cloud DNS managed-zone resource name, required for managed Cloud DNS records." }
       }
     },
     "pool": {
@@ -169,7 +231,7 @@
         },
         "disk_size": {
           "type": "integer",
-          "description": "Root disk size for VMs in this pool, in GiB.",
+          "description": "Root disk size in GiB. Omit to use the provider's default.",
           "minimum": 1
         }
       }
@@ -178,10 +240,22 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["kind"],
+      "allOf": [{
+        "if": { "properties": { "kind": { "const": "aws" } }, "required": ["kind"] },
+        "else": {
+          "properties": {
+            "load_balancers": {
+              "additionalProperties": {
+                "properties": { "listeners": { "items": { "not": { "required": ["proxy_port"] } } } }
+              }
+            }
+          }
+        }
+      }],
       "properties": {
         "kind": {
           "type": "string",
-          "description": "Infrastructure provider kind. Cluster create currently supports aws.",
+          "description": "Infrastructure provider kind. Managed cloud deployment uses aws or google.",
           "enum": ["aws", "google", "proxmox"]
         },
         "region": { "type": "string", "description": "Provider region." },
@@ -204,7 +278,7 @@
         },
         "load_balancers": {
           "type": "object",
-          "description": "Named load balancers referenced by domains and Kubernetes API configuration.",
+          "description": "Named load balancers referenced by domains and Kubernetes API configuration. Omit when cluster.tunnel is configured.",
           "additionalProperties": { "$ref": "#/$defs/loadBalancer" }
         },
         "buckets": {
@@ -330,6 +404,7 @@
       "properties": {
         "port": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "External listener port." },
         "target_port": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Port on target VMs. Defaults to port." },
+        "proxy_port": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "AWS-only wake proxy port. Defaults to target_port, then port; must be unique across listeners. Omit on Google Cloud, where the proxy uses port internally." },
         "pool": { "type": "string", "description": "Pool whose VMs are registered with this listener's target group." }
       }
     },
@@ -352,8 +427,8 @@
       "required": ["api_hostname"],
       "properties": {
         "api_hostname": { "type": "string", "format": "hostname", "maxLength": 253, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$", "description": "Kubernetes API hostname." },
-        "api_port": { "type": "integer", "description": "Public Kubernetes API port. Defaults to 6443.", "minimum": 1, "maximum": 65535 },
-        "api_load_balancer": { "type": "string", "description": "Optional provider load-balancer key used for managed API connectivity and DNS." },
+        "api_port": { "type": "integer", "description": "Public Kubernetes API port. Defaults to 6443 for NLB; tunnel mode requires 443. The origin remains 6443.", "minimum": 1, "maximum": 65535 },
+        "api_load_balancer": { "type": "string", "description": "Optional provider load-balancer key used for managed API connectivity and DNS. Omit in tunnel mode." },
         "cluster_cidr": {
           "type": "array",
           "description": "Kubernetes pod CIDR ranges.",

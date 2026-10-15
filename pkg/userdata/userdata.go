@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -38,7 +39,7 @@ type TemplateVars struct {
 	// changes the Nstance instance configuration hash.
 	ImmutableSSHAuthorizedKeys string
 
-	// EnableSSM controls whether user-data installs and starts AWS SSM Agent.
+	// EnableSSM controls AWS SSM Agent installation.
 	EnableSSM bool
 
 	// AWSAccountID and GoogleProjectID are dedicated fields because they are
@@ -50,27 +51,40 @@ type TemplateVars struct {
 	// not a value vmconfig should receive later through mutable.env.
 	Nonce string
 
+	// ServerEnv supplies nst boot-time settings, immutable for that VM.
+	ServerEnv map[string]string
+
+	// ActivityPorts selects the TCP ports monitored by Kubernetes nodes.
+	ActivityPorts string
+
+	// NATIPv4SourceCIDRs supplies the NAT VM's immutable source allowlist.
+	NATIPv4SourceCIDRs string
+
 	// The following fields are only used for local VMs and is not used
 	// when rendering user-data for real clusters
 	Local LocalData
 }
 
+// ClusterData supplies the cluster identity and CA certificate to user-data.
 type ClusterData struct {
 	ID     string
 	CACert string
 }
 
+// ProviderData describes the VM's infrastructure provider and location.
 type ProviderData struct {
 	Kind   string
 	Region string
 	Zone   string
 }
 
+// InstanceData supplies the VM identity and instance type to user-data.
 type InstanceData struct {
 	ID   string
 	Type string
 }
 
+// ServerData supplies the Nstance registration and agent server addresses.
 type ServerData struct {
 	RegistrationAddr string
 	AgentAddr        string
@@ -127,6 +141,19 @@ func validateTemplateValues(v *TemplateVars) error {
 			return err
 		}
 	}
+	// envName constrains keys inserted as shell assignment declarations.
+	envName := regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+	for name, value := range v.ServerEnv {
+		if !envName.MatchString(name) {
+			return fmt.Errorf("ServerEnv key %q is not an environment variable name", name)
+		}
+		if strings.ContainsAny(value, "\x00\n\r") {
+			return fmt.Errorf("ServerEnv.%s contains a NUL or newline", name)
+		}
+	}
+	if v.Manifest.VMConfig.Kind != "nst" && len(v.ServerEnv) > 0 {
+		return fmt.Errorf("ServerEnv is only supported for nst")
+	}
 	if strings.ContainsAny(v.ImmutableSSHAuthorizedKeys, "\x00\r") {
 		return fmt.Errorf("ImmutableSSHAuthorizedKeys contains a NUL or carriage return")
 	}
@@ -136,10 +163,10 @@ func validateTemplateValues(v *TemplateVars) error {
 	if !isTemplateValue(v.Provider.Kind) && !map[string]bool{"local": true, "aws": true, "google": true, "proxmox": true}[v.Provider.Kind] {
 		return fmt.Errorf("Provider.Kind failed validation on 'oneof' validator")
 	}
-	if v.Instance.ID == "" {
+	if v.Instance.ID == "" && v.Manifest.VMConfig.Kind != "nst" {
 		return fmt.Errorf("Instance.ID failed validation on 'required' validator")
 	}
-	if v.Cluster.ID == "" {
+	if v.Cluster.ID == "" && v.Manifest.VMConfig.Kind != "nst" {
 		return fmt.Errorf("Cluster.ID failed validation on 'required' validator")
 	}
 	return nil
@@ -171,46 +198,61 @@ func quoteEnvValue(value string) string {
 // renderManifest renders the canonical userdata template from a parsed manifest.
 func renderManifest(manifest *deps.Manifest, opts Options) (string, error) {
 	vars := TemplateVars{
-		Manifest:      manifest,
-		DepsMirrorURL: opts.DepsMirrorURL,
-		Cluster: ClusterData{
-			ID:     "{{ .Cluster.ID }}",
-			CACert: "{{ .Cluster.CACert }}",
-		},
-		Provider: ProviderData{
-			Kind:   opts.ProviderKind,
-			Region: "{{ .Provider.Region }}",
-			Zone:   "{{ .Provider.Zone }}",
-		},
-		Instance: InstanceData{
-			ID:   "{{ .Instance.ID }}",
-			Type: "{{ .Instance.Type }}",
-		},
-		Server: ServerData{
-			RegistrationAddr: "{{ .Server.RegistrationAddr }}",
-			AgentAddr:        "{{ .Server.AgentAddr }}",
-		},
+		Manifest:                   manifest,
+		DepsMirrorURL:              opts.DepsMirrorURL,
+		Provider:                   ProviderData{Kind: opts.ProviderKind},
 		AWSAccountID:               opts.AWSAccountID,
 		GoogleProjectID:            opts.GoogleProjectID,
 		ImmutableSSHAuthorizedKeys: opts.ImmutableSSHAuthorizedKeys,
 		EnableSSM:                  opts.EnableSSM,
-		Nonce:                      "{{ .Nonce }}",
+		ServerEnv:                  opts.ServerEnv,
+	}
+	if manifest.VMConfig.Kind == "nst" {
+		// NST is rendered by Terraform, without Nstance agent interpolation.
+		return vars.Render()
+	}
+	vars.Cluster = ClusterData{ID: "{{ .Cluster.ID }}", CACert: "{{ .Cluster.CACert }}"}
+	vars.Provider.Region = "{{ .Provider.Region }}"
+	vars.Provider.Zone = "{{ .Provider.Zone }}"
+	vars.Instance = InstanceData{ID: "{{ .Instance.ID }}", Type: "{{ .Instance.Type }}"}
+	vars.Server = ServerData{
+		RegistrationAddr: "{{ .Server.RegistrationAddr }}",
+		AgentAddr:        "{{ .Server.AgentAddr }}",
+	}
+	vars.Nonce = "{{ .Nonce }}"
+	if opts.ProviderKind != "local" {
+		switch manifest.VMConfig.Kind {
+		case "knc", "knd":
+			vars.ActivityPorts = "{{ .Vars.NSTANCE_EBPF_PORTS }}"
+		case "nat":
+			vars.NATIPv4SourceCIDRs = "{{ .Vars.NAT_IPV4_SOURCE_CIDRS }}"
+		}
 	}
 	return vars.Render()
 }
 
 // Options contains values used to render Podplane userdata.
 type Options struct {
-	DepsMirrorURL              string
-	ProviderKind               string
-	AWSAccountID               string
-	GoogleProjectID            string
+	// DepsMirrorURL overrides upstream dependency URLs with mirror-relative URLs.
+	DepsMirrorURL string
+	// ProviderKind selects provider-specific dependencies and bootstrap behavior.
+	ProviderKind string
+	// AWSAccountID supplies the AWS account identity to vmconfig.
+	AWSAccountID string
+	// GoogleProjectID supplies the Google project identity to vmconfig.
+	GoogleProjectID string
+	// ImmutableSSHAuthorizedKeys installs first-boot debugging keys.
 	ImmutableSSHAuthorizedKeys string
-	EnableSSM                  bool
+	// EnableSSM installs and starts AWS SSM Agent.
+	EnableSSM bool
+	// ServerEnv supplies non-sensitive nst settings written to mutable.env once
+	// at provisioning. Changes require replacing the VM.
+	ServerEnv map[string]string
 }
 
 // Render renders userdata from an explicitly pinned vmconfig manifest JSON
-// document. It performs no network or file access.
+// document. It performs no network or file access. Agent-managed kinds retain
+// their nstance-server Go-template placeholders; nst is ready for cloud-init.
 func Render(manifestJSON []byte, opts Options) (string, error) {
 	var manifest deps.Manifest
 	if err := json.Unmarshal(manifestJSON, &manifest); err != nil {

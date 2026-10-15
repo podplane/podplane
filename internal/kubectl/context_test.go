@@ -12,6 +12,7 @@ import (
 	"testing"
 )
 
+// TestUserFromContextUsesSelectedContext checks that an explicit context overrides the current context.
 func TestUserFromContextUsesSelectedContext(t *testing.T) {
 	installFakeKubectl(t, `{"current-context":"dev","contexts":[{"name":"dev","context":{"user":"dev-user"}},{"name":"prod","context":{"user":"prod-user"}}]}`)
 	user, err := UserFromContext("prod", "")
@@ -23,6 +24,7 @@ func TestUserFromContextUsesSelectedContext(t *testing.T) {
 	}
 }
 
+// TestUserFromContextDefaultsToCurrentContext checks user lookup without an explicit context.
 func TestUserFromContextDefaultsToCurrentContext(t *testing.T) {
 	installFakeKubectl(t, `{"current-context":"dev","contexts":[{"name":"dev","context":{"user":"dev-user"}}]}`)
 	user, err := UserFromContext("", "")
@@ -34,6 +36,7 @@ func TestUserFromContextDefaultsToCurrentContext(t *testing.T) {
 	}
 }
 
+// installFakeKubectl prepends a shell executable that emits canned output to the test PATH.
 func installFakeKubectl(t *testing.T, stdout string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {

@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +28,7 @@ import (
 	"github.com/podplane/podplane/pkg/seeds"
 )
 
+// TestLocalIngressClusterID checks cluster extraction from normalized app and reserved API hostnames.
 func TestLocalIngressClusterID(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -51,6 +53,7 @@ func TestLocalIngressClusterID(t *testing.T) {
 	}
 }
 
+// TestIsAppIngressHostname checks local app names exclude API, production, and overly nested hosts.
 func TestIsAppIngressHostname(t *testing.T) {
 	tests := []struct {
 		name string
@@ -74,6 +77,7 @@ func TestIsAppIngressHostname(t *testing.T) {
 	}
 }
 
+// TestLocalIngressClusterIDRejectsInvalidHostnames checks nonlocal and malformed names fail cluster extraction.
 func TestLocalIngressClusterIDRejectsInvalidHostnames(t *testing.T) {
 	for _, serverName := range []string{"", "example.com", "localhost", "api.internal.dev.localhost"} {
 		t.Run(serverName, func(t *testing.T) {
@@ -84,6 +88,7 @@ func TestLocalIngressClusterIDRejectsInvalidHostnames(t *testing.T) {
 	}
 }
 
+// TestLocalIngressClusterIDAcceptsPort checks a host port does not affect cluster extraction.
 func TestLocalIngressClusterIDAcceptsPort(t *testing.T) {
 	got, err := localIngressClusterID("app.dev.localhost:4433")
 	if err != nil {
@@ -94,6 +99,7 @@ func TestLocalIngressClusterIDAcceptsPort(t *testing.T) {
 	}
 }
 
+// TestLocalIngressTargetForKubernetesAPIHost checks the reserved hostname selects the cluster API backend.
 func TestLocalIngressTargetForKubernetesAPIHost(t *testing.T) {
 	target, err := localIngressTargetForHost("dev.k8s.localhost:4433")
 	if err != nil {
@@ -104,8 +110,9 @@ func TestLocalIngressTargetForKubernetesAPIHost(t *testing.T) {
 	}
 }
 
+// TestLocalIngressProxyRoutesKubernetesAPIHost checks requests reach the API port recorded in cluster state.
 func TestLocalIngressProxyRoutesKubernetesAPIHost(t *testing.T) {
-	backend := httptest.NewTLSServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+	backend := startTLSHTTP2Server(t, http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		rw.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(backend.Close)
@@ -127,15 +134,16 @@ func TestLocalIngressProxyRoutesKubernetesAPIHost(t *testing.T) {
 	r.Host = "dev.k8s.localhost"
 	w := httptest.NewRecorder()
 
-	localIngressProxy(runtimeDir).ServeHTTP(w, r)
+	localIngressProxy(runtimeDir, testRootCAs(backend)).ServeHTTP(w, r)
 
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusNoContent, w.Body.String())
 	}
 }
 
+// TestLocalIngressProxyRoutesKubernetesAPIByTLSServerName checks SNI selects the API backend for an IP-address request.
 func TestLocalIngressProxyRoutesKubernetesAPIByTLSServerName(t *testing.T) {
-	backend := httptest.NewTLSServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+	backend := startTLSHTTP2Server(t, http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		rw.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(backend.Close)
@@ -158,19 +166,21 @@ func TestLocalIngressProxyRoutesKubernetesAPIByTLSServerName(t *testing.T) {
 	r.TLS = &tls.ConnectionState{ServerName: "dev.k8s.localhost"}
 	w := httptest.NewRecorder()
 
-	localIngressProxy(runtimeDir).ServeHTTP(w, r)
+	localIngressProxy(runtimeDir, testRootCAs(backend)).ServeHTTP(w, r)
 
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusNoContent, w.Body.String())
 	}
 }
 
+// TestLocalIngressProxyForwardsAppTLSServerName checks the upstream TLS handshake retains the app hostname.
 func TestLocalIngressProxyForwardsAppTLSServerName(t *testing.T) {
 	serverNames := make(chan string, 1)
 	backend := httptest.NewUnstartedServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		rw.WriteHeader(http.StatusNoContent)
 	}))
 	backend.TLS = &tls.Config{
+		Certificates: []tls.Certificate{testServerCertificate(t, []string{"*.dev.localhost"})},
 		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 			serverNames <- hello.ServerName
 			return nil, nil
@@ -186,7 +196,7 @@ func TestLocalIngressProxyForwardsAppTLSServerName(t *testing.T) {
 	r.TLS = &tls.ConnectionState{ServerName: "hello.dev.localhost"}
 	w := httptest.NewRecorder()
 
-	localIngressProxy(runtimeDir).ServeHTTP(w, r)
+	localIngressProxy(runtimeDir, testRootCAs(backend)).ServeHTTP(w, r)
 
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusNoContent, w.Body.String())
@@ -196,11 +206,62 @@ func TestLocalIngressProxyForwardsAppTLSServerName(t *testing.T) {
 	}
 }
 
+// TestLocalIngressProxyVerifiesUpstreamTLS rejects untrusted and wrong-host certificates on both transports.
+func TestLocalIngressProxyVerifiesUpstreamTLS(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		domains []string
+		trusted bool
+	}{
+		{"valid", []string{"dev.k8s.localhost", "*.dev.localhost"}, true},
+		{"untrusted", []string{"dev.k8s.localhost", "*.dev.localhost"}, false},
+		{"wrong hostname", []string{"other.localhost"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := startTLSHTTP2Server(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			}), tc.domains...)
+			runtimeDir := t.TempDir()
+			writeDevState(t, runtimeDir, backendPort(t, backend), backendPort(t, backend))
+			roots := x509.NewCertPool()
+			if tc.trusted {
+				roots = testRootCAs(backend)
+			}
+			handler := localIngressProxy(runtimeDir, roots)
+			for _, host := range []string{"dev.k8s.localhost", "hello.dev.localhost"} {
+				for _, upgrade := range []bool{false, true} {
+					r := httptest.NewRequest(http.MethodGet, "https://"+host+"/", nil)
+					if upgrade {
+						r.Header.Set("Connection", "Upgrade")
+						r.Header.Set("Upgrade", "SPDY/3.1")
+					}
+					w := httptest.NewRecorder()
+					handler.ServeHTTP(w, r)
+					want := http.StatusNoContent
+					if tc.name != "valid" {
+						want = http.StatusBadGateway
+						if host == "dev.k8s.localhost" {
+							want = http.StatusServiceUnavailable
+						}
+						if !strings.Contains(w.Body.String(), "x509:") {
+							t.Errorf("host %s upgrade %t: expected certificate rejection, got %s", host, upgrade, w.Body.String())
+						}
+					}
+					if w.Code != want {
+						t.Errorf("host %s upgrade %t: status = %d, want %d; body=%s", host, upgrade, w.Code, want, w.Body.String())
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestLocalIngressProxyShowsPlaceholderForMissingClusterState checks absent clusters receive an explanatory 404 page.
 func TestLocalIngressProxyShowsPlaceholderForMissingClusterState(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "https://hello.localhost:4433/", nil)
 	w := httptest.NewRecorder()
 
-	localIngressProxy(t.TempDir()).ServeHTTP(w, r)
+	localIngressProxy(t.TempDir(), x509.NewCertPool()).ServeHTTP(w, r)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusNotFound, w.Body.String())
@@ -212,6 +273,7 @@ func TestLocalIngressProxyShowsPlaceholderForMissingClusterState(t *testing.T) {
 	}
 }
 
+// TestWriteLocalClusterConfigUsesReservedKubernetesAPIHost checks generated API, OIDC, and component source settings.
 func TestWriteLocalClusterConfigUsesReservedKubernetesAPIHost(t *testing.T) {
 	manager := newTestLocalManager(t.TempDir(), "dev")
 	componentsSource := &clusterconfig.ComponentsSource{
@@ -233,6 +295,7 @@ func TestWriteLocalClusterConfigUsesReservedKubernetesAPIHost(t *testing.T) {
 	}
 }
 
+// TestLocalIngressPlaceholder checks placeholder responses use the ingress title and not-found status.
 func TestLocalIngressPlaceholder(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "https://localhost:4433/", nil)
 	w := httptest.NewRecorder()
@@ -245,19 +308,34 @@ func TestLocalIngressPlaceholder(t *testing.T) {
 	}
 }
 
+// errTestPlaceholder supplies a fixed reason for placeholder response tests.
 type errTestPlaceholder struct{}
 
+// Error returns the test placeholder reason.
 func (errTestPlaceholder) Error() string { return "test reason" }
 
 // startTLSHTTP2Server starts an httptest.Server with TLS + HTTP/2 enabled
 // so we can verify the proxy's upstream transport actually negotiates h2.
-func startTLSHTTP2Server(t *testing.T, h http.Handler) *httptest.Server {
+func startTLSHTTP2Server(t *testing.T, h http.Handler, dnsNames ...string) *httptest.Server {
 	t.Helper()
+	if len(dnsNames) == 0 {
+		dnsNames = []string{"dev.k8s.localhost"}
+	}
 	srv := httptest.NewUnstartedServer(h)
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{testServerCertificate(t, dnsNames)}}
 	srv.EnableHTTP2 = true
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// testRootCAs trusts only the certificates presented by the supplied test servers.
+func testRootCAs(servers ...*httptest.Server) *x509.CertPool {
+	roots := x509.NewCertPool()
+	for _, server := range servers {
+		roots.AddCert(server.Certificate())
+	}
+	return roots
 }
 
 // backendPort returns the TCP port the given httptest.Server is listening on.
@@ -305,7 +383,7 @@ func TestLocalIngressProxyUpstreamNegotiatesHTTP2(t *testing.T) {
 	runtimeDir := t.TempDir()
 	writeDevState(t, runtimeDir, backendPort(t, backend), 0)
 
-	handler := localIngressProxy(runtimeDir)
+	handler := localIngressProxy(runtimeDir, testRootCAs(backend))
 
 	// Fire several sequential requests against the same backend so the
 	// transport has a chance to upgrade to HTTP/2 on the first hop.
@@ -399,7 +477,7 @@ func TestLocalIngressProxyUpgradeUsesHTTP1(t *testing.T) {
 	runtimeDir := t.TempDir()
 	writeDevState(t, runtimeDir, backendPort(t, backend), 0)
 
-	frontend := httptest.NewTLSServer(localIngressProxy(runtimeDir))
+	frontend := httptest.NewTLSServer(localIngressProxy(runtimeDir, testRootCAs(backend)))
 	t.Cleanup(frontend.Close)
 	frontendURL, err := url.Parse(frontend.URL)
 	if err != nil {
@@ -470,7 +548,7 @@ func TestLocalIngressProxyConcurrentBurstSucceeds(t *testing.T) {
 	runtimeDir := t.TempDir()
 	writeDevState(t, runtimeDir, backendPort(t, backend), 0)
 
-	handler := localIngressProxy(runtimeDir)
+	handler := localIngressProxy(runtimeDir, testRootCAs(backend))
 
 	const requests = 25
 	var wg sync.WaitGroup
@@ -522,7 +600,7 @@ func TestLocalIngressProxyEmitsKubernetesStatusOnGiveUp(t *testing.T) {
 	req.Host = "dev.k8s.localhost"
 	w := httptest.NewRecorder()
 
-	localIngressProxy(runtimeDir).ServeHTTP(w, req)
+	localIngressProxy(runtimeDir, x509.NewCertPool()).ServeHTTP(w, req)
 
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusServiceUnavailable, w.Body.String())
@@ -554,8 +632,8 @@ func TestLocalIngressProxyEmitsKubernetesStatusOnGiveUp(t *testing.T) {
 // own warm transport) but that repeated requests for the same cluster reuse
 // the same entry.
 func TestLocalIngressProxyReusesCachedProxyPerCluster(t *testing.T) {
-	backendA := startTLSHTTP2Server(t, http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusOK) }))
-	backendB := startTLSHTTP2Server(t, http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusOK) }))
+	backendA := startTLSHTTP2Server(t, http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusOK) }), "a.k8s.localhost")
+	backendB := startTLSHTTP2Server(t, http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusOK) }), "b.k8s.localhost")
 
 	runtimeDir := t.TempDir()
 	if err := writeState(runtimeDir, clusterState{ClusterID: "a", Backend: "qemu", Ports: portState{KubernetesAPI: backendPort(t, backendA)}}); err != nil {
@@ -565,7 +643,7 @@ func TestLocalIngressProxyReusesCachedProxyPerCluster(t *testing.T) {
 		t.Fatalf("writeState b: %v", err)
 	}
 
-	handler := localIngressProxy(runtimeDir)
+	handler := localIngressProxy(runtimeDir, testRootCAs(backendA, backendB))
 
 	hit := func(cluster string) {
 		t.Helper()
@@ -614,7 +692,7 @@ func TestLocalIngressProxyRebuildsOnPortChange(t *testing.T) {
 	runtimeDir := t.TempDir()
 	writeDevState(t, runtimeDir, backendPort(t, backend1), 0)
 
-	handler := localIngressProxy(runtimeDir)
+	handler := localIngressProxy(runtimeDir, testRootCAs(backend1, backend2))
 
 	req := httptest.NewRequest(http.MethodGet, "https://dev.k8s.localhost/readyz", nil)
 	req.Host = "dev.k8s.localhost"
@@ -671,7 +749,7 @@ func TestLocalIngressProxyStreamingResponseIsNotBuffered(t *testing.T) {
 	runtimeDir := t.TempDir()
 	writeDevState(t, runtimeDir, backendPort(t, backend), 0)
 
-	handler := localIngressProxy(runtimeDir)
+	handler := localIngressProxy(runtimeDir, testRootCAs(backend))
 	srv := httptest.NewUnstartedServer(handler)
 	srv.EnableHTTP2 = true
 	srv.StartTLS()

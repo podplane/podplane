@@ -30,10 +30,14 @@ const (
 	coreDNSHelmReleaseKey            = "/registry/helm.toolkit.fluxcd.io/helmreleases/platform-coredns/coredns"
 )
 
+// SnapshotOptions supplies a seed, cluster config, and ordered values overrides for snapshot rendering.
 type SnapshotOptions struct {
 	Context           context.Context
 	ClusterConfigPath string
 	SeedPath          string
+	// NodeIngressCertificate selects node-local ingress delivery for local clusters.
+	// Tunnel configurations always use node-local delivery.
+	NodeIngressCertificate bool
 	// ValuesContent is YAML or JSON that overrides derived defaults before ValuesFile.
 	ValuesContent []byte
 	// ValuesFile is a YAML or JSON file applied last.
@@ -50,7 +54,8 @@ func WriteSnapshot(w io.Writer, opts SnapshotOptions) error {
 	if err != nil {
 		return err
 	}
-	values, err := buildPlatformComponentsValues(cluster)
+	nodeCertificate := opts.NodeIngressCertificate || cluster.Cluster.Tunnel != nil
+	values, err := buildPlatformComponentsValues(cluster, nodeCertificate)
 	if err != nil {
 		return err
 	}
@@ -60,6 +65,9 @@ func WriteSnapshot(w io.Writer, opts SnapshotOptions) error {
 	if err := mergeValuesFile(values, opts.ValuesFile); err != nil {
 		return err
 	}
+	if nodeCertificate {
+		applyNodeCertificateValues(values)
+	}
 	seedData, err := loadSeedFile(opts.Context, opts.SeedPath)
 	if err != nil {
 		return err
@@ -67,6 +75,11 @@ func WriteSnapshot(w io.Writer, opts SnapshotOptions) error {
 	records, err := datafile.ReadSnapshot(bytes.NewReader(seedData))
 	if err != nil {
 		return fmt.Errorf("read Podplane seed file: %w", err)
+	}
+	if nodeCertificate {
+		if err := disableSeedIngressCertificates(records); err != nil {
+			return err
+		}
 	}
 	if len(cluster.Cluster.Kubernetes.ServiceCIDR) > 0 {
 		network, err := clusterconfig.ServiceNetworkFromCIDRs(cluster.Cluster.Kubernetes.ServiceCIDR)
@@ -84,7 +97,7 @@ func WriteSnapshot(w io.Writer, opts SnapshotOptions) error {
 	if err := interpolatePlatformComponents(records, values); err != nil {
 		return err
 	}
-	records, err = interpolateEnvoyIngress(records, cluster)
+	records, err = interpolateEnvoyIngress(records, cluster, nodeCertificate)
 	if err != nil {
 		return err
 	}
@@ -96,8 +109,56 @@ func WriteSnapshot(w io.Writer, opts SnapshotOptions) error {
 			return err
 		}
 	}
+	// Filtering and appending records must leave a fresh bootstrap history with
+	// contiguous revisions starting at 1, not the captured cluster's revisions.
+	for i, record := range records {
+		record.Revision = int64(i + 1)
+		record.CreateRevision = record.Revision
+		record.PrevRevision = 0
+	}
 	if err := datafile.WriteSnapshot(w, records, cluster.Cluster.ID); err != nil {
 		return fmt.Errorf("write Netsy snapshot: %w", err)
+	}
+	return nil
+}
+
+// disableSeedIngressCertificates removes captured issuer settings before the
+// operator can start, including settings later reconciled by its Helm release.
+func disableSeedIngressCertificates(records []*datafile.Record) error {
+	for _, record := range records {
+		key := string(record.Key)
+		if key != "/registry/configmaps/platform-podplane-operator/platform-podplane-operator-config" &&
+			key != "/registry/helm.toolkit.fluxcd.io/helmreleases/platform-podplane-operator/podplane-operator" {
+			continue
+		}
+		var obj map[string]any
+		if err := json.Unmarshal(record.Value, &obj); err != nil {
+			return fmt.Errorf("decode operator seed record %s: %w", key, err)
+		}
+		if stringValue(obj["kind"]) == "ConfigMap" {
+			data := ensureMap(obj, "data")
+			var config map[string]any
+			if err := json.Unmarshal([]byte(stringValue(data["config.json"])), &config); err != nil {
+				return fmt.Errorf("decode seeded operator config: %w", err)
+			}
+			delete(config, "ingress_certificates")
+			contents, err := json.Marshal(config)
+			if err != nil {
+				return err
+			}
+			data["config.json"] = string(contents)
+		} else {
+			config := obj
+			for _, field := range []string{"spec", "values", "podplane", "operator", "config"} {
+				config = ensureMap(config, field)
+			}
+			config["ingressCertificates"] = nil
+		}
+		encoded, err := json.Marshal(obj)
+		if err != nil {
+			return err
+		}
+		record.Value = encoded
 	}
 	return nil
 }

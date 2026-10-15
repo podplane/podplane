@@ -6,6 +6,7 @@ package deps
 
 import "testing"
 
+// TestExactSemverTag verifies exact numeric release tags are accepted while ranges and prereleases are rejected.
 func TestExactSemverTag(t *testing.T) {
 	tests := []struct {
 		name    string

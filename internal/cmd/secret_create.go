@@ -29,7 +29,7 @@ func newSecretCreateCmd(c *config.Config) *cobra.Command {
 			if err := secrets.ValidateKey(args[0]); err != nil {
 				return err
 			}
-			ctx, err := resolveSecretContext(c)
+			ctx, err := resolveSecretContext(cmd.Context(), c)
 			if err != nil {
 				return err
 			}
@@ -37,7 +37,7 @@ func newSecretCreateCmd(c *config.Config) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client := secrets.Client{Context: secretFlags.Context, Kubeconfig: secretFlags.Kubeconfig}
+			client := secrets.Client{Context: ctx.Context, Kubeconfig: secretFlags.Kubeconfig}
 			opts := secrets.WriteOptions{Namespace: ctx.Namespace, KeyspaceName: ctx.KeyspaceName, ClusterID: ctx.ClusterID, Key: args[0], Operation: "create", Value: value}
 			request, err := client.EncryptedRequest(opts)
 			if err != nil {

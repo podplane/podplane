@@ -6,6 +6,7 @@ package kubectl
 
 import "testing"
 
+// TestClusterKey checks distinct kubeconfig cluster keys for local and remote clusters.
 func TestClusterKey(t *testing.T) {
 	tests := []struct {
 		clusterID string
@@ -25,6 +26,7 @@ func TestClusterKey(t *testing.T) {
 	}
 }
 
+// TestContextKey checks context names including the shorthand for the default local cluster.
 func TestContextKey(t *testing.T) {
 	tests := []struct {
 		clusterID string
@@ -44,6 +46,7 @@ func TestContextKey(t *testing.T) {
 	}
 }
 
+// TestCredentialsKey checks credential keys scoped by subject, cluster, and local mode.
 func TestCredentialsKey(t *testing.T) {
 	tests := []struct {
 		sub       string

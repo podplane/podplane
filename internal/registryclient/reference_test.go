@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 )
 
+// TestRemoteRefDefaultsToAppsBasenameAndTag verifies default destinations retain the source basename and tag.
 func TestRemoteRefDefaultsToAppsBasenameAndTag(t *testing.T) {
 	source := mustRef(t, "ghcr.io/acme/example-api:v1.2.3")
 	ref, err := remoteRef("registry.example.com", source, "")
@@ -22,6 +23,7 @@ func TestRemoteRefDefaultsToAppsBasenameAndTag(t *testing.T) {
 	}
 }
 
+// TestRemoteRefPreservesAppsSourcePath verifies nested apps repositories survive destination rewriting.
 func TestRemoteRefPreservesAppsSourcePath(t *testing.T) {
 	source := mustRef(t, "apps/team/example-api:v1.2.3")
 	ref, err := remoteRef("registry.example.com", source, "")
@@ -33,6 +35,7 @@ func TestRemoteRefPreservesAppsSourcePath(t *testing.T) {
 	}
 }
 
+// TestSourceRefNormalizesBuildOutputRefs verifies accepted build references normalize to apps paths.
 func TestSourceRefNormalizesBuildOutputRefs(t *testing.T) {
 	tests := map[string]string{
 		"api":                                   "apps/api:latest",
@@ -55,6 +58,7 @@ func TestSourceRefNormalizesBuildOutputRefs(t *testing.T) {
 	}
 }
 
+// TestSourceRefRejectsRemoteAndReservedRefs verifies sources outside the supported apps forms fail.
 func TestSourceRefRejectsRemoteAndReservedRefs(t *testing.T) {
 	for _, input := range []string{"ghcr.io/me/api:v1", "mirror/api:v1", "default-registry.local/mirror/api:v1", "default-registry.local/api:v1", "team/api:v1"} {
 		t.Run(input, func(t *testing.T) {
@@ -65,6 +69,7 @@ func TestSourceRefRejectsRemoteAndReservedRefs(t *testing.T) {
 	}
 }
 
+// TestDockerImageCandidatesPreferTypedRefThenAppBasename verifies local image lookup candidate order.
 func TestDockerImageCandidatesPreferTypedRefThenAppBasename(t *testing.T) {
 	source := mustTag(t, "apps/api:v1")
 	got := dockerImageCandidates("default-registry.local/apps/api:v1", source)
@@ -74,6 +79,7 @@ func TestDockerImageCandidatesPreferTypedRefThenAppBasename(t *testing.T) {
 	}
 }
 
+// TestRemoteRefPrefixesClusterRegistryForRepositoryOnlyRemote verifies unqualified destinations use the cluster registry.
 func TestRemoteRefPrefixesClusterRegistryForRepositoryOnlyRemote(t *testing.T) {
 	source := mustRef(t, "example-api:latest")
 	ref, err := remoteRef("registry.example.com", source, "apps/acme/example-api:prod")
@@ -85,6 +91,7 @@ func TestRemoteRefPrefixesClusterRegistryForRepositoryOnlyRemote(t *testing.T) {
 	}
 }
 
+// TestRemoteRefAllowsExplicitRegistryUnderApps verifies an explicit apps registry overrides the cluster registry.
 func TestRemoteRefAllowsExplicitRegistryUnderApps(t *testing.T) {
 	source := mustRef(t, "example-api:latest")
 	ref, err := remoteRef("registry.example.com", source, "localhost:5000/apps/example-api:prod")
@@ -96,6 +103,7 @@ func TestRemoteRefAllowsExplicitRegistryUnderApps(t *testing.T) {
 	}
 }
 
+// TestRemoteRefRejectsNonAppsRepositories verifies destinations outside apps report a namespace error.
 func TestRemoteRefRejectsNonAppsRepositories(t *testing.T) {
 	source := mustRef(t, "example-api:latest")
 	_, err := remoteRef("registry.example.com", source, "mirror/ghcr.io/acme/example-api:latest")
@@ -107,6 +115,7 @@ func TestRemoteRefRejectsNonAppsRepositories(t *testing.T) {
 	}
 }
 
+// TestRemoteRefRejectsDigest verifies digest-addressed push destinations are rejected.
 func TestRemoteRefRejectsDigest(t *testing.T) {
 	source := mustRef(t, "example-api:latest")
 	_, err := remoteRef("registry.example.com", source, "apps/example-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
@@ -115,6 +124,7 @@ func TestRemoteRefRejectsDigest(t *testing.T) {
 	}
 }
 
+// TestImageHasRegistry verifies hostnames and ports distinguish qualified image references.
 func TestImageHasRegistry(t *testing.T) {
 	tests := []struct {
 		ref  string
@@ -135,6 +145,7 @@ func TestImageHasRegistry(t *testing.T) {
 	}
 }
 
+// mustRef parses a test image reference or fails the calling test.
 func mustRef(t *testing.T, ref string) name.Reference {
 	t.Helper()
 	parsed, err := name.ParseReference(ref, name.WeakValidation)
@@ -144,6 +155,7 @@ func mustRef(t *testing.T, ref string) name.Reference {
 	return parsed
 }
 
+// mustTag parses a test image tag or fails the calling test.
 func mustTag(t *testing.T, ref string) name.Tag {
 	t.Helper()
 	tag, err := name.NewTag(ref, name.WeakValidation)

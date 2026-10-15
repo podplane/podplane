@@ -15,6 +15,7 @@ import (
 	"github.com/diskfs/go-diskfs/filesystem/iso9660"
 )
 
+// TestWriteCloudInitDataISO verifies the cidata label and all three seed files.
 func TestWriteCloudInitDataISO(t *testing.T) {
 	dir := t.TempDir()
 	isoPath := filepath.Join(dir, "seed.iso")
@@ -89,6 +90,7 @@ func TestWriteCloudInitDataISO(t *testing.T) {
 	}
 }
 
+// TestWriteCloudInitDataISO_NetworkConfig checks that network configuration survives ISO creation.
 func TestWriteCloudInitDataISO_NetworkConfig(t *testing.T) {
 	dir := t.TempDir()
 	isoPath := filepath.Join(dir, "seed.iso")
@@ -111,6 +113,7 @@ func TestWriteCloudInitDataISO_NetworkConfig(t *testing.T) {
 	}
 }
 
+// TestWriteCloudInitDataISO_CreatesParentDirs checks creation under a missing directory tree.
 func TestWriteCloudInitDataISO_CreatesParentDirs(t *testing.T) {
 	dir := t.TempDir()
 	isoPath := filepath.Join(dir, "nested", "deep", "seed.iso")
@@ -125,6 +128,7 @@ func TestWriteCloudInitDataISO_CreatesParentDirs(t *testing.T) {
 	}
 }
 
+// openTestISO opens a seed image for inspection and closes its file during test cleanup.
 func openTestISO(t *testing.T, isoPath string) *iso9660.FileSystem {
 	t.Helper()
 	info, err := os.Stat(isoPath)

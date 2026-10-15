@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+// TestDeleteRemovesStoppedVMArtifacts checks deletion removes disks, the serial socket, and PID file.
 func TestDeleteRemovesStoppedVMArtifacts(t *testing.T) {
 	dataDir := t.TempDir()
 	runtimeDir := t.TempDir()

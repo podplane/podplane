@@ -17,6 +17,7 @@ var oidcCmd = &cobra.Command{
 
 const defaultOIDCConfigName = "podplane.oidc.jsonc"
 
+// newOIDCCmd groups OIDC infrastructure creation and deletion commands with fallback help.
 func newOIDCCmd(c *config.Config) *cobra.Command {
 	oidcCmd.Run = func(cmd *cobra.Command, args []string) {
 		_ = cmd.Help()

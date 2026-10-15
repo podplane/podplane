@@ -16,12 +16,14 @@ import (
 	"github.com/podplane/podplane/internal/tui"
 )
 
+// configField stores one OIDC wizard prompt, answer, and validation rule.
 type configField struct {
 	label    string
 	value    string
 	validate func(string) error
 }
 
+// configForm tracks OIDC wizard answers, the active input, and completion or cancellation.
 type configForm struct {
 	fields   []configField
 	index    int

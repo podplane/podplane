@@ -7,6 +7,7 @@ package clustercreate
 import (
 	"fmt"
 	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -37,18 +38,16 @@ func cloudProviderItems() []list.Item {
 
 // configField describes one field in the cluster configuration wizard.
 type configField struct {
-	label       string
-	value       string
-	validate    func(string) error
-	advanced    bool
-	domainOnly  bool
-	noDomain    bool
-	acmeDNSOnly bool
+	label    string
+	value    string
+	validate func(string) error
+	visible  func(configForm) bool
 }
 
 // configForm holds the cluster configuration wizard state.
 type configForm struct {
 	fields         []configField
+	providerKind   string
 	index          int
 	input          textinput.Model
 	oidcIssuerURL  string
@@ -61,9 +60,12 @@ type configForm struct {
 	complete       bool
 }
 
-// RunConfigWizard runs an interactive form and returns a cluster configuration.
-func RunConfigWizard(oidcIssuerURL, seedVersion string) (*clusterconfig.ClusterConfig, error) {
-	m := newConfigForm(oidcIssuerURL, seedVersion)
+// RunConfigWizard runs the AWS or Google Cloud form and returns a cluster configuration.
+func RunConfigWizard(providerKind, oidcIssuerURL, seedVersion string) (*clusterconfig.ClusterConfig, error) {
+	m, err := newConfigForm(providerKind, oidcIssuerURL, seedVersion)
+	if err != nil {
+		return nil, err
+	}
 	got, err := tea.NewProgram(m).Run()
 	if err != nil {
 		return nil, fmt.Errorf("run cluster config form: %w", err)
@@ -82,31 +84,51 @@ func RunConfigWizard(oidcIssuerURL, seedVersion string) (*clusterconfig.ClusterC
 }
 
 // newConfigForm creates the initial model for the cluster config form.
-func newConfigForm(oidcIssuerURL, seedVersion string) configForm {
-	draft := clusterconfig.NewDraftConfig("aws")
+func newConfigForm(providerKind, oidcIssuerURL, seedVersion string) (configForm, error) {
+	draft, err := clusterconfig.NewDraftConfig(providerKind)
+	if err != nil {
+		return configForm{}, err
+	}
 	if oidcIssuerURL != "" {
 		draft.Cluster.OIDC.IssuerURL = oidcIssuerURL
 	}
 	provider := draft.Cluster.Providers[0]
-	zone := "us-east-1a"
+	zone := ""
 	for name := range provider.Zones {
 		zone = name
 		break
 	}
 	pool := draft.Cluster.Pools["control-plane"]
+	regionField := configField{label: "AWS region", value: provider.Region, validate: clusterconfig.ValidateAWSRegion}
+	credentialsField := configField{label: "AWS profile (optional)", value: provider.Profile}
+	zoneField := configField{label: "AWS availability zone", value: zone, validate: tui.Required("AWS availability zone")}
+	dnsField := configField{label: "DNS provider (aws-route53 or blank for manual)", validate: validateDNSProvider}
+	if providerKind == "google" {
+		regionField = configField{label: "Google Cloud region", value: provider.Region, validate: validateGoogleRegion}
+		credentialsField = configField{label: "Google Cloud project ID", value: provider.Project, validate: tui.Required("Google Cloud project ID")}
+		zoneField = configField{label: "Google Cloud zone", value: zone, validate: tui.Required("Google Cloud zone")}
+		dnsField = configField{label: "DNS provider (google-cloud-dns or blank for manual)", validate: validateGoogleDNSProvider}
+	}
+	zoneField.visible = func(m configForm) bool { return m.showNetworking }
+	dnsField.visible = func(m configForm) bool { return m.domain != "" }
 	fields := []configField{
 		{label: "Cluster name", value: draft.Cluster.Name, validate: tui.Required("cluster name")},
 		{label: "Cluster ID / slug", value: draft.Cluster.ID, validate: validateClusterID},
 		{label: "Cluster domain (optional)", validate: validateOptionalDomain},
-		{label: "DNS provider (aws-route53 or blank for manual)", validate: validateDNSProvider, domainOnly: true},
-		{label: "ACME account email (optional)", acmeDNSOnly: true},
-		{label: "Kubernetes API hostname", validate: validateDomain, noDomain: true},
-		{label: "AWS region", value: provider.Region, validate: clusterconfig.ValidateAWSRegion},
-		{label: "AWS profile (optional)", value: provider.Profile},
+		dnsField,
+		{label: "Google Cloud DNS managed-zone resource name", validate: tui.Required("managed-zone resource name"), visible: func(m configForm) bool {
+			return m.domain != "" && m.providerKind == "google" && m.dnsProvider == "google-cloud-dns"
+		}},
+		{label: "ACME account email (optional)", visible: func(m configForm) bool {
+			return (&clusterconfig.DomainProvider{Kind: m.dnsProvider}).SupportsACME()
+		}},
+		{label: "Kubernetes API hostname", validate: validateDomain, visible: func(m configForm) bool { return m.domain == "" }},
+		regionField,
+		credentialsField,
 		{label: "Initial platform components (recommended, minimal, none)", value: seeds.Recommended, validate: validateSeedName},
 		{label: "Configure networking options?", value: "no", validate: validateYesNo},
-		{label: "VPC IPv4 CIDR", value: provider.VPC.V4CIDR, validate: validateVPCCIDR, advanced: true},
-		{label: "AWS availability zone", value: zone, validate: tui.Required("AWS availability zone"), advanced: true},
+		{label: "VPC IPv4 CIDR", value: provider.VPC.V4CIDR, validate: validateVPCCIDR, visible: func(m configForm) bool { return m.showNetworking }},
+		zoneField,
 		{label: "Control-plane architecture", value: pool.Arch, validate: validateArch},
 		{label: "Control-plane instance type", value: pool.InstanceType, validate: tui.Required("instance type")},
 		{label: "Control-plane size", value: strconv.Itoa(pool.Size), validate: validatePositiveInt},
@@ -120,7 +142,7 @@ func newConfigForm(oidcIssuerURL, seedVersion string) configForm {
 	input.CharLimit = 256
 	input.SetValue(fields[0].value)
 	input.CursorEnd()
-	return configForm{fields: fields, input: input, oidcIssuerURL: oidcIssuerURL, seedVersion: seedVersion}
+	return configForm{fields: fields, input: input, providerKind: providerKind, oidcIssuerURL: oidcIssuerURL, seedVersion: seedVersion}, nil
 }
 
 // Init starts cursor blinking for the cluster config form.
@@ -185,6 +207,13 @@ func (m configForm) moveNext() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	if field.label == "Google Cloud zone" {
+		region := m.fields[indexForLabel(m.fields, "Google Cloud region")].value
+		if err := validateGoogleZone(region, value); err != nil {
+			m.err = err
+			return m, nil
+		}
+	}
 	m.fields[m.index].value = value
 	if field.label == "Configure networking options?" {
 		m.showNetworking = strings.EqualFold(value, "yes") || strings.EqualFold(value, "y")
@@ -192,7 +221,7 @@ func (m configForm) moveNext() (tea.Model, tea.Cmd) {
 	if field.label == "Cluster domain (optional)" {
 		m.domain = value
 	}
-	if field.label == "DNS provider (aws-route53 or blank for manual)" {
+	if strings.HasPrefix(field.label, "DNS provider (") {
 		m.dnsProvider = value
 	}
 	m.err = nil
@@ -237,7 +266,7 @@ func (m *configForm) storeCurrentValue() {
 	if m.fields[m.index].label == "Cluster domain (optional)" {
 		m.domain = value
 	}
-	if m.fields[m.index].label == "DNS provider (aws-route53 or blank for manual)" {
+	if strings.HasPrefix(m.fields[m.index].label, "DNS provider (") {
 		m.dnsProvider = value
 	}
 }
@@ -262,19 +291,7 @@ func (m configForm) previousIndex(index int) int {
 
 // fieldVisible reports whether a field applies to the current wizard answers.
 func (m configForm) fieldVisible(field configField) bool {
-	if field.advanced && !m.showNetworking {
-		return false
-	}
-	if field.domainOnly && m.domain == "" {
-		return false
-	}
-	if field.noDomain && m.domain != "" {
-		return false
-	}
-	if field.acmeDNSOnly && !(&clusterconfig.DomainProvider{Kind: m.dnsProvider}).SupportsACME() {
-		return false
-	}
-	return true
+	return field.visible == nil || field.visible(m)
 }
 
 // config converts completed form answers into a cluster configuration.
@@ -287,7 +304,10 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse control-plane size: %w", err)
 	}
-	cfg := clusterconfig.NewDraftConfig("aws")
+	cfg, err := clusterconfig.NewDraftConfig(m.providerKind)
+	if err != nil {
+		return nil, err
+	}
 	cfg.Cluster.Name = values["Cluster name"]
 	cfg.Cluster.ID = values["Cluster ID / slug"]
 	cfg.Cluster.OIDC.IssuerURL = m.oidcIssuerURL
@@ -313,21 +333,49 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 	provider := cfg.Cluster.Providers[0]
 	provider.Region = values["AWS region"]
 	provider.Profile = values["AWS profile (optional)"]
+	if m.providerKind == "google" {
+		provider.Region = values["Google Cloud region"]
+		provider.Project = values["Google Cloud project ID"]
+		if err := tui.Required("Google Cloud project ID")(provider.Project); err != nil {
+			return nil, err
+		}
+		secretProvider := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]
+		secretProvider.ProjectID = provider.Project
+		cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider] = secretProvider
+	}
 	provider.VPC.V4CIDR = values["VPC IPv4 CIDR"]
 	zone := values["AWS availability zone"]
-	if !m.showNetworking {
-		zone = provider.Region + "a"
+	if m.providerKind == "google" {
+		zone = values["Google Cloud zone"]
+		if !m.showNetworking {
+			zone = provider.Region + "-a"
+		}
+		if err := validateGoogleZone(provider.Region, zone); err != nil {
+			return nil, fmt.Errorf("invalid Google Cloud zone %q: %w", zone, err)
+		}
+	} else {
+		if !m.showNetworking {
+			zone = provider.Region + "a"
+		}
+		if err := clusterconfig.ValidateAWSAvailabilityZone(provider.Region, zone); err != nil {
+			return nil, fmt.Errorf("AWS availability zone %q %w", zone, err)
+		}
 	}
-	if err := clusterconfig.ValidateAWSAvailabilityZone(provider.Region, zone); err != nil {
-		return nil, fmt.Errorf("AWS availability zone %q %w", zone, err)
+	if err := validateVPCCIDR(provider.VPC.V4CIDR); err != nil {
+		return nil, err
 	}
 	vpcPrefix, err := netip.ParsePrefix(provider.VPC.V4CIDR)
 	if err != nil {
 		return nil, fmt.Errorf("parse VPC IPv4 CIDR: %w", err)
 	}
 	vpcAddr := vpcPrefix.Addr().As4()
-	subnets := provider.Zones["us-east-1a"]
+	var subnets []clusterconfig.Subnet
+	for _, defaults := range provider.Zones {
+		subnets = append([]clusterconfig.Subnet(nil), defaults...)
+		break
+	}
 	for i := range subnets {
+		subnets[i].Services = append([]string(nil), subnets[i].Services...)
 		subnetPrefix, err := netip.ParsePrefix(subnets[i].V4CIDR)
 		if err != nil {
 			return nil, fmt.Errorf("parse default subnet IPv4 CIDR: %w", err)
@@ -350,6 +398,15 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 			configuredDomain.Provider = &clusterconfig.DomainProvider{Kind: "aws-route53"}
 			if email := values["ACME account email (optional)"]; email != "" {
 				cfg.Cluster.ACME = &clusterconfig.ACME{Email: email}
+			}
+		}
+		if m.providerKind == "google" && values["DNS provider (google-cloud-dns or blank for manual)"] == "google-cloud-dns" {
+			zoneName := values["Google Cloud DNS managed-zone resource name"]
+			if err := tui.Required("managed-zone resource name")(zoneName); err != nil {
+				return nil, err
+			}
+			configuredDomain.Provider = &clusterconfig.DomainProvider{
+				Kind: "google-cloud-dns", Project: provider.Project, HostedZoneName: zoneName,
 			}
 		}
 		cfg.Cluster.Domains = []clusterconfig.Domain{configuredDomain}
@@ -402,6 +459,34 @@ func validateDNSProvider(value string) error {
 		return nil
 	}
 	return fmt.Errorf("DNS provider must be aws-route53 or blank for manual DNS")
+}
+
+// validateGoogleDNSProvider accepts managed Google DNS or manual DNS.
+func validateGoogleDNSProvider(value string) error {
+	if value == "" || value == "google-cloud-dns" {
+		return nil
+	}
+	return fmt.Errorf("DNS provider must be google-cloud-dns or blank for manual DNS")
+}
+
+// validateGoogleRegion validates Google Cloud region syntax without a cloud lookup.
+func validateGoogleRegion(value string) error {
+	if matched, _ := regexp.MatchString(`^[a-z]+(-[a-z]+)+[0-9]+$`, value); !matched {
+		return fmt.Errorf("must be a valid Google Cloud region, such as us-central1")
+	}
+	return nil
+}
+
+// validateGoogleZone verifies that a Google Cloud zone belongs to the region.
+func validateGoogleZone(region, zone string) error {
+	if err := validateGoogleRegion(region); err != nil {
+		return err
+	}
+	suffix := strings.TrimPrefix(zone, region+"-")
+	if !strings.HasPrefix(zone, region+"-") || len(suffix) != 1 || suffix[0] < 'a' || suffix[0] > 'z' {
+		return fmt.Errorf("must be a zone in region %s", region)
+	}
+	return nil
 }
 
 // validateVPCCIDR validates the /16 network shape used by the cluster wizard's

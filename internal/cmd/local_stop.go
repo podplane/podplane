@@ -20,12 +20,14 @@ var localStopCmd = &cobra.Command{
 	Long:  `Stop a running local cluster VM`,
 }
 
+// init registers optional cluster deletion after stopping the local VM.
 func init() {
 	localStopCmd.Flags().BoolVar(&localStopRemove, "rm", false, "Remove (delete) the cluster after stopping")
 }
 
 var localStopRemove bool
 
+// newLocalStopCmd wires VM shutdown and optional credential cleanup and cluster deletion.
 func newLocalStopCmd(c *config.Config) *cobra.Command {
 	localStopCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true

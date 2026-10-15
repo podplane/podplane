@@ -22,9 +22,9 @@
 Keep command behavior aligned with the command context model documented in
 [`docs/reference/cli/overview.md#config-files--context`](docs/reference/cli/overview.md#config-files--context).
 
-- **Cluster config commands** use `-f, --cluster-config`, defaulting to `./podplane.cluster.jsonc`: `login`, `cluster *`, `install`, `uninstall`.
+- **Cluster config commands** use `-f, --cluster-config`, defaulting to `./podplane.cluster.jsonc`: `login`, `cluster create`, `cluster upgrade`, `cluster delete`, `install`, `uninstall`.
 - **OIDC server config commands** use `-f, --oidc-config`, defaulting to `./podplane.oidc.jsonc`: `oidc *`.
-- **Kubernetes context commands** use `--context` / `--kubeconfig`, defaulting to the current kubeconfig context: `deploy`, `remove`, `logout`.
+- **Kubernetes context commands** use `--context` / `--kubeconfig`, defaulting to the current kubeconfig context: `deploy`, `remove`, `logout`, `cluster sleep`.
 - **Local/cache/info commands** should not require config/context by default: `local *`, `deps *`, `version`, `completion`, `help`.
 - `deps download` may optionally accept `--cluster-config` for targeted dependency prefetching.
 - `logout` may accept `--cluster` or explicit `-f, --cluster-config` for cleanup, but must not implicitly read `./podplane.cluster.jsonc`.

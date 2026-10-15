@@ -5,6 +5,9 @@
 package deploy
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/podplane/podplane/internal/kubectl"
@@ -41,19 +44,32 @@ func Run(opts Options) error {
 	if err := validateTemplateValuesSchema(opts.Template, opts.ChartPath, opts.Hostname != "", opts.Path != ""); err != nil {
 		return err
 	}
+	selected, err := kubectl.ResolveContext(context.Background(), opts.Context, opts.Kubeconfig)
+	if err != nil {
+		return err
+	}
+	opts.Context = selected.Name
 	port := opts.Port
 	if port == 0 && local.IsAppIngressHostname(opts.Hostname) {
 		// Local clusters expose app ingress through the host-side local ingress
 		// server, so the browser-facing route port can differ from the in-cluster
 		// Gateway HTTPS port used by the HTTPRoute.
-		clusterID, isLocal, err := kubectl.ClusterIDFromContext(opts.Context, opts.Kubeconfig)
-		if err == nil && isLocal {
+		clusterID, isLocal := selected.ClusterID()
+		if isLocal {
 			port = local.AppIngressRoutePort(opts.RuntimeDirectory, opts.Hostname, clusterID)
 		}
 	}
-	return withValuesFile(opts.Image, env, opts.Hostname, opts.Path, port, func(valuesPath string) error {
+	err = withValuesFile(opts.Image, env, opts.Hostname, opts.Path, port, func(valuesPath string) error {
 		return runHelm(helmUpgradeInstallArgs(opts, valuesPath))
 	})
+	if err != nil && opts.Wait {
+		// Helm only reports a readiness timeout; explain Pod Security failures.
+		target := AppTargetOptions{Name: opts.Name, Namespace: opts.Namespace, Context: opts.Context, Kubeconfig: opts.Kubeconfig}
+		if problems := podSecurityProblems(target); len(problems) > 0 {
+			return fmt.Errorf("%s\n%w", strings.Join(problems, "\n"), err)
+		}
+	}
+	return err
 }
 
 // helmUpgradeInstallArgs builds the Helm upgrade/install command for an app

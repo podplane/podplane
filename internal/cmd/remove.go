@@ -25,6 +25,7 @@ var (
 	removeKubeconfig string
 )
 
+// init registers app removal flags and requires a deployment name.
 func init() {
 	removeCmd.Flags().StringVar(&removeName, "name", "", "Name of the app deployment to remove")
 	removeCmd.Flags().StringVarP(&removeNamespace, "namespace", "n", "", "Kubernetes namespace the app was deployed into")
@@ -33,6 +34,7 @@ func init() {
 	_ = removeCmd.MarkFlagRequired("name")
 }
 
+// newRemoveCmd wires app removal using the selected Kubernetes namespace and context.
 func newRemoveCmd(c *config.Config) *cobra.Command {
 	_ = c
 	removeCmd.RunE = func(cmd *cobra.Command, args []string) error {

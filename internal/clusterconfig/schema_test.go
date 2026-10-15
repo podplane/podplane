@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
 
+// TestClusterSchemaJSONIsValidJSON checks the embedded schema title and absence of generated metadata.
 func TestClusterSchemaJSONIsValidJSON(t *testing.T) {
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(ClusterSchemaJSON), &schema); err != nil {
@@ -25,10 +27,14 @@ func TestClusterSchemaJSONIsValidJSON(t *testing.T) {
 	}
 }
 
+// TestWriteAddsDefaultLocalSchemaRef checks that writing adds the offline schema reference without mutating input.
 func TestWriteAddsDefaultLocalSchemaRef(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "podplane.cluster.jsonc")
-	cfg := NewDraftConfig("aws")
+	cfg, err := NewDraftConfig("aws")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := Write(path, cfg); err != nil {
 		t.Fatalf("Write returned error: %v", err)
 	}
@@ -48,6 +54,7 @@ func TestWriteAddsDefaultLocalSchemaRef(t *testing.T) {
 	}
 }
 
+// TestWriteSchemaWritesLocalSchemaFile checks that the schema copy identifies its checked-in source.
 func TestWriteSchemaWritesLocalSchemaFile(t *testing.T) {
 	dir := t.TempDir()
 	if err := WriteSchema(dir); err != nil {
@@ -67,5 +74,32 @@ func TestWriteSchemaWritesLocalSchemaFile(t *testing.T) {
 	}
 	if !strings.Contains(comment, "schemas/podplane.cluster.schema.json") {
 		t.Fatalf("written schema $comment = %q, want source schema path", comment)
+	}
+}
+
+// TestNetworkingSchemaCoversConfigFields checks schema properties match networking and pool JSON fields.
+func TestNetworkingSchemaCoversConfigFields(t *testing.T) {
+	var schema struct {
+		Defs map[string]struct{ Properties map[string]json.RawMessage } `json:"$defs"`
+	}
+	if err := json.Unmarshal([]byte(ClusterSchemaJSON), &schema); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]any{
+		"cluster": Cluster{}, "provider": Provider{}, "tunnel": Tunnel{},
+		"nat": NAT{}, "natGroup": NATGroup{}, "tenantNAT": TenantNAT{}, "listener": Listener{},
+		"pool": Pool{},
+	} {
+		fields := reflect.TypeOf(value)
+		properties := schema.Defs[name].Properties
+		if len(properties) != fields.NumField() {
+			t.Fatalf("schema %s has %d fields, config has %d", name, len(properties), fields.NumField())
+		}
+		for i := 0; i < fields.NumField(); i++ {
+			key := strings.Split(fields.Field(i).Tag.Get("json"), ",")[0]
+			if _, ok := properties[key]; !ok {
+				t.Fatalf("schema %s missing config field %s", name, key)
+			}
+		}
 	}
 }

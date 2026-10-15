@@ -14,6 +14,7 @@ import (
 	"github.com/podplane/podplane/pkg/seeds"
 )
 
+// TestCloudProviderItemsDefaultToAWSAndIncludeCancel checks provider ordering and cancellation.
 func TestCloudProviderItemsDefaultToAWSAndIncludeCancel(t *testing.T) {
 	items := cloudProviderItems()
 	if len(items) != 3 {
@@ -39,8 +40,9 @@ func TestCloudProviderItemsDefaultToAWSAndIncludeCancel(t *testing.T) {
 	}
 }
 
+// TestNewConfigFormSkipsOIDCIssuerFieldWhenProvided checks reuse of a resolved issuer URL.
 func TestNewConfigFormSkipsOIDCIssuerFieldWhenProvided(t *testing.T) {
-	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
 
 	for _, field := range form.fields {
 		if field.label == "OIDC issuer URL" {
@@ -57,8 +59,9 @@ func TestNewConfigFormSkipsOIDCIssuerFieldWhenProvided(t *testing.T) {
 	}
 }
 
+// TestNewConfigFormPromptsOIDCIssuerFieldWhenMissing checks that an unresolved issuer is requested.
 func TestNewConfigFormPromptsOIDCIssuerFieldWhenMissing(t *testing.T) {
-	form := newConfigForm("", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "", "v1.2.3-1")
 
 	for _, field := range form.fields {
 		if field.label == "OIDC issuer URL" {
@@ -71,15 +74,16 @@ func TestNewConfigFormPromptsOIDCIssuerFieldWhenMissing(t *testing.T) {
 // TestNewConfigFormRequiresIntentionalDomainlessAPIHostname verifies the API
 // endpoint prompt has no inferred placeholder.
 func TestNewConfigFormRequiresIntentionalDomainlessAPIHostname(t *testing.T) {
-	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
 	field := form.fields[indexForField(t, form, "Kubernetes API hostname")]
 	if field.value != "" {
 		t.Fatalf("Kubernetes API hostname default = %q, want empty", field.value)
 	}
 }
 
+// TestNewConfigFormDefaultsToRecommendedSeed checks the default seed name and resolved version.
 func TestNewConfigFormDefaultsToRecommendedSeed(t *testing.T) {
-	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
 	seedField := form.fields[indexForField(t, form, "Initial platform components (recommended, minimal, none)")]
 	if seedField.value != seeds.Recommended {
 		t.Fatalf("seed field default = %q, want %q", seedField.value, seeds.Recommended)
@@ -97,8 +101,9 @@ func TestNewConfigFormDefaultsToRecommendedSeed(t *testing.T) {
 	}
 }
 
+// TestConfigFormCanSelectBareSeed checks that selecting none clears seed name and version.
 func TestConfigFormCanSelectBareSeed(t *testing.T) {
-	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
 	form.fields[indexForField(t, form, "Initial platform components (recommended, minimal, none)")].value = seeds.None
 
 	cfg, err := form.config()
@@ -115,7 +120,7 @@ func TestConfigFormCanSelectBareSeed(t *testing.T) {
 
 // TestConfigFormBuildsManagedDomainDefaults verifies the concise domain flow.
 func TestConfigFormBuildsManagedDomainDefaults(t *testing.T) {
-	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
 	form.fields[indexForField(t, form, "Cluster domain (optional)")].value = "staging.example.com"
 	form.fields[indexForField(t, form, "DNS provider (aws-route53 or blank for manual)")].value = "aws-route53"
 	form.fields[indexForField(t, form, "ACME account email (optional)")].value = "ops@example.com"
@@ -145,7 +150,7 @@ func TestConfigFormBuildsManagedDomainDefaults(t *testing.T) {
 // TestConfigFormOnlyShowsACMEEmailForSupportedDNS verifies that the ACME email
 // field is visible only after selecting a DNS provider with ACME support.
 func TestConfigFormOnlyShowsACMEEmailForSupportedDNS(t *testing.T) {
-	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
 	field := form.fields[indexForField(t, form, "ACME account email (optional)")]
 	form.domain = "example.com"
 	if form.fieldVisible(field) {
@@ -159,7 +164,7 @@ func TestConfigFormOnlyShowsACMEEmailForSupportedDNS(t *testing.T) {
 
 // TestConfigFormBuildsDomainlessCluster verifies explicit unmanaged API setup.
 func TestConfigFormBuildsDomainlessCluster(t *testing.T) {
-	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
 	form.fields[indexForField(t, form, "Cluster ID / slug")].value = "production"
 	form.fields[indexForField(t, form, "Kubernetes API hostname")].value = "api.example.net"
 
@@ -181,7 +186,7 @@ func TestConfigFormBuildsDomainlessCluster(t *testing.T) {
 // TestConfigFormAdaptsSubnetsToCustomVPCAndRegion verifies generated subnet
 // CIDRs and availability zones follow the wizard's networking inputs.
 func TestConfigFormAdaptsSubnetsToCustomVPCAndRegion(t *testing.T) {
-	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
 	form.showNetworking = true
 	form.fields[indexForField(t, form, "AWS region")].value = "us-west-2"
 	form.fields[indexForField(t, form, "VPC IPv4 CIDR")].value = "172.19.0.0/16"
@@ -205,7 +210,7 @@ func TestConfigFormAdaptsSubnetsToCustomVPCAndRegion(t *testing.T) {
 // TestConfigFormRejectsAvailabilityZoneOutsideRegion preserves final config
 // validation as a fallback for the immediate field validation.
 func TestConfigFormRejectsAvailabilityZoneOutsideRegion(t *testing.T) {
-	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
 	form.showNetworking = true
 	form.fields[indexForField(t, form, "AWS region")].value = "us-west-2"
 	form.fields[indexForField(t, form, "AWS availability zone")].value = "us-west-1a"
@@ -236,7 +241,7 @@ func TestConfigFormRejectsInvalidNetworkFieldsBeforeAdvancing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.field, func(t *testing.T) {
-			form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+			form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
 			form.showNetworking = true
 			if tt.prepare != nil {
 				tt.prepare(&form)
@@ -256,8 +261,9 @@ func TestConfigFormRejectsInvalidNetworkFieldsBeforeAdvancing(t *testing.T) {
 	}
 }
 
+// TestConfigFormCanNavigateBackWithoutLosingAnswers checks saved answers and back-navigation hints.
 func TestConfigFormCanNavigateBackWithoutLosingAnswers(t *testing.T) {
-	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
 	form.input.SetValue("production")
 	if view := form.View(); strings.Contains(view, "shift+tab: back") {
 		t.Fatalf("first cluster step should not show back hint; view = %q", view)
@@ -292,8 +298,9 @@ func TestConfigFormCanNavigateBackWithoutLosingAnswers(t *testing.T) {
 	}
 }
 
+// TestConfigFormBackNavigationSkipsHiddenNetworkingFields checks navigation past disabled network prompts.
 func TestConfigFormBackNavigationSkipsHiddenNetworkingFields(t *testing.T) {
-	form := newConfigForm("https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
 	form.index = form.nextIndex(indexForField(t, form, "Control-plane architecture") - 1)
 	form.input.SetValue(form.fields[form.index].value)
 
@@ -304,6 +311,17 @@ func TestConfigFormBackNavigationSkipsHiddenNetworkingFields(t *testing.T) {
 	}
 }
 
+// testConfigForm constructs a wizard form or fails the calling test.
+func testConfigForm(t *testing.T, providerKind, issuerURL, seedVersion string) configForm {
+	t.Helper()
+	form, err := newConfigForm(providerKind, issuerURL, seedVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return form
+}
+
+// indexForField finds a form field by label or fails the test.
 func indexForField(t *testing.T, form configForm, label string) int {
 	t.Helper()
 	for i, field := range form.fields {

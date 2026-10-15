@@ -13,6 +13,7 @@ import (
 	"testing"
 )
 
+// fakeEngine simulates module resolution and provider mirroring while recording requests.
 type fakeEngine struct {
 	platforms       []string
 	moduleVersion   string
@@ -38,19 +39,18 @@ func (e *fakeEngine) InitBackendDisabled(_ context.Context, dir string) error {
 		return err
 	}
 	e.roots = append(e.roots, string(root))
-	source := filepath.Join(dir, ".terraform", "modules", "cluster")
-	if err := os.MkdirAll(filepath.Join(source, "modules", "cluster"), 0o755); err != nil {
-		return err
-	}
-	for _, name := range []string{"account", "network", "shard"} {
-		if err := os.MkdirAll(filepath.Join(source, "modules", name), 0o755); err != nil {
+	for _, key := range []string{"cluster", "google_cluster"} {
+		source := filepath.Join(dir, ".terraform", "modules", key)
+		for _, name := range []string{"cluster", "account", "network", "shard"} {
+			if err := os.MkdirAll(filepath.Join(source, "modules", name), 0o755); err != nil {
+				return err
+			}
+		}
+		if err := os.WriteFile(filepath.Join(source, "modules", "cluster", "main.tf"), []byte(key), 0o644); err != nil {
 			return err
 		}
 	}
-	if err := os.WriteFile(filepath.Join(source, "modules", "cluster", "main.tf"), []byte("cluster"), 0o644); err != nil {
-		return err
-	}
-	manifest := `{"Modules":[{"Key":"","Dir":"."},{"Key":"cluster","Dir":".terraform/modules/cluster/modules/cluster","Version":"` + e.moduleVersion + `"}]}`
+	manifest := `{"Modules":[{"Key":"","Dir":"."},{"Key":"cluster","Dir":".terraform/modules/cluster/modules/cluster","Version":"` + e.moduleVersion + `"},{"Key":"google_cluster","Dir":".terraform/modules/google_cluster/modules/cluster","Version":"` + e.moduleVersion + `"}]}`
 	if err := os.WriteFile(filepath.Join(dir, ".terraform", "modules", "modules.json"), []byte(manifest), 0o644); err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func TestDownloadAndConfigureSharedCache(t *testing.T) {
 	}
 
 	firstClusterDir := t.TempDir()
-	first, err := cache.Ensure(context.Background(), engine, firstClusterDir)
+	first, err := cache.Ensure(context.Background(), engine, firstClusterDir, "aws")
 	if err != nil {
 		t.Fatalf("Ensure returned error: %v", err)
 	}
@@ -151,14 +151,14 @@ func TestDownloadAndConfigureSharedCache(t *testing.T) {
 		t.Fatalf("second Download returned error: %v", err)
 	}
 	secondClusterDir := t.TempDir()
-	second, err := cache.Ensure(context.Background(), engine, secondClusterDir)
+	second, err := cache.Ensure(context.Background(), engine, secondClusterDir, "google")
 	if err != nil {
 		t.Fatalf("second Ensure returned error: %v", err)
 	}
 	if second.CLIConfigPath != first.CLIConfigPath {
 		t.Fatalf("clusters use different CLI configs: %q and %q", first.CLIConfigPath, second.CLIConfigPath)
 	}
-	if got := filepath.Clean(filepath.Join(secondClusterDir, filepath.FromSlash(second.NstanceModuleDir))); got != filepath.Join(cache.root, modulesDirName, nstanceDirName, "2.1.0") {
+	if got := filepath.Clean(filepath.Join(secondClusterDir, filepath.FromSlash(second.NstanceModuleDir))); got != filepath.Join(cache.root, modulesDirName, nstanceDirName, "2.1.0", "google") {
 		t.Fatalf("second cluster module directory = %q", got)
 	}
 	for _, path := range []string{
@@ -210,7 +210,7 @@ func TestEnsureUsesCompleteReadOnlyCache(t *testing.T) {
 		_ = os.Chmod(cache.root, 0o755)
 	})
 
-	configuration, err := cache.Ensure(context.Background(), engine, t.TempDir())
+	configuration, err := cache.Ensure(context.Background(), engine, t.TempDir(), "aws")
 	if err != nil {
 		t.Fatalf("Ensure returned error with complete read-only cache: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestEnsureRestoresVersionsFromGeneratedSourceAndLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	clusterDir := t.TempDir()
-	configuration, err := cache.Ensure(context.Background(), engine, clusterDir)
+	configuration, err := cache.Ensure(context.Background(), engine, clusterDir, "google")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestEnsureRestoresVersionsFromGeneratedSourceAndLock(t *testing.T) {
 	if err := cache.Download(context.Background(), engine, []string{"darwin_arm64"}); err != nil {
 		t.Fatal(err)
 	}
-	oldModule := filepath.Join(cache.root, modulesDirName, nstanceDirName, "2.0.1")
+	oldModule := filepath.Join(cache.root, modulesDirName, nstanceDirName, "2.0.1", "google")
 	oldProvider := filepath.Join(cache.root, providersDirName, "registry.terraform.io", "hashicorp", "aws", "terraform-provider-aws_1.0.0_darwin_arm64.zip")
 	if err := os.RemoveAll(oldModule); err != nil {
 		t.Fatal(err)
@@ -259,7 +259,7 @@ func TestEnsureRestoresVersionsFromGeneratedSourceAndLock(t *testing.T) {
 
 	engine.moduleVersion = "2.0.1"
 	engine.providerVersion = "9.9.9"
-	restored, err := cache.Ensure(context.Background(), engine, clusterDir)
+	restored, err := cache.Ensure(context.Background(), engine, clusterDir, "google")
 	if err != nil {
 		t.Fatalf("Ensure returned error: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestEnsureRestoresVersionsFromGeneratedSourceAndLock(t *testing.T) {
 	if current != "2.1.0" {
 		t.Fatalf("historical restore changed current module version to %q", current)
 	}
-	if got := engine.roots[len(engine.roots)-1]; strings.Count(got, `version = "2.0.1"`) != 4 {
+	if got := engine.roots[len(engine.roots)-1]; strings.Count(got, `version = "2.0.1"`) != 8 {
 		t.Fatalf("restore did not request exact module version:\n%s", got)
 	}
 	lock, err := os.ReadFile(filepath.Join(clusterDir, lockFileName))
@@ -298,7 +298,7 @@ func TestUpgradeMovesCachedStackToCurrentVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 	clusterDir := t.TempDir()
-	configuration, err := cache.Ensure(context.Background(), engine, clusterDir)
+	configuration, err := cache.Ensure(context.Background(), engine, clusterDir, "aws")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestUpgradeMovesCachedStackToCurrentVersions(t *testing.T) {
 
 	engine.moduleVersion = "2.1.0"
 	engine.providerVersion = "1.1.0"
-	upgraded, err := cache.Upgrade(context.Background(), engine, clusterDir)
+	upgraded, err := cache.Upgrade(context.Background(), engine, clusterDir, "aws")
 	if err != nil {
 		t.Fatalf("Upgrade returned error: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestUpgradeMovesCachedStackToCurrentVersions(t *testing.T) {
 
 // TestUpgradeRequiresGeneratedInfrastructure verifies upgrades reject clusters without generated infrastructure.
 func TestUpgradeRequiresGeneratedInfrastructure(t *testing.T) {
-	_, err := New(t.TempDir()).Upgrade(context.Background(), &fakeEngine{}, t.TempDir())
+	_, err := New(t.TempDir()).Upgrade(context.Background(), &fakeEngine{}, t.TempDir(), "aws")
 	if err == nil || !strings.Contains(err.Error(), "cluster create") {
 		t.Fatalf("Upgrade error = %v", err)
 	}

@@ -5,7 +5,7 @@
 package cmd
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,7 +14,6 @@ import (
 	"syscall"
 
 	"github.com/podplane/podplane/internal/config"
-	"github.com/podplane/podplane/internal/execwrap"
 	"github.com/podplane/podplane/internal/kubectl"
 	"github.com/podplane/podplane/internal/secrets"
 	"github.com/spf13/cobra"
@@ -65,6 +64,7 @@ func newSecretCmd(c *config.Config) *cobra.Command {
 
 // secretContext contains the resolved Kubernetes and Podplane secret request scope.
 type secretContext struct {
+	Context      string
 	Namespace    string
 	Provider     string
 	KeyspaceName string
@@ -72,28 +72,28 @@ type secretContext struct {
 }
 
 // resolveSecretContext resolves namespace, cluster, provider, and keyspace for a secret command.
-func resolveSecretContext(c *config.Config) (secretContext, error) {
+func resolveSecretContext(ctx context.Context, c *config.Config) (secretContext, error) {
 	if strings.TrimSpace(secretFlags.For) == "" {
 		return secretContext{}, fmt.Errorf("--for is required")
 	}
 	if err := secrets.ValidateScopeName("--for", secretFlags.For); err != nil {
 		return secretContext{}, err
 	}
+	selected, err := kubectl.ResolveContext(ctx, secretFlags.Context, secretFlags.Kubeconfig)
+	if err != nil {
+		return secretContext{}, err
+	}
 	namespace := strings.TrimSpace(secretFlags.Namespace)
 	if namespace == "" {
-		var err error
-		namespace, err = currentNamespace(secretFlags.Context, secretFlags.Kubeconfig)
-		if err != nil {
-			return secretContext{}, err
-		}
+		namespace = strings.TrimSpace(selected.Namespace)
+	}
+	if namespace == "" {
+		namespace = "default"
 	}
 	if err := secrets.ValidateScopeName("--namespace", namespace); err != nil {
 		return secretContext{}, err
 	}
-	clusterID, local, err := kubectl.ClusterIDFromContext(secretFlags.Context, secretFlags.Kubeconfig)
-	if err != nil {
-		return secretContext{}, err
-	}
+	clusterID, local := selected.ClusterID()
 	summary, err := c.ClusterSummary(clusterID, local)
 	if err != nil {
 		return secretContext{}, err
@@ -105,7 +105,7 @@ func resolveSecretContext(c *config.Config) (secretContext, error) {
 	if err != nil {
 		return secretContext{}, err
 	}
-	return secretContext{Namespace: namespace, Provider: provider, KeyspaceName: secrets.KeyspaceName(provider, secretFlags.For), ClusterID: summary.ID}, nil
+	return secretContext{Context: selected.Name, Namespace: namespace, Provider: provider, KeyspaceName: secrets.KeyspaceName(provider, secretFlags.For), ClusterID: summary.ID}, nil
 }
 
 // readSecretValue reads a secret value from file, stdin, or an interactive terminal prompt.
@@ -157,26 +157,4 @@ func printKeyspace(keyspace secrets.SecretProviderKeyspace, format string) error
 	default:
 		return fmt.Errorf("unsupported output format %q", format)
 	}
-}
-
-// currentNamespace resolves the active Kubernetes namespace for the selected context.
-func currentNamespace(kubeContext, kubeconfig string) (string, error) {
-	args := append(kubectl.Args(kubeContext, kubeconfig), "config", "view", "--minify", "--output=jsonpath={..namespace}")
-	cmd := execwrap.Command("kubectl", args...)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg != "" {
-			return "", fmt.Errorf("read current namespace: %w: %s", err, msg)
-		}
-		return "", fmt.Errorf("read current namespace: %w", err)
-	}
-	ns := strings.TrimSpace(stdout.String())
-	if ns == "" {
-		ns = "default"
-	}
-	return ns, nil
 }

@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -299,6 +300,9 @@ func Validate(cfg *ClusterConfig) error {
 	if len(cfg.Cluster.Domains) > 0 && cfg.Cluster.Registry.Hostname == "" {
 		return fmt.Errorf("cluster.registry.hostname is required when domains are configured")
 	}
+	if cfg.Cluster.Tunnel != nil && cfg.Cluster.ACME != nil {
+		return fmt.Errorf("cluster.acme cannot be combined with cluster.tunnel; the tunnel provider supplies public TLS")
+	}
 	if err := ValidateACME(cfg.Cluster.ACME, cfg.Cluster.Domains); err != nil {
 		return fmt.Errorf("cluster.acme: %w", err)
 	}
@@ -342,7 +346,124 @@ func Validate(cfg *ClusterConfig) error {
 			return err
 		}
 	}
+	if err := validateNetworking(cfg); err != nil {
+		return err
+	}
 	return validateDomains(cfg, cfg.Cluster.Providers[0])
+}
+
+// validateNetworking validates tunnel, listener and NAT settings without mutating defaults.
+func validateNetworking(cfg *ClusterConfig) error {
+	if len(cfg.Cluster.Providers) != 1 && (cfg.Cluster.Tunnel != nil || cfg.Cluster.NAT != nil) {
+		return fmt.Errorf("tunnel and NAT settings require exactly one infrastructure provider")
+	}
+	provider := cfg.Cluster.Providers[0]
+	if tunnel := cfg.Cluster.Tunnel; tunnel != nil {
+		if tunnel.Kind != "cloudflare" {
+			return fmt.Errorf("unsupported tunnel provider %q", tunnel.Kind)
+		}
+		if strings.TrimSpace(tunnel.ID) == "" || strings.TrimSpace(tunnel.CredentialSecret) == "" {
+			return fmt.Errorf("cluster.tunnel requires id and credential_secret for an existing tunnel")
+		}
+		if len(provider.LoadBalancers) > 0 || cfg.Cluster.Kubernetes.APILoadBalancer != "" {
+			return fmt.Errorf("cluster.tunnel cannot be combined with load balancers")
+		}
+		for _, domain := range cfg.Cluster.Domains {
+			if domain.LoadBalancer != "" {
+				return fmt.Errorf("domain %q load_balancer cannot be combined with cluster.tunnel", domain.Zone)
+			}
+		}
+		if cfg.Cluster.Kubernetes.APIPort != 0 && cfg.Cluster.Kubernetes.APIPort != 443 {
+			return fmt.Errorf("cluster.tunnel requires external api_port 443")
+		}
+	}
+	proxyPorts := map[int]string{}
+	for name, lb := range provider.LoadBalancers {
+		for _, listener := range lb.Listeners {
+			port := listener.ResolvedProxyPort()
+			if port >= 8990 && port <= 8994 {
+				return fmt.Errorf("load balancer %q proxy port collides with Nstance server port %d", name, port)
+			}
+			if owner, ok := proxyPorts[port]; ok && provider.Kind == "aws" {
+				return fmt.Errorf("load balancer %q proxy port %d collides with %q", name, port, owner)
+			}
+			proxyPorts[port] = name
+		}
+	}
+	if nat := cfg.Cluster.NAT; nat != nil {
+		if err := validateNAT(cfg, provider, nat); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateNAT checks tenant ownership, scaling choices, and subnet placement.
+func validateNAT(cfg *ClusterConfig, provider Provider, nat *NAT) error {
+	if nat.Mode != "provider" && nat.Mode != "nstance" {
+		return fmt.Errorf("cluster.nat.mode must be provider or nstance")
+	}
+	if nat.FixedPublicIPv4Count < 0 {
+		return fmt.Errorf("cluster.nat.fixed_public_ipv4_count must be non-negative")
+	}
+	if nat.Mode == "nstance" && len(nat.Tenants) == 0 {
+		return fmt.Errorf("nstance NAT requires tenant configuration")
+	}
+	groups := map[string]bool{}
+	for tenant, policy := range nat.Tenants {
+		// Podplane's Kubernetes groups belong to the default tenant.
+		if tenant != "default" {
+			return fmt.Errorf("cluster.nat.tenants: only the default Kubernetes tenant is supported")
+		}
+		group, ok := nat.Groups[policy.Group]
+		if !ok || policy.Group == "" {
+			return fmt.Errorf("NAT tenant %q references unknown group %q", tenant, policy.Group)
+		}
+		groups[policy.Group] = true
+		if group.Arch != "amd64" && group.Arch != "arm64" {
+			return fmt.Errorf("NAT group %q arch must be amd64 or arm64", policy.Group)
+		}
+		if _, exists := cfg.Cluster.Pools[policy.Group]; exists {
+			return fmt.Errorf("NAT group %q conflicts with a Kubernetes pool", policy.Group)
+		}
+		if len(policy.InstanceTypeLadder) == 0 || !slices.Contains(policy.InstanceTypeLadder, group.InstanceType) {
+			return fmt.Errorf("NAT tenant %q ladder must include its starting instance type", tenant)
+		}
+		types := map[string]bool{}
+		for _, instanceType := range policy.InstanceTypeLadder {
+			if strings.TrimSpace(instanceType) == "" || types[instanceType] {
+				return fmt.Errorf("NAT tenant %q ladder contains empty or duplicate instance types", tenant)
+			}
+			types[instanceType] = true
+		}
+		for zone, subnets := range provider.Zones {
+			found := false
+			serverFound := false
+			for _, subnet := range subnets {
+				if subnet.ResolvedRole() == group.SubnetPool && subnet.Public && slices.Contains(subnet.Services, "nat") {
+					found = true
+				}
+				if slices.Contains(subnet.Services, "nstance") {
+					serverFound = true
+					if nat.Mode == "nstance" && !subnet.Public {
+						return fmt.Errorf("nstance NAT requires public/direct Nstance placement in %s", zone)
+					}
+				}
+			}
+			if nat.Mode == "nstance" && !serverFound {
+				return fmt.Errorf("nstance NAT requires public/direct Nstance placement in %s", zone)
+			}
+			if !found {
+				return fmt.Errorf("NAT group %q requires a public NAT service subnet in %s", policy.Group, zone)
+			}
+		}
+	}
+	for group := range nat.Groups {
+		if !groups[group] {
+			return fmt.Errorf("NAT group %q has no owning tenant", group)
+		}
+	}
+	return nil
 }
 
 // validateDomains validates domain names and their required load-balancer
@@ -365,9 +486,14 @@ func validateDomains(cfg *ClusterConfig, provider Provider) error {
 				return fmt.Errorf("%s.provider.kind must be aws-route53, cloudflare, google-cloud-dns, or local", prefix)
 			}
 		}
-		if err := requireListener(provider, domain.ResolvedDomainLoadBalancer(), 443, 443, ""); err != nil {
-			return fmt.Errorf("%s.load_balancer: %w", prefix, err)
+		if cfg.Cluster.Tunnel == nil {
+			if err := requireListener(provider, domain.ResolvedDomainLoadBalancer(), 443, 443, ""); err != nil {
+				return fmt.Errorf("%s.load_balancer: %w", prefix, err)
+			}
 		}
+	}
+	if cfg.Cluster.Tunnel != nil {
+		return nil
 	}
 	if loadBalancer := cfg.Cluster.Kubernetes.APILoadBalancer; loadBalancer != "" {
 		for _, domain := range cfg.Cluster.Domains {
@@ -417,11 +543,13 @@ func validateProvider(cfg *ClusterConfig, index int, provider Provider) error {
 			return fmt.Errorf("%s.region %w", prefix, err)
 		}
 	case "google":
-		return fmt.Errorf("%s.kind google is not supported by cluster create yet", prefix)
+		if provider.Region == "" || provider.Project == "" {
+			return fmt.Errorf("%s Google configuration requires region and project", prefix)
+		}
 	case "proxmox":
 		return fmt.Errorf("%s.kind proxmox is not supported by cluster create", prefix)
 	default:
-		return fmt.Errorf("%s.kind must be aws", prefix)
+		return fmt.Errorf("%s.kind must be aws or google", prefix)
 	}
 	if provider.VPC.ID != "" && (provider.VPC.V4CIDR != "" || provider.VPC.V6CIDR != "") {
 		return fmt.Errorf("%s.vpc.id cannot be combined with vpc CIDRs", prefix)
@@ -509,6 +637,17 @@ func validateProvider(cfg *ClusterConfig, index int, provider Provider) error {
 			ports[listener.Port] = true
 			if listener.TargetPort < 0 || listener.TargetPort > 65535 {
 				return fmt.Errorf("%s.target_port must be 1-65535 when set", listenerPrefix)
+			}
+			if listener.ProxyPort != nil {
+				if provider.Kind != "aws" {
+					return fmt.Errorf("%s.proxy_port is only supported on AWS; omit it for %s", listenerPrefix, provider.Kind)
+				}
+				if *listener.ProxyPort < 1 || *listener.ProxyPort > 65535 {
+					return fmt.Errorf("%s.proxy_port must be 1-65535 when set", listenerPrefix)
+				}
+			}
+			if provider.Kind == "google" && listener.ResolvedTargetPort() != listener.Port {
+				return fmt.Errorf("%s Google passthrough frontend and target ports must be equal", listenerPrefix)
 			}
 			if _, ok := cfg.Cluster.Pools[listener.Pool]; !ok {
 				return fmt.Errorf("%s.pool references unknown pool %q", listenerPrefix, listener.Pool)

@@ -128,6 +128,7 @@ type authorizeParams struct {
 	CodeChallenge string
 }
 
+// buildAuthorizeURL appends authorization-code and S256 PKCE parameters to an issuer endpoint.
 func buildAuthorizeURL(endpoint string, p authorizeParams) string {
 	q := url.Values{}
 	q.Set("response_type", "code")
@@ -152,6 +153,7 @@ func browserAuthorize(ctx context.Context, authorizeURL string, port int, expect
 		return "", fmt.Errorf("listen on callback port %d: %w", port, err)
 	}
 
+	// result carries the callback's authorization code or validation error to the waiting login flow.
 	type result struct {
 		code string
 		err  error
@@ -236,6 +238,7 @@ func readCallback(r *http.Request, expectedState string) (string, error) {
 	return code, nil
 }
 
+// postToken submits a token exchange form and requires a successful response containing an ID token.
 func postToken(ctx context.Context, client *http.Client, endpoint string, form url.Values) (*Tokens, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -272,6 +275,7 @@ func newPKCE() (verifier, challenge string, err error) {
 	return verifier, base64.RawURLEncoding.EncodeToString(sum[:]), nil
 }
 
+// randomURLSafe encodes n cryptographically random bytes as unpadded URL-safe base64.
 func randomURLSafe(n int) (string, error) {
 	buf := make([]byte, n)
 	if _, err := rand.Read(buf); err != nil {

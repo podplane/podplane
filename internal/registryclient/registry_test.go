@@ -16,6 +16,7 @@ import (
 	"time"
 )
 
+// TestEnsureZotRegistryReadySucceedsWithReadyEndpoint verifies an addressed Service endpoint permits registry access.
 func TestEnsureZotRegistryReadySucceedsWithReadyEndpoint(t *testing.T) {
 	installFakeKubectl(t, `{"subsets":[{"addresses":[{"ip":"10.0.0.10"}]}]}`)
 	if err := ensureZotRegistryReady("test-context", "/tmp/kubeconfig"); err != nil {
@@ -23,6 +24,7 @@ func TestEnsureZotRegistryReadySucceedsWithReadyEndpoint(t *testing.T) {
 	}
 }
 
+// TestEnsureZotRegistryReadyRejectsEmptyEndpoints verifies missing ready addresses produce a readiness error.
 func TestEnsureZotRegistryReadyRejectsEmptyEndpoints(t *testing.T) {
 	installFakeKubectl(t, `{"subsets":[{"addresses":[]}]}`)
 	err := ensureZotRegistryReady("", "")
@@ -142,6 +144,7 @@ func TestWaitForPortForwardReadyIncludesOutputInStartupFailure(t *testing.T) {
 	}
 }
 
+// installFakeKubectl adds a temporary kubectl shim that prints the supplied output to PATH.
 func installFakeKubectl(t *testing.T, stdout string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {

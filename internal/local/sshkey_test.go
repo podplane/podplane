@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// TestSSHKeyForLocalVMGeneratesPodplaneKeyWhenUserHasNoSSHKey checks generated keys are parseable with safe file modes.
 func TestSSHKeyForLocalVMGeneratesPodplaneKeyWhenUserHasNoSSHKey(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
@@ -33,6 +34,7 @@ func TestSSHKeyForLocalVMGeneratesPodplaneKeyWhenUserHasNoSSHKey(t *testing.T) {
 	assertFileMode(t, privateKeyPath+".pub", 0644)
 }
 
+// TestSSHKeyForLocalVMPrefersExistingPodplaneKey checks an existing managed key and identity path are reused.
 func TestSSHKeyForLocalVMPrefersExistingPodplaneKey(t *testing.T) {
 	dataDir := t.TempDir()
 	podplaneKey := "ssh-ed25519 AAAApodplane"
@@ -63,6 +65,7 @@ func TestSSHKeyForLocalVMPrefersExistingPodplaneKey(t *testing.T) {
 	}
 }
 
+// TestSSHKeyForLocalVMIgnoresUserSSHKey checks local VMs use a managed key instead of the user's identity.
 func TestSSHKeyForLocalVMIgnoresUserSSHKey(t *testing.T) {
 	homeDir := t.TempDir()
 	sshDir := filepath.Join(homeDir, ".ssh")
@@ -90,6 +93,7 @@ func TestSSHKeyForLocalVMIgnoresUserSSHKey(t *testing.T) {
 	assertFileMode(t, privateKeyPath, 0600)
 }
 
+// assertFileMode fails unless a file has the expected permission bits.
 func assertFileMode(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
 	info, err := os.Stat(path)

@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// TestConfigFormCanNavigateBackWithoutLosingAnswers checks saved OIDC answers and back-navigation hints.
 func TestConfigFormCanNavigateBackWithoutLosingAnswers(t *testing.T) {
 	form := newConfigForm()
 	form.input.SetValue("auth.example.com")

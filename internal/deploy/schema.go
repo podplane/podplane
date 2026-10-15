@@ -18,6 +18,7 @@ import (
 
 const valuesSchemaFile = "values.schema.json"
 
+// valuesSchema retains nested property declarations used to detect supported chart values.
 type valuesSchema struct {
 	Properties map[string]valuesSchema `json:"properties"`
 }

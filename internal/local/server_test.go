@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+// TestLocalServicePeerAllowlistAllowsLoopback checks IPv4 and IPv6 loopback peers reach the handler.
 func TestLocalServicePeerAllowlistAllowsLoopback(t *testing.T) {
 	handler := localServicePeerAllowlist(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		rw.WriteHeader(http.StatusNoContent)
@@ -30,6 +31,7 @@ func TestLocalServicePeerAllowlistAllowsLoopback(t *testing.T) {
 	}
 }
 
+// TestLocalServicePeerAllowlistRejectsNonLoopback checks remote and malformed peer addresses receive forbidden responses.
 func TestLocalServicePeerAllowlistRejectsNonLoopback(t *testing.T) {
 	handler := localServicePeerAllowlist(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		rw.WriteHeader(http.StatusNoContent)

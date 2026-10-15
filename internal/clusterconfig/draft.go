@@ -4,48 +4,32 @@
 
 package clusterconfig
 
-// NewDraftConfig returns a mutable draft cluster config for the requested
-// provider.
-func NewDraftConfig(providerKind string) *ClusterConfig {
-	cfg := copyClusterConfig(defaultDraftConfig)
-	if providerKind == "" {
-		providerKind = "aws"
-	}
-	cfg.Cluster.Providers = []Provider{newDraftProvider(providerKind)}
-	cfg.Cluster.Secrets = newDraftSecrets(providerKind)
-	cfg.Cluster.SPIFFE.TrustDomain = cfg.Cluster.Kubernetes.APIHostname
-	return &cfg
-}
+import "fmt"
 
-// newDraftProvider returns provider-specific draft infrastructure settings.
-func newDraftProvider(kind string) Provider {
-	switch kind {
-	case "aws":
-		return Provider{
-			Kind:   "aws",
-			Region: "us-east-1",
-			VPC: VPC{
-				V4CIDR: "172.18.0.0/16",
-				V6CIDR: "auto",
-			},
-			Zones: map[string][]Subnet{
-				"us-east-1a": {
-					{V4CIDR: "172.18.10.0/28", V6CIDR: "auto", Services: []string{"nat", "nlb"}, Public: true},
-					{V4CIDR: "172.18.20.0/28", V6CIDR: "auto", Services: []string{"nstance"}},
-					{V4CIDR: "172.18.1.0/24", V6CIDR: "auto", Pool: "control-plane"},
-				},
+// NewDraftConfig returns a mutable draft cluster config for the requested
+// provider, rejecting empty or unsupported provider kinds.
+func NewDraftConfig(providerKind string) (*ClusterConfig, error) {
+	cfg := copyClusterConfig(defaultDraftConfig)
+	provider := Provider{Kind: providerKind, VPC: VPC{V4CIDR: "172.18.0.0/16"}}
+	var zone string
+	var pool Pool
+	switch providerKind {
+	case "google":
+		provider.Region = "us-central1"
+		zone = "us-central1-a"
+		pool = Pool{Arch: "amd64", InstanceType: "e2-medium", Size: 3}
+		cfg.Cluster.Secrets = Secrets{
+			DefaultProvider: "gcp-secret-manager",
+			Providers: map[string]SecretsProvider{
+				"gcp-secret-manager": {Kind: "gcp"},
 			},
 		}
-	default:
-		return Provider{Kind: kind}
-	}
-}
-
-// newDraftSecrets returns provider-specific draft secret settings.
-func newDraftSecrets(providerKind string) Secrets {
-	switch providerKind {
 	case "aws":
-		return Secrets{
+		provider.Region = "us-east-1"
+		provider.VPC.V6CIDR = "auto"
+		zone = "us-east-1a"
+		pool = Pool{Arch: "arm64", InstanceType: "t4g.medium", Size: 3}
+		cfg.Cluster.Secrets = Secrets{
 			DefaultProvider: "aws-secrets-manager",
 			Providers: map[string]SecretsProvider{
 				"aws-secrets-manager": {
@@ -55,23 +39,28 @@ func newDraftSecrets(providerKind string) Secrets {
 			},
 		}
 	default:
-		return Secrets{}
+		return nil, fmt.Errorf("unsupported cloud provider %q; must be aws or google", providerKind)
 	}
+	provider.Zones = map[string][]Subnet{
+		zone: {
+			{V4CIDR: "172.18.10.0/28", V6CIDR: provider.VPC.V6CIDR, Services: []string{"nat", "nlb"}, Public: true},
+			{V4CIDR: "172.18.20.0/28", V6CIDR: provider.VPC.V6CIDR, Services: []string{"nstance"}},
+			{V4CIDR: "172.18.1.0/26", V6CIDR: provider.VPC.V6CIDR, Pool: "control-plane"},
+		},
+	}
+	cfg.Cluster.Providers = []Provider{provider}
+	cfg.Cluster.Pools = map[string]Pool{"control-plane": pool}
+	cfg.Cluster.SPIFFE.TrustDomain = cfg.Cluster.Kubernetes.APIHostname
+	return &cfg, nil
 }
 
+// defaultDraftConfig holds provider-independent cluster defaults.
 var defaultDraftConfig = ClusterConfig{Cluster: Cluster{
 	ID:   "example-cluster",
 	Name: "Example Cluster",
 	OIDC: OIDC{IssuerURL: "https://auth.example.com"},
 	Registry: Registry{
 		Hostname: "example-cluster-registry.local",
-	},
-	Pools: map[string]Pool{
-		"control-plane": {
-			Arch:         "arm64",
-			InstanceType: "t4g.medium",
-			Size:         3,
-		},
 	},
 	Kubernetes: Kubernetes{
 		APIHostname: "example-cluster.k8s.local",

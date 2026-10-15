@@ -19,6 +19,7 @@ var localSyncCmd = &cobra.Command{
 	Long:  `Rsync files into the local cluster VM.`,
 }
 
+// init registers ownership and exclusion options for rsync into the local VM.
 func init() {
 	localSyncCmd.Flags().StringVar(&localStartChown, "chown", "", "Rsync chown flag")
 	localSyncCmd.Flags().StringArrayVar(&localSyncExcludes, "exclude", nil, "Rsync exclude pattern (may be specified multiple times)")

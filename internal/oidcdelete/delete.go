@@ -18,6 +18,7 @@ type Executor interface {
 // ConfirmFunc asks the user to confirm a destructive action.
 type ConfirmFunc func(message string) (bool, error)
 
+// DeleteOptions supplies the stack, executor, confirmation policy, and destroy deadline.
 type DeleteOptions struct {
 	StackDir       string
 	Executor       Executor

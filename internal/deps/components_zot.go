@@ -25,6 +25,7 @@ const defaultMirrorPrefix = "mirror"
 
 var ociLayoutJSON = []byte(`{"imageLayoutVersion":"1.0.0"}`)
 
+// ociDescriptor identifies a blob with optional platform and tag metadata.
 type ociDescriptor struct {
 	MediaType   string            `json:"mediaType,omitempty"`
 	Digest      string            `json:"digest"`
@@ -33,18 +34,21 @@ type ociDescriptor struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
+// ociPlatform identifies an image's operating system, architecture, and variant.
 type ociPlatform struct {
 	OS           string `json:"os"`
 	Architecture string `json:"architecture"`
 	Variant      string `json:"variant,omitempty"`
 }
 
+// ociIndex stores manifest descriptors in a repository or multi-platform image index.
 type ociIndex struct {
 	SchemaVersion int             `json:"schemaVersion"`
 	MediaType     string          `json:"mediaType,omitempty"`
 	Manifests     []ociDescriptor `json:"manifests,omitempty"`
 }
 
+// componentImageProgress tracks transferred bytes and emits image download progress.
 type componentImageProgress struct {
 	name    string
 	current int64
@@ -52,6 +56,7 @@ type componentImageProgress struct {
 	emit    func(DownloadEvent)
 }
 
+// addCurrent adds a positive byte count and reports updated progress when present.
 func (p *componentImageProgress) addCurrent(size int64) {
 	if p == nil || size <= 0 {
 		return
@@ -60,6 +65,7 @@ func (p *componentImageProgress) addCurrent(size int64) {
 	p.report()
 }
 
+// report emits the current image byte counts when a callback is configured.
 func (p *componentImageProgress) report() {
 	if p == nil || p.emit == nil {
 		return
@@ -67,11 +73,13 @@ func (p *componentImageProgress) report() {
 	p.emit(DownloadEvent{Type: DownloadEventProgress, Name: p.name, Current: p.current, Total: p.total})
 }
 
+// progressReadCloser wraps a stream with a callback for bytes read.
 type progressReadCloser struct {
 	io.ReadCloser
 	read func(int)
 }
 
+// Read forwards the read and reports any bytes returned to the callback.
 func (r progressReadCloser) Read(p []byte) (int, error) {
 	n, err := r.ReadCloser.Read(p)
 	if n > 0 && r.read != nil {
@@ -201,6 +209,7 @@ func writeComponentImage(ctx context.Context, destDir string, image ComponentIma
 	return upsertTaggedImageIndex(repoDir, chartTag, descriptorFromRemote(desc, image.Platform))
 }
 
+// componentImageCached checks local indexes and required blobs for an image's tag and digest.
 func componentImageCached(destDir string, image ComponentImage) (bool, error) {
 	_, err := name.ParseReference(image.Image, name.WeakValidation)
 	if err != nil {
@@ -411,6 +420,7 @@ func writeDescriptorBlobs(ctx context.Context, repoDir string, repo name.Reposit
 	return nil
 }
 
+// existingBlobComplete checks that a cached blob has the expected size and SHA-256 digest.
 func existingBlobComplete(path, digest string, size int64) (bool, error) {
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {

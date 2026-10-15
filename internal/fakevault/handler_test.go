@@ -16,6 +16,7 @@ import (
 	"testing"
 )
 
+// memoryStore tracks secret values, archive state, and versions for handler tests.
 type memoryStore struct {
 	secrets  map[string]map[string]string
 	archived map[string]bool

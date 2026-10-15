@@ -44,6 +44,7 @@ func RunDownloadProgress(title string, run func(func(deps.DownloadEvent)) error)
 	return nil
 }
 
+// downloadProgressItem records one artifact's byte counts, event state, and display ordering.
 type downloadProgressItem struct {
 	Name    string
 	Path    string
@@ -55,6 +56,7 @@ type downloadProgressItem struct {
 	Updated time.Time
 }
 
+// downloadProgressModel collects download events and tracks completion and terminal display state.
 type downloadProgressModel struct {
 	title        string
 	run          func(func(deps.DownloadEvent)) error
@@ -68,18 +70,23 @@ type downloadProgressModel struct {
 	height       int
 }
 
+// downloadProgressEventMsg delivers a dependency download event to the update loop.
 type downloadProgressEventMsg deps.DownloadEvent
 
+// downloadProgressDoneMsg reports the download runner's final error.
 type downloadProgressDoneMsg struct {
 	err error
 }
 
+// downloadProgressClosedMsg signals that the download event channel has been drained.
 type downloadProgressClosedMsg struct{}
 
+// Init starts the download runner and the first event read concurrently.
 func (m downloadProgressModel) Init() tea.Cmd {
 	return tea.Batch(m.runCommand(), m.waitForEvent())
 }
 
+// runCommand runs downloads, forwards events without blocking, and closes the event stream.
 func (m downloadProgressModel) runCommand() tea.Cmd {
 	return func() tea.Msg {
 		err := m.run(func(event deps.DownloadEvent) {
@@ -93,6 +100,7 @@ func (m downloadProgressModel) runCommand() tea.Cmd {
 	}
 }
 
+// waitForEvent reads the next download event or reports the end of the stream.
 func (m downloadProgressModel) waitForEvent() tea.Cmd {
 	return func() tea.Msg {
 		event, ok := <-m.events
@@ -103,6 +111,7 @@ func (m downloadProgressModel) waitForEvent() tea.Cmd {
 	}
 }
 
+// Update handles cancellation, sizing, and download events, quitting once completion and stream closure arrive.
 func (m downloadProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -133,6 +142,7 @@ func (m downloadProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// applyEvent merges an event into the status message or its artifact's progress record.
 func (m *downloadProgressModel) applyEvent(event deps.DownloadEvent) {
 	if event.Type == deps.DownloadEventStatus {
 		m.message = event.Message
@@ -172,6 +182,7 @@ func (m *downloadProgressModel) applyEvent(event deps.DownloadEvent) {
 	m.items[event.Name] = item
 }
 
+// View renders aggregate byte progress, prioritized artifact rows, and status counts.
 func (m downloadProgressModel) View() string {
 	var b strings.Builder
 	titleStyle := lipgloss.NewStyle().Background(ColorPrimary).Foreground(ColorWhite).Padding(0, 1)
@@ -214,6 +225,7 @@ func (m downloadProgressModel) View() string {
 	return b.String()
 }
 
+// visibleItems prioritizes failures and active downloads, then queued and recently completed items within the row budget.
 func (m downloadProgressModel) visibleItems() ([]downloadProgressItem, int) {
 	maxItems := m.maxVisibleItems()
 	if maxItems <= 0 {
@@ -268,6 +280,7 @@ func (m downloadProgressModel) visibleItems() ([]downloadProgressItem, int) {
 	return visible, len(m.order) - len(visible)
 }
 
+// maxVisibleItems derives the artifact row budget from terminal height and status message space.
 func (m downloadProgressModel) maxVisibleItems() int {
 	if m.height <= 0 {
 		return defaultDownloadProgressVisibleItems
@@ -283,6 +296,7 @@ func (m downloadProgressModel) maxVisibleItems() int {
 	return maxItems
 }
 
+// renderItem formats an artifact row with its progress bar, error, size, or state text.
 func (m downloadProgressModel) renderItem(item downloadProgressItem) string {
 	name := item.Name
 	if item.Path != "" && name == "" {
@@ -301,6 +315,7 @@ func (m downloadProgressModel) renderItem(item downloadProgressItem) string {
 	return fmt.Sprintf("%s %-24s %s", status, name, itemStateText(item.Status))
 }
 
+// overallProgress sums known artifact sizes and transferred bytes capped at each artifact's total.
 func (m downloadProgressModel) overallProgress() (int64, int64) {
 	var current int64
 	var total int64
@@ -318,6 +333,7 @@ func (m downloadProgressModel) overallProgress() (int64, int64) {
 	return current, total
 }
 
+// summary formats artifact counts by active, complete, cached, queued, and failed state.
 func (m downloadProgressModel) summary() string {
 	var active, complete, cached, failed, queued int
 	for _, item := range m.items {
@@ -338,6 +354,7 @@ func (m downloadProgressModel) summary() string {
 	return fmt.Sprintf("%d required, %d active, %d complete, %d cached, %d queued, %d failed", len(m.items), active, complete, cached, queued, failed)
 }
 
+// itemStatusLabel chooses a display symbol for an artifact's download state.
 func itemStatusLabel(item downloadProgressItem) string {
 	switch item.Status {
 	case deps.DownloadEventCached:
@@ -355,6 +372,7 @@ func itemStatusLabel(item downloadProgressItem) string {
 	}
 }
 
+// itemStateText converts download states into readable row labels.
 func itemStateText(status deps.DownloadEventType) string {
 	switch status {
 	case deps.DownloadEventChecking:
@@ -370,6 +388,7 @@ func itemStateText(status deps.DownloadEventType) string {
 	}
 }
 
+// renderBar draws a fixed-width byte progress bar with the filled portion clamped to its bounds.
 func renderBar(current, total int64, width int) string {
 	if width <= 0 {
 		return ""
@@ -387,6 +406,7 @@ func renderBar(current, total int64, width int) string {
 	return "[" + strings.Repeat("█", filled) + strings.Repeat("░", width-filled) + "]"
 }
 
+// renderBytesProgress formats transferred bytes with a total when one is known.
 func renderBytesProgress(current, total int64) string {
 	if total <= 0 {
 		return formatBytes(current)
@@ -394,6 +414,7 @@ func renderBytesProgress(current, total int64) string {
 	return fmt.Sprintf("%s / %s", formatBytes(current), formatBytes(total))
 }
 
+// formatBytes formats a byte count using binary units with one decimal place above bytes.
 func formatBytes(bytes int64) string {
 	const unit = 1024
 	if bytes < unit {
@@ -407,6 +428,7 @@ func formatBytes(bytes int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
+// runTextDownloadProgress runs downloads while printing cache, transfer, and failure events to stdout.
 func runTextDownloadProgress(run func(func(deps.DownloadEvent)) error) error {
 	return run(func(event deps.DownloadEvent) {
 		switch event.Type {

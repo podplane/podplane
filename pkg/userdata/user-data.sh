@@ -22,7 +22,9 @@ log "Podplane cloud-init user-data script has started."
 
 # --- 1. Configure hostname --------------------------------------------------
 
+{{if ne .Manifest.VMConfig.Kind "nst" -}}
 hostnamectl set-hostname {{.Instance.ID}}
+{{end -}}
 {{if eq .Provider.Kind "local"}}echo "debian:devonly" | chpasswd
 {{end}}
 
@@ -47,8 +49,7 @@ fi
 
 # --- 3. Bootstrap provider-specific tools -----------------------------------
 
-{{if eq .Provider.Kind "aws"}}
-{{if .EnableSSM}}
+{{if and (eq .Provider.Kind "aws") .EnableSSM}}
 log "Ensuring AWS SSM Agent is installed and running..."
 if command -v snap >/dev/null 2>&1 && snap list amazon-ssm-agent >/dev/null 2>&1; then
   snap start amazon-ssm-agent
@@ -62,10 +63,10 @@ else
   systemctl enable --now amazon-ssm-agent
 fi
 {{end}}
-{{end}}
 
 # --- 4. Check connectivity to Nstance Server --------------------------------
 
+{{if ne .Manifest.VMConfig.Kind "nst" -}}
 REGISTRATION_ADDR="{{.Server.RegistrationAddr}}"
 log "Checking connectivity to nstance-server at $REGISTRATION_ADDR..."
 attempt=0
@@ -84,7 +85,7 @@ do
   fi
   log "Failed to connect to nstance-server at $REGISTRATION_ADDR (attempt $attempt), retrying in $retry_in seconds..."
   sleep $retry_in
-done
+done{{end}}
 
 # --- 5. Download and verify dependencies ------------------------------------
 
@@ -125,20 +126,33 @@ log "Writing user-data.env file..."
 mkdir -p /opt/podplane/etc
 cat > /opt/podplane/etc/user-data.env <<'USERDATA_ENV'
 IMMUTABLE_SSH_AUTHORIZED_KEYS={{quoteEnv .ImmutableSSHAuthorizedKeys}}
-
-INSTANCE_ID='{{.Instance.ID}}'
-CLUSTER_ID='{{.Cluster.ID}}'
-
 PROVIDER_KIND='{{.Provider.Kind}}'
-PROVIDER_REGION='{{.Provider.Region}}'
-PROVIDER_ZONE='{{.Provider.Zone}}'
-PROVIDER_INSTANCE_TYPE='{{.Instance.Type}}'
 AWS_ACCOUNT_ID='{{.AWSAccountID}}'
 GOOGLE_PROJECT_ID='{{.GoogleProjectID}}'
 
+{{if ne .Manifest.VMConfig.Kind "nst" -}}
+INSTANCE_ID='{{.Instance.ID}}'
+CLUSTER_ID='{{.Cluster.ID}}'
+
+PROVIDER_REGION='{{.Provider.Region}}'
+PROVIDER_ZONE='{{.Provider.Zone}}'
+PROVIDER_INSTANCE_TYPE='{{.Instance.Type}}'
+
+{{if eq .Provider.Kind "local" -}}
 NSTANCE_CA_CERT='{{.Cluster.CACert}}'
+{{else -}}
+# The cloud bootstrap below writes Nstance's PEM directly to the identity directory.
+NSTANCE_CA_CERT=''
+{{end -}}
 NSTANCE_SERVER_REGISTRATION_ADDR='{{.Server.RegistrationAddr}}'
 NSTANCE_SERVER_AGENT_ADDR='{{.Server.AgentAddr}}'
+{{- end}}
+{{if .ActivityPorts -}}
+NSTANCE_EBPF_PORTS={{quoteEnv .ActivityPorts}}
+{{end -}}
+{{if .NATIPv4SourceCIDRs -}}
+NAT_IPV4_SOURCE_CIDRS={{quoteEnv .NATIPv4SourceCIDRs}}
+{{end -}}
 USERDATA_ENV
 chmod 0600 /opt/podplane/etc/user-data.env
 
@@ -180,10 +194,21 @@ chmod +x /opt/podplane/bin/install.sh
 /opt/podplane/bin/install.sh
 
 # --- 10. Run configure.sh ---------------------------------------------------
+{{if eq .Manifest.VMConfig.Kind "nst" -}}
+# NST has no agent updates; this file is immutable for the lifetime of the VM.
+if [ ! -f /opt/podplane/bootstrap.done ]; then
+  cat > /opt/podplane/etc/mutable.env <<'SERVER_ENV'
+{{- range $name, $value := .ServerEnv}}
+{{$name}}={{quoteEnv $value}}
+{{- end}}
+SERVER_ENV
+  chmod 0600 /opt/podplane/etc/mutable.env
+fi
+{{end -}}
 log "Running configure.sh..."
 chmod +x /opt/podplane/bin/configure.sh
 /opt/podplane/bin/configure.sh
-{{if eq .Provider.Kind "local"}}
+{{if and (eq .Provider.Kind "local") (ne .Manifest.VMConfig.Kind "nst")}}
 # --- Local provider VM preparation ------------------------------------------
 
 log "Applying local provider VM preparation..."

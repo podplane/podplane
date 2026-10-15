@@ -38,7 +38,7 @@ const (
 
 var (
 	platformPattern     = regexp.MustCompile(`^[a-z0-9]+_[a-z0-9]+$`)
-	cachedModuleVersion = regexp.MustCompile(`/tf/modules/nstance/([^/"\\]+)/modules/cluster`)
+	cachedModuleVersion = regexp.MustCompile(`/tf/modules/nstance/([^/"\\]+)/(?:[^/"\\]+/)?modules/cluster`)
 )
 
 // Engine performs the OpenTofu/Terraform operations needed to populate a cache.
@@ -127,13 +127,26 @@ func (c *Cache) download(ctx context.Context, engine Engine, platforms []string,
 	if err := copyFile(filepath.Join(rootModule, lockFileName), filepath.Join(stage, lockFileName)); err != nil {
 		return fmt.Errorf("retain provider lock information: %w", err)
 	}
-	sourceRoot, moduleVersion, err := nstanceSourceRoot(rootModule)
+	sourceRoot, moduleVersion, err := nstanceSourceRoot(rootModule, "cluster")
 	if err != nil {
 		return err
+	}
+	googleSourceRoot, googleVersion, err := nstanceSourceRoot(rootModule, "google_cluster")
+	if err != nil {
+		return err
+	}
+	if googleVersion != moduleVersion {
+		return fmt.Errorf("resolved Nstance AWS and Google module versions must match: AWS %s, Google %s", moduleVersion, googleVersion)
 	}
 	stagedModule := filepath.Join(stage, modulesDirName, nstanceDirName, moduleVersion)
 	if err := copyTree(sourceRoot, stagedModule); err != nil {
 		return fmt.Errorf("normalize Nstance module source: %w", err)
+	}
+	if err := copyTree(googleSourceRoot, filepath.Join(stagedModule, "google")); err != nil {
+		return fmt.Errorf("normalize Google Nstance module source: %w", err)
+	}
+	if err := validateModuleVersion(stagedModule); err != nil {
+		return err
 	}
 	if err := mergeProviderMirror(mirrorDir, filepath.Join(c.root, providersDirName)); err != nil {
 		return fmt.Errorf("merge provider mirror: %w", err)
@@ -174,7 +187,8 @@ func (c *Cache) cachedPlatforms() ([]string, error) {
 
 // Ensure prepares a cluster stack to use the shared cache, restoring exact
 // dependencies recorded by existing generated files when they are missing.
-func (c *Cache) Ensure(ctx context.Context, engine Engine, clusterDir string) (Configuration, error) {
+// The returned module directory belongs to providerKind.
+func (c *Cache) Ensure(ctx context.Context, engine Engine, clusterDir, providerKind string) (Configuration, error) {
 	version, pinned, err := clusterModuleVersion(clusterDir)
 	if err != nil {
 		return Configuration{}, err
@@ -200,7 +214,7 @@ func (c *Cache) Ensure(ctx context.Context, engine Engine, clusterDir string) (C
 				return Configuration{}, fmt.Errorf("restore cached OpenTofu/Terraform dependencies: %w", err)
 			}
 		}
-		return c.configureVersion(clusterDir, version, true)
+		return c.configureVersion(clusterDir, version, providerKind, true)
 	}
 
 	download := false
@@ -230,12 +244,12 @@ func (c *Cache) Ensure(ctx context.Context, engine Engine, clusterDir string) (C
 	if err != nil {
 		return Configuration{}, err
 	}
-	return c.configureVersion(clusterDir, version, false)
+	return c.configureVersion(clusterDir, version, providerKind, false)
 }
 
 // Upgrade downloads the latest supported dependencies and moves an existing
-// cluster stack to those versions.
-func (c *Cache) Upgrade(ctx context.Context, engine Engine, clusterDir string) (Configuration, error) {
+// cluster stack to those versions for providerKind.
+func (c *Cache) Upgrade(ctx context.Context, engine Engine, clusterDir, providerKind string) (Configuration, error) {
 	_, pinned, err := clusterModuleVersion(clusterDir)
 	if err != nil {
 		return Configuration{}, err
@@ -250,7 +264,7 @@ func (c *Cache) Upgrade(ctx context.Context, engine Engine, clusterDir string) (
 	if err != nil {
 		return Configuration{}, err
 	}
-	return c.configureVersion(clusterDir, version, false)
+	return c.configureVersion(clusterDir, version, providerKind, false)
 }
 
 // currentModuleVersion returns the module version selected by the latest download.
@@ -265,8 +279,8 @@ func (c *Cache) currentModuleVersion() (string, error) {
 	return strings.TrimSpace(string(versionRaw)), nil
 }
 
-// configureVersion prepares a cluster to use one cached module version and the shared provider mirror.
-func (c *Cache) configureVersion(clusterDir, version string, preserveLock bool) (Configuration, error) {
+// configureVersion selects the provider's cached module and the shared provider mirror.
+func (c *Cache) configureVersion(clusterDir, version, providerKind string, preserveLock bool) (Configuration, error) {
 	nstanceModuleDir := filepath.Join(c.root, modulesDirName, nstanceDirName, version)
 	providerDir := filepath.Join(c.root, providersDirName)
 	requiredPaths := []string{providerDir, nstanceModuleDir}
@@ -283,6 +297,13 @@ func (c *Cache) configureVersion(clusterDir, version string, preserveLock bool) 
 	}
 	if err := validateModuleVersion(nstanceModuleDir); err != nil {
 		return Configuration{}, err
+	}
+	switch providerKind {
+	case "aws":
+	case "google":
+		nstanceModuleDir = filepath.Join(nstanceModuleDir, "google")
+	default:
+		return Configuration{}, fmt.Errorf("unsupported Nstance module provider %q", providerKind)
 	}
 	relativeNstanceModuleDir, err := filepath.Rel(clusterDir, nstanceModuleDir)
 	if err != nil {
@@ -381,6 +402,7 @@ func (c *Cache) dependenciesAvailable(moduleVersion, lockPath, platform string) 
 	return len(providers) > 0, nil
 }
 
+// providerLock records an exact provider address and version selected by a lock file.
 type providerLock struct {
 	address string
 	version string
@@ -418,14 +440,22 @@ func readProviderLocks(path string) ([]providerLock, error) {
 	return providers, nil
 }
 
-// validateModuleVersion checks that every generated cluster submodule exists.
+// validateModuleVersion checks both cached Nstance package trees.
 func validateModuleVersion(dir string) error {
+	if err := validateModulePackage(dir); err != nil {
+		return err
+	}
+	return validateModulePackage(filepath.Join(dir, "google"))
+}
+
+// validateModulePackage checks that every generated cluster submodule exists.
+func validateModulePackage(dir string) error {
 	for _, name := range []string{"cluster", "account", "network", "shard"} {
 		if info, err := os.Stat(filepath.Join(dir, "modules", name)); err != nil || !info.IsDir() {
 			if err == nil {
 				err = fmt.Errorf("not a directory")
 			}
-			return fmt.Errorf("cached Nstance module %s is incomplete: %w", name, err)
+			return fmt.Errorf("cached Nstance module %s is incomplete: %w", filepath.Join(dir, "modules", name), err)
 		}
 	}
 	return nil
@@ -455,8 +485,8 @@ func resolvePlatforms(ctx context.Context, engine Engine, platforms []string) ([
 	return out, nil
 }
 
-// nstanceSourceRoot locates the resolved Nstance package root and exact version.
-func nstanceSourceRoot(rootModule string) (string, string, error) {
+// nstanceSourceRoot locates a package and version using its resolved cluster module.
+func nstanceSourceRoot(rootModule, clusterKey string) (string, string, error) {
 	raw, err := os.ReadFile(filepath.Join(rootModule, ".terraform", "modules", "modules.json"))
 	if err != nil {
 		return "", "", fmt.Errorf("read resolved Terraform modules: %w", err)
@@ -472,20 +502,20 @@ func nstanceSourceRoot(rootModule string) (string, string, error) {
 		return "", "", fmt.Errorf("decode resolved Terraform modules: %w", err)
 	}
 	for _, module := range manifest.Modules {
-		if module.Key != "cluster" {
+		if module.Key != clusterKey {
 			continue
 		}
 		dir := filepath.Join(rootModule, filepath.FromSlash(module.Dir))
 		suffix := filepath.Join("modules", "cluster")
 		if filepath.Base(dir) != "cluster" || filepath.Base(filepath.Dir(dir)) != "modules" {
-			return "", "", fmt.Errorf("resolved Nstance cluster module has unexpected directory %q", module.Dir)
+			return "", "", fmt.Errorf("resolved Nstance %s module has unexpected directory %q", clusterKey, module.Dir)
 		}
 		if module.Version == "" || filepath.Base(module.Version) != module.Version || module.Version == "." || module.Version == ".." {
 			return "", "", fmt.Errorf("resolved Nstance module has invalid version %q", module.Version)
 		}
 		return strings.TrimSuffix(dir, suffix), module.Version, nil
 	}
-	return "", "", fmt.Errorf("resolved Nstance module source was not found")
+	return "", "", fmt.Errorf("resolved Nstance %s module source was not found", clusterKey)
 }
 
 // copyTree recursively copies src to dst.
@@ -568,6 +598,19 @@ func copyFile(src, dst string) error {
 // installModuleVersion atomically installs a staged module version when absent.
 func installModuleVersion(stage, dst string) error {
 	if _, err := os.Stat(dst); err == nil {
+		// Older caches contain only AWS. Add the Google package without
+		// replacing the existing AWS tree used by pinned stacks.
+		if err := validateModulePackage(dst); err != nil {
+			return err
+		}
+		googleDir := filepath.Join(dst, "google")
+		if _, err := os.Stat(googleDir); os.IsNotExist(err) {
+			if err := os.Rename(filepath.Join(stage, "google"), googleDir); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
 		return validateModuleVersion(dst)
 	} else if !os.IsNotExist(err) {
 		return err

@@ -25,6 +25,7 @@ var localServerCmd = &cobra.Command{
 	Long:   `Server is used by VMs to download cloud-init files, cached package files, and access services like fake S3 and OIDC servers. Generally you should not be running this command directly.`,
 }
 
+// init registers local server bind address, background mode, and shutdown flags.
 func init() {
 	localServerCmd.Flags().StringVarP(&serverAddr, "addr", "a", "0.0.0.0", "Address to bind server to. Default is 0.0.0.0")
 	localServerCmd.Flags().BoolVarP(&serverBackground, "background", "b", false, "Run the server in the background. This is set when 'podplane local start' invokes this command in the background.")
@@ -35,6 +36,7 @@ var serverAddr string
 var serverBackground bool
 var serverStop bool
 
+// newLocalServerCmd wires PID checks, server startup or shutdown, and signal-driven cleanup.
 func newLocalServerCmd(c *config.Config) *cobra.Command {
 	localServerCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		// load pid file

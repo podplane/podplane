@@ -21,6 +21,7 @@ var localCmd = &cobra.Command{
 	Long:  `Commands to manage local clusters. VMs are run using a local provider (e.g. Qemu) which must be installed first.`,
 }
 
+// init registers the shared local cluster ID flag.
 func init() {
 	pflags := localCmd.PersistentFlags()
 	pflags.StringVar(&localClusterID, "id", "default", "Cluster ID")

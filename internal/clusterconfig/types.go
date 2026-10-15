@@ -5,6 +5,8 @@
 package clusterconfig
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"slices"
 )
@@ -30,6 +32,7 @@ type Cluster struct {
 	OIDC       OIDC            `json:"oidc"`
 	ACME       *ACME           `json:"acme,omitempty"`
 	Domains    []Domain        `json:"domains,omitempty"`
+	Tunnel     *Tunnel         `json:"tunnel,omitempty"`
 	Registry   Registry        `json:"registry,omitempty"`
 	Pools      map[string]Pool `json:"pools,omitempty"`
 	Providers  []Provider      `json:"providers,omitempty"`
@@ -38,6 +41,7 @@ type Cluster struct {
 	Kubernetes Kubernetes      `json:"kubernetes"`
 	Seed       Seed            `json:"seed,omitempty"`
 	Components Components      `json:"components,omitempty"`
+	NAT        *NAT            `json:"nat,omitempty"`
 }
 
 // SPIFFE contains immutable workload identity configuration.
@@ -183,6 +187,53 @@ func (p *DomainProvider) SupportsACME() bool {
 	return p != nil && p.Kind == "aws-route53"
 }
 
+// Tunnel references a user-managed tunnel for both Kubernetes API and ingress,
+// replacing provider load balancers. CredentialSecret is a logical secret name
+// in the cluster's Nstance secrets backend, shared by normal and wake connectors.
+type Tunnel struct {
+	Kind             string `json:"kind"`
+	ID               string `json:"id"`
+	CredentialSecret string `json:"credential_secret"`
+}
+
+// NAT selects egress implementation without changing node subnet identity.
+type NAT struct {
+	Mode                 string               `json:"mode"`
+	FixedPublicIPv4Count int                  `json:"fixed_public_ipv4_count,omitempty"`
+	Groups               map[string]NATGroup  `json:"groups,omitempty"`
+	Tenants              map[string]TenantNAT `json:"tenants,omitempty"`
+}
+
+// UnmarshalJSON rejects unknown NAT settings, including fixed group size and
+// per-instance capacity metadata, instead of silently ignoring them.
+func (n *NAT) UnmarshalJSON(raw []byte) error {
+	// plain decodes NAT fields without invoking UnmarshalJSON recursively.
+	type plain NAT
+	var decoded plain
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return fmt.Errorf("parse NAT configuration: %w", err)
+	}
+	*n = NAT(decoded)
+	return nil
+}
+
+// NATGroup owns deployment settings. Its size is derived by Nstance from
+// populated node subnets, not a fixed replica count or capacity estimate.
+type NATGroup struct {
+	Arch         string `json:"arch"`
+	InstanceType string `json:"instance_type"`
+	SubnetPool   string `json:"subnet_pool"`
+}
+
+// TenantNAT selects a deployment group and its vertical scaling choices.
+// Timing and utilization thresholds use Nstance defaults.
+type TenantNAT struct {
+	Group              string   `json:"group"`
+	InstanceTypeLadder []string `json:"instance_type_ladder"`
+}
+
 // Pool is one entry in cluster.pools.<name>.
 type Pool struct {
 	Arch         string `json:"arch"`
@@ -249,7 +300,25 @@ type LoadBalancer struct {
 type Listener struct {
 	Port       int    `json:"port"`
 	TargetPort int    `json:"target_port,omitempty"`
+	ProxyPort  *int   `json:"proxy_port,omitempty"`
 	Pool       string `json:"pool"`
+}
+
+// ResolvedTargetPort returns the production port, defaulting to the listener port.
+func (l Listener) ResolvedTargetPort() int {
+	if l.TargetPort != 0 {
+		return l.TargetPort
+	}
+	return l.Port
+}
+
+// ResolvedProxyPort returns the wake port, defaulting to the production target port.
+// Valid Google listeners have no override and use the same port for both.
+func (l Listener) ResolvedProxyPort() int {
+	if l.ProxyPort != nil {
+		return *l.ProxyPort
+	}
+	return l.ResolvedTargetPort()
 }
 
 // Role is one entry in cluster.providers[].roles.<name>.
@@ -323,17 +392,29 @@ func (c *ClusterConfig) ResolvedGroupsClaim() string {
 	return "groups"
 }
 
+// UsesPublicAPIRoots reports whether API TLS terminates at a public tunnel edge.
+func (c *ClusterConfig) UsesPublicAPIRoots() bool {
+	return c.Cluster.Tunnel != nil
+}
+
+// ResolvedAPIPort returns the external port without changing the origin port.
+func (c *ClusterConfig) ResolvedAPIPort() int {
+	if c.Cluster.Kubernetes.APIPort != 0 {
+		return c.Cluster.Kubernetes.APIPort
+	}
+	if c.UsesPublicAPIRoots() {
+		return 443
+	}
+	return 6443
+}
+
 // ResolvedKubernetesAPIURL builds the https URL for the cluster's API server.
-// Defaults to port 6443 if api_port is unset. Returns "" if api_hostname is
-// not set.
+// Defaults to port 6443 for NLB and 443 for tunnel exposure. Returns ""
+// if api_hostname is not set.
 func (c *ClusterConfig) ResolvedKubernetesAPIURL() string {
 	host := c.Cluster.Kubernetes.APIHostname
 	if host == "" {
 		return ""
 	}
-	port := c.Cluster.Kubernetes.APIPort
-	if port == 0 {
-		port = 6443
-	}
-	return fmt.Sprintf("https://%s:%d", host, port)
+	return fmt.Sprintf("https://%s:%d", host, c.ResolvedAPIPort())
 }

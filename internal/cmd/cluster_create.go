@@ -58,9 +58,6 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 				if cancelled {
 					return nil
 				}
-				if providerKind == "google" {
-					return fmt.Errorf("google cloud cluster creation is not supported yet")
-				}
 				// Read or download the latest seed snapshots for determining cluster seed file version to use
 				seedManifest, err := depsManager.EnsureSeedSnapshotsCached(context.Background())
 				if err != nil {
@@ -77,7 +74,7 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 					return err
 				}
 				// Begin cluster-config-related questions
-				cfg, err = clustercreate.RunConfigWizard(issuerURL, seedManifest.Seeds.Version)
+				cfg, err = clustercreate.RunConfigWizard(providerKind, issuerURL, seedManifest.Seeds.Version)
 				if err != nil {
 					return err
 				}
@@ -117,7 +114,7 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 			}
 			depsCtx, depsCancel := context.WithTimeout(cmd.Context(), 30*time.Minute)
 			defer depsCancel()
-			configuration, err := tfdeps.New(c.DepsCacheDir()).Ensure(depsCtx, executor, dir)
+			configuration, err := tfdeps.New(c.DepsCacheDir()).Ensure(depsCtx, executor, dir, cfg.Cluster.Providers[0].Kind)
 			if err != nil {
 				return err
 			}
@@ -154,39 +151,31 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 // prepareClusterGeneration resolves the cached inputs needed to regenerate a
 // cluster's managed Terraform files.
 func prepareClusterGeneration(ctx context.Context, c *config.Config, depsManager *deps.Manager, cfg *clusterconfig.ClusterConfig) (tfgen.ClusterOptions, error) {
+	if err := tfgen.ValidateClusterGeneration(cfg); err != nil {
+		return tfgen.ClusterOptions{}, err
+	}
 	if cfg.Cluster.Seed.Name != "" && cfg.Cluster.Seed.Name != seeds.None {
 		if _, err := depsManager.EnsureSeedSnapshot(ctx, cfg.Cluster.Seed.Name, cfg.Cluster.Seed.Version, nil); err != nil {
 			return tfgen.ClusterOptions{}, fmt.Errorf("failed to prepare seed snapshot %q: %w", cfg.Cluster.Seed.Name, err)
 		}
 	}
 
-	manifests := map[string]tfgen.VMConfigManifest{}
-	for poolName, pool := range cfg.Cluster.Pools {
-		kind := "knd"
-		if poolName == "control-plane" {
-			kind = "knc"
-		}
-		key := kind + "/" + pool.Arch
-		if _, ok := manifests[key]; ok {
-			continue
-		}
-		if _, err := depsManager.EnsureVMConfigManifestCached(kind, pool.Arch); err != nil {
+	manifestList := []tfgen.VMConfigManifest{}
+	for _, target := range tfgen.RequiredVMTargets(cfg) {
+		key := target.Kind + "/" + target.Arch
+		if _, err := depsManager.EnsureVMConfigManifestCached(target.Kind, target.Arch); err != nil {
 			return tfgen.ClusterOptions{}, fmt.Errorf("failed to prepare vmconfig manifest %s: %w", key, err)
 		}
-		_, raw, err := depsManager.ReadCachedManifest(kind, pool.Arch)
+		_, raw, err := depsManager.ReadCachedManifest(target.Kind, target.Arch)
 		if err != nil {
 			return tfgen.ClusterOptions{}, fmt.Errorf("failed to read vmconfig manifest %s: %w", key, err)
 		}
-		manifests[key] = tfgen.VMConfigManifest{
-			Kind:     kind,
-			Arch:     pool.Arch,
-			Filename: filepath.Base(depsManager.VMConfigManifestCachePath(kind, pool.Arch)),
+		manifestList = append(manifestList, tfgen.VMConfigManifest{
+			Kind:     target.Kind,
+			Arch:     target.Arch,
+			Filename: filepath.Base(depsManager.VMConfigManifestCachePath(target.Kind, target.Arch)),
 			JSON:     raw,
-		}
-	}
-	manifestList := make([]tfgen.VMConfigManifest, 0, len(manifests))
-	for _, manifest := range manifests {
-		manifestList = append(manifestList, manifest)
+		})
 	}
 	return tfgen.ClusterOptions{
 		DepsMirrorURL:     c.DepsBaseURL(),

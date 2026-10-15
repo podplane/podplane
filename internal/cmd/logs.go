@@ -35,6 +35,7 @@ var (
 	logsAll        bool
 )
 
+// init registers Kubernetes selection and container filtering flags for app logs.
 func init() {
 	logsCmd.Flags().StringVarP(&logsNamespace, "namespace", "n", "", "Kubernetes namespace the app was deployed into")
 	logsCmd.Flags().StringVar(&logsContext, "context", "", "The name of the kubeconfig context to use")
@@ -43,6 +44,7 @@ func init() {
 	logsCmd.Flags().BoolVar(&logsAll, "all", false, "Tail logs from all containers with prefixed lines")
 }
 
+// newLogsCmd wires log streaming with optional interactive container selection.
 func newLogsCmd(c *config.Config) *cobra.Command {
 	_ = c
 	logsCmd.RunE = func(cmd *cobra.Command, args []string) error {

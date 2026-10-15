@@ -11,6 +11,7 @@ import (
 	"github.com/podplane/podplane/internal/vm"
 )
 
+// TestQemuArgumentsDirectBoot checks kernel boot, virtio disks, and serial socket arguments.
 func TestQemuArgumentsDirectBoot(t *testing.T) {
 	boot := &vm.DirectBootOptions{KernelPath: "/cache/vmlinuz", InitrdPath: "/cache/initrd", Cmdline: "root=UUID=abc ro"}
 	args := QemuArguments(false, "arm64", "/vms/os.qcow2", "/vms/cidata.iso", "/run/vms/console.sock", "2", "4G", boot, nil)
@@ -30,6 +31,7 @@ func TestQemuArgumentsDirectBoot(t *testing.T) {
 	}
 }
 
+// TestQemuArgumentsFirmwareFallback checks firmware boot omits direct-boot and QMP options.
 func TestQemuArgumentsFirmwareFallback(t *testing.T) {
 	args := QemuArguments(false, "arm64", "/vms/os.qcow2", "/vms/cidata.iso", "/run/vms/console.sock", "2", "4G", nil, nil)
 
@@ -48,6 +50,7 @@ func TestQemuArgumentsFirmwareFallback(t *testing.T) {
 	}
 }
 
+// TestQemuArgumentsUsesSelectedLocalPorts checks all selected TCP forwards reach the NIC option.
 func TestQemuArgumentsUsesSelectedLocalPorts(t *testing.T) {
 	ports := []vm.PortForward{
 		{HostBindAddress: "127.0.0.1", HostPort: 3222, GuestPort: 22},
@@ -61,6 +64,7 @@ func TestQemuArgumentsUsesSelectedLocalPorts(t *testing.T) {
 	assertContainsPair(t, args, "-nic", "user,hostfwd=tcp:127.0.0.1:3222-:22,hostfwd=tcp:127.0.0.1:16443-:6443,hostfwd=tcp:127.0.0.1:18081-:8080,hostfwd=tcp:127.0.0.1:15001-:5000,hostfwd=tcp:127.0.0.1:18443-:443")
 }
 
+// TestQemuArgumentsUsesQ35ForAMD64 checks x86 uses Q35 with KVM and a virtio NIC.
 func TestQemuArgumentsUsesQ35ForAMD64(t *testing.T) {
 	args := QemuArguments(false, "amd64", "/vms/os.qcow2", "/vms/cidata.iso", "/run/vms/console.sock", "2", "4G", nil, nil)
 
@@ -69,6 +73,7 @@ func TestQemuArgumentsUsesQ35ForAMD64(t *testing.T) {
 	assertNotContains(t, args, "virt,accel=kvm,highmem=on")
 }
 
+// assertContainsPair fails unless an option and its value occur consecutively.
 func assertContainsPair(t *testing.T, args []string, key, value string) {
 	t.Helper()
 	for i := 0; i < len(args)-1; i++ {
@@ -79,6 +84,7 @@ func assertContainsPair(t *testing.T, args []string, key, value string) {
 	t.Fatalf("args do not contain %s %q: %v", key, value, args)
 }
 
+// assertNotContains fails if an unwanted argument is present.
 func assertNotContains(t *testing.T, args []string, value string) {
 	t.Helper()
 	if slices.Contains(args, value) {

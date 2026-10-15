@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/nstance-dev/nstance/pkg/fakeserver"
+	"github.com/nstance-dev/nstance/v2/pkg/fakeserver"
 
 	"github.com/podplane/podplane/internal/oidcserver"
 	"github.com/podplane/podplane/internal/vm"
@@ -429,6 +429,7 @@ func (m *Local) WaitForAPIServerWithOptions(ctx context.Context, opts APIReadine
 	return m.waitForAPIServerEndpoint(ctx, "ready", opts.Quiet, m.ProbeAPIServerReady)
 }
 
+// waitForAPIServerEndpoint polls a probe until success, cancellation, or the readiness timeout.
 func (m *Local) waitForAPIServerEndpoint(ctx context.Context, label string, quiet bool, probe func(context.Context) error) error {
 	deadline := time.Now().Add(localAPIReadinessTimeout)
 	if !quiet {

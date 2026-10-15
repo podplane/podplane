@@ -13,6 +13,7 @@ import (
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/components"
 	"github.com/podplane/podplane/internal/config"
+	"github.com/podplane/podplane/internal/kubectl"
 	"github.com/podplane/podplane/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -55,7 +56,11 @@ first if you have not yet logged in.`,
 
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
-			cfg, err := components.Read(ctx, installContext, installKubeconfig)
+			selected, err := kubectl.ResolveContext(ctx, installContext, installKubeconfig)
+			if err != nil {
+				return err
+			}
+			cfg, err := components.Read(ctx, selected.Name, installKubeconfig)
 			if err != nil {
 				return err
 			}
@@ -94,7 +99,7 @@ first if you have not yet logged in.`,
 				}
 			}
 
-			if err := components.SetEnabled(ctx, installContext, installKubeconfig, plan.Apps, plan.CRDs, true); err != nil {
+			if err := components.SetEnabled(ctx, selected.Name, installKubeconfig, plan.Apps, plan.CRDs, true); err != nil {
 				return err
 			}
 
@@ -105,7 +110,7 @@ first if you have not yet logged in.`,
 			}
 			waitCtx, waitCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer waitCancel()
-			if err := runComponentStatusProgress(waitCtx, "Installing component dependencies", installContext, installKubeconfig, items, required); err != nil {
+			if err := runComponentStatusProgress(waitCtx, "Installing component dependencies", selected.Name, installKubeconfig, items, required); err != nil {
 				return err
 			}
 

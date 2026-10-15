@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// TestBuildEnabledPatch checks the nested HelmRelease patch for app and CRD enablement.
 func TestBuildEnabledPatch(t *testing.T) {
 	got := buildEnabledPatch([]string{"cert-manager"}, []string{"cert-manager-crds"}, true)
 	want := map[string]any{
@@ -32,6 +33,7 @@ func TestBuildEnabledPatch(t *testing.T) {
 	}
 }
 
+// TestBuildEnabledPatchOnlyApps checks omission of the CRD section when only apps are patched.
 func TestBuildEnabledPatchOnlyApps(t *testing.T) {
 	got := buildEnabledPatch([]string{"envoy-gateway"}, nil, false)
 	components := got["spec"].(map[string]any)["values"].(map[string]any)["platform"].(map[string]any)["components"].(map[string]any)

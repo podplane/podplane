@@ -16,6 +16,7 @@ import (
 // InputValidator validates text entered into an input prompt.
 type InputValidator func(string) error
 
+// inputModel tracks a validated text prompt and its submission or cancellation state.
 type inputModel struct {
 	title    string
 	label    string

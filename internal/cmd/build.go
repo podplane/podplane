@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// podplaneBuildFlags holds image build options and unsupported flags reported as errors.
 type podplaneBuildFlags struct {
 	file                  string
 	tags                  []string

@@ -20,6 +20,7 @@ var localDeleteCmd = &cobra.Command{
 	Long:  `Delete a running local cluster and its VM`,
 }
 
+// newLocalDeleteCmd wires credential cleanup followed by local cluster deletion.
 func newLocalDeleteCmd(c *config.Config) *cobra.Command {
 	localDeleteCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		manager := local.NewManager(c, localClusterID)

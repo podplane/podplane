@@ -74,6 +74,7 @@ func WriteCloudInitDataISO(outputPath, userData, metaData, networkConfig string)
 	return nil
 }
 
+// writeSeedFile copies text into a file in the seed ISO filesystem.
 func writeSeedFile(fs filesystem.FileSystem, path, contents string) error {
 	f, err := fs.OpenFile(path, os.O_CREATE|os.O_RDWR)
 	if err != nil {

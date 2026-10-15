@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// TestCacheDomainPaths verifies manifest and artifact locations across dependency cache domains.
 func TestCacheDomainPaths(t *testing.T) {
 	manager := NewManager("https://example.invalid/deps", "/cache/deps")
 	dep := Dependency{
@@ -72,6 +73,7 @@ func TestCacheDomainPaths(t *testing.T) {
 	}
 }
 
+// TestRegistryCacheDirWithCustomDepsCacheDir verifies custom cache roots contain the registry store.
 func TestRegistryCacheDirWithCustomDepsCacheDir(t *testing.T) {
 	manager := NewManager("https://example.invalid/deps", "/custom/podplane-deps")
 	if got, want := manager.RegistryCacheDir(), filepath.Join("/custom/podplane-deps", "registry"); got != want {
@@ -79,6 +81,7 @@ func TestRegistryCacheDirWithCustomDepsCacheDir(t *testing.T) {
 	}
 }
 
+// TestManifestFilename verifies vmconfig filenames include kind, OS, and architecture.
 func TestManifestFilename(t *testing.T) {
 	// The filename is part of the local cache path contract.
 	tests := []struct {

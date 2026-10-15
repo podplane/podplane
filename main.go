@@ -13,6 +13,7 @@ import (
 	"github.com/podplane/podplane/internal/config"
 )
 
+// main initializes CLI configuration and dispatches commands, including Docker credential helper calls.
 func main() {
 	c, err := config.Init()
 	if err != nil {

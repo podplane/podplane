@@ -184,6 +184,7 @@ func (m *Manager) EnsureSeedSnapshot(ctx context.Context, name, version string, 
 	return m.CachedSeedSnapshotPath(name, version)
 }
 
+// cacheSeedSnapshots populates snapshot files and persists their cache-state manifest.
 func (m *Manager) cacheSeedSnapshots(ctx context.Context, manifest *SeedsManifest, manifestPath string, client *http.Client, progress func(DownloadEvent)) error {
 	if err := m.populateSeedsCache(ctx, manifest, manifestPath, client, progress); err != nil {
 		return err
@@ -198,6 +199,7 @@ func (m *Manager) cacheSeedSnapshots(ctx context.Context, manifest *SeedsManifes
 	return nil
 }
 
+// populateSeedsCache copies local snapshots or downloads verified remote snapshots in name order.
 func (m *Manager) populateSeedsCache(ctx context.Context, manifest *SeedsManifest, manifestPath string, client *http.Client, progress func(DownloadEvent)) error {
 	if manifest == nil {
 		return fmt.Errorf("seeds manifest is required")
@@ -264,6 +266,7 @@ func (m *Manager) populateSeedsCache(ctx context.Context, manifest *SeedsManifes
 	return nil
 }
 
+// seedSnapshotCachePath derives a versioned destination using the snapshot's source basename.
 func (m *Manager) seedSnapshotCachePath(manifest *SeedsManifest, name string, snapshot SeedSnapshot) string {
 	filename := name + ".netsy"
 	if snapshot.Path != "" {
@@ -276,6 +279,7 @@ func (m *Manager) seedSnapshotCachePath(manifest *SeedsManifest, name string, sn
 	return m.SeedSnapshotCachePath(name, manifest.Seeds.Version, filename)
 }
 
+// validateSeedSnapshot requires a name, one source, and digest and size metadata for remote sources.
 func validateSeedSnapshot(name string, snapshot SeedSnapshot) error {
 	if name == "" {
 		return fmt.Errorf("seed snapshot name is required")
@@ -294,6 +298,7 @@ func validateSeedSnapshot(name string, snapshot SeedSnapshot) error {
 	return nil
 }
 
+// parseSeedSnapshotDigest splits a required SHA-512 digest and validates its checksum length.
 func parseSeedSnapshotDigest(name string, snapshot SeedSnapshot) (string, string, error) {
 	if snapshot.Digest == "" {
 		return "", "", fmt.Errorf("seed snapshot %s is missing digest", name)
@@ -311,6 +316,7 @@ func parseSeedSnapshotDigest(name string, snapshot SeedSnapshot) (string, string
 	return algo, checksum, nil
 }
 
+// copyLocalSeedSnapshot resolves manifest-relative sources and atomically copies them into the cache.
 func copyLocalSeedSnapshot(dest, source, manifestPath string) error {
 	if !filepath.IsAbs(source) && manifestPath != "" {
 		source = filepath.Join(filepath.Dir(manifestPath), source)

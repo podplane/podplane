@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+// TestDeleteClusterDataRemovesPerClusterData checks cluster cleanup preserves other tenants and buckets.
 func TestDeleteClusterDataRemovesPerClusterData(t *testing.T) {
 	dataDir := t.TempDir()
 	manager := &Local{dataDir: dataDir, clusterID: "cluster-a"}

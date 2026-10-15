@@ -23,6 +23,7 @@ const NET_START = "192.168.1.1"
 const NET_END = "192.168.1.20"
 const NET_MACPREFIX = "52:52:00:00:00:"
 
+// NetMacAddress appends a zero-padded suffix to the local VM MAC prefix.
 func NetMacAddress(suffix string) string {
 	if len(suffix) == 1 {
 		return NET_MACPREFIX + "0" + suffix
@@ -154,6 +155,7 @@ func QemuArguments(monitor bool, arch, vmImage, cloudInitDataISOPath, serialCons
 	return args
 }
 
+// qemuUserNetwork builds a user-mode NIC option with TCP port forwards.
 func qemuUserNetwork(arch string, ports []vm.PortForward) string {
 	arg := "user"
 	if arch == "amd64" {

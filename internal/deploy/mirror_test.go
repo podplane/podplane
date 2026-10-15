@@ -13,6 +13,7 @@ import (
 	"github.com/podplane/podplane/internal/deps"
 )
 
+// TestTemplateMirrorSetArgsInjectsTemplateImages checks mirror overrides for images used by the selected template.
 func TestTemplateMirrorSetArgsInjectsTemplateImages(t *testing.T) {
 	t.Parallel()
 	images := []deps.TemplateImage{
@@ -32,6 +33,7 @@ func TestTemplateMirrorSetArgsInjectsTemplateImages(t *testing.T) {
 	}
 }
 
+// TestTemplateMirrorSetArgsSkipsExplicitImageValues checks that user-supplied images take precedence over mirroring.
 func TestTemplateMirrorSetArgsSkipsExplicitImageValues(t *testing.T) {
 	t.Parallel()
 	images := []deps.TemplateImage{
@@ -46,6 +48,7 @@ func TestTemplateMirrorSetArgsSkipsExplicitImageValues(t *testing.T) {
 	}
 }
 
+// TestTemplateMirrorSetArgsDisabledWithoutMirror checks that an unconfigured mirror produces no overrides.
 func TestTemplateMirrorSetArgsDisabledWithoutMirror(t *testing.T) {
 	t.Parallel()
 	images := []deps.TemplateImage{{Image: "docker.io/library/caddy:2", Templates: map[string]string{"web": "caddy"}}}
@@ -56,6 +59,7 @@ func TestTemplateMirrorSetArgsDisabledWithoutMirror(t *testing.T) {
 	}
 }
 
+// mirrorClusterSummary builds a cluster summary with an enabled registry mirror for tests.
 func mirrorClusterSummary(hostname string) config.ClusterSummary {
 	return config.ClusterSummary{
 		Components: config.ClusterSummaryClusterComponents{

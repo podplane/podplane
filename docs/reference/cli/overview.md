@@ -36,7 +36,7 @@ Podplane commands use different config/context sources depending on the command:
 
 - __Cluster Config__
   Flags: `-f` / `--cluster-config`, default `./podplane.cluster.jsonc`
-  For Commands: `cluster *`, `login`
+  For Commands: `cluster create`, `cluster upgrade`, `cluster delete`, `login`
 
 - __OIDC Server Config__
   Flags: `-f` / `--oidc-config`, default `./podplane.oidc.jsonc`
@@ -44,7 +44,7 @@ Podplane commands use different config/context sources depending on the command:
 
 - __Kubernetes Context__ 
   Flags: `--context` / `--kubeconfig`, default `kubectl config current-context`
-  For Commands: `deploy`, `remove`, `logs`, `install`, `uninstall`, `logout`.
+  For Commands: `deploy`, `remove`, `logs`, `install`, `uninstall`, `logout`, `cluster sleep`.
   Exceptions:
   - `logout` optionally also accepts `--cluster` or `-f` / `--cluster-config`
   - `install podplane-operator` also reads `-f` / `--cluster-config` to validate the workload certificate trust domain and CA-key provider

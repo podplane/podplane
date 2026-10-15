@@ -44,6 +44,7 @@ func DeleteClusterAccess(stdout io.Writer, clusterID string, subs []string, loca
 	return nil
 }
 
+// kubectlConfigDelete removes a kubeconfig entry, ignoring missing entries and logging successful output.
 func kubectlConfigDelete(stdout io.Writer, subcommand, key string) error {
 	var outBuf bytes.Buffer
 	var errBuf bytes.Buffer

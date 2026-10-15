@@ -64,6 +64,7 @@ func NormalizeKernelCmdline(arch, raw string) string {
 	return strings.Join(out, " ")
 }
 
+// serialConsoleTTY selects the guest serial device for the architecture.
 func serialConsoleTTY(arch string) string {
 	switch arch {
 	case "arm64":

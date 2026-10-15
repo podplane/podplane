@@ -13,6 +13,7 @@ import (
 	"testing"
 )
 
+// TestPopulateSeedsCacheCopiesLocalManifestSnapshots verifies manifest-relative snapshots are copied and marked cached.
 func TestPopulateSeedsCacheCopiesLocalManifestSnapshots(t *testing.T) {
 	dir := t.TempDir()
 	manifestDir := filepath.Join(dir, "manifests")
@@ -66,6 +67,7 @@ func TestPopulateSeedsCacheCopiesLocalManifestSnapshots(t *testing.T) {
 	}
 }
 
+// TestValidateSeedSnapshotRequiresPathOrURL verifies snapshots need exactly one local or remote source.
 func TestValidateSeedSnapshotRequiresPathOrURL(t *testing.T) {
 	if err := validateSeedSnapshot("recommended", SeedSnapshot{Path: "recommended.netsy"}); err != nil {
 		t.Fatalf("validate path snapshot: %v", err)

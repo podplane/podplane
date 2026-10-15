@@ -133,10 +133,12 @@ func workloadReady(resource string, status workloadStatus) (bool, string) {
 	}
 }
 
+// workloadObject decodes the status portion of a Kubernetes workload.
 type workloadObject struct {
 	Status workloadStatus `json:"status"`
 }
 
+// workloadStatus holds replica and scheduling counts used to assess workload readiness.
 type workloadStatus struct {
 	Replicas               int `json:"replicas"`
 	ReadyReplicas          int `json:"readyReplicas"`

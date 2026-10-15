@@ -12,6 +12,7 @@ import (
 	"testing"
 )
 
+// TestParseNameDefaultsAndValidates checks supported seed names, the default, and invalid input.
 func TestParseNameDefaultsAndValidates(t *testing.T) {
 	cases := map[string]string{
 		"":          Recommended,
@@ -33,6 +34,7 @@ func TestParseNameDefaultsAndValidates(t *testing.T) {
 	}
 }
 
+// TestResolveSeedPathNoneSkips checks the none seed needs no download settings.
 func TestResolveSeedPathNoneSkips(t *testing.T) {
 	path, err := ResolveSeedPath(ResolveOptions{Name: None})
 	if err != nil {
@@ -43,6 +45,7 @@ func TestResolveSeedPathNoneSkips(t *testing.T) {
 	}
 }
 
+// TestVerifySeedFile checks matching SHA-512 verification and malformed digest rejection.
 func TestVerifySeedFile(t *testing.T) {
 	contents := []byte("seed snapshot")
 	path := filepath.Join(t.TempDir(), "seed.netsy")

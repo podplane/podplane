@@ -20,6 +20,7 @@ import (
 	"time"
 )
 
+// TestDownloadDownloadsArtifactsInParallel verifies concurrent artifact transfers after fetching component metadata.
 func TestDownloadDownloadsArtifactsInParallel(t *testing.T) {
 	imageBody := []byte("image artifact")
 	depBody := []byte("dependency artifact")
@@ -140,6 +141,7 @@ func TestDownloadDownloadsArtifactsInParallel(t *testing.T) {
 	}
 }
 
+// TestDownloadUsesLocalManifestFile verifies local vmconfig overrides skip remote metadata and preserve development stubs.
 func TestDownloadUsesLocalManifestFile(t *testing.T) {
 	imageBody := []byte("image artifact")
 	depBody := []byte("dependency artifact")
@@ -258,6 +260,7 @@ func TestDownloadUsesLocalManifestFile(t *testing.T) {
 	}
 }
 
+// TestFetchTemplatesManifestRetriesTransientFailures verifies template metadata fetches recover after gateway errors.
 func TestFetchTemplatesManifestRetriesTransientFailures(t *testing.T) {
 	oldDelays := dependencyManifestRetryDelays
 	dependencyManifestRetryDelays = []time.Duration{0, 0, 0}
@@ -296,6 +299,7 @@ func TestFetchTemplatesManifestRetriesTransientFailures(t *testing.T) {
 	}
 }
 
+// TestDownloadRejectsPartiallyPopulatedVMConfigDependency verifies a vmconfig URL without a digest is not a valid stub.
 func TestDownloadRejectsPartiallyPopulatedVMConfigDependency(t *testing.T) {
 	imageBody := []byte("image artifact")
 	manifest := Manifest{VMConfig: VMConfig{
@@ -340,6 +344,7 @@ func TestDownloadRejectsPartiallyPopulatedVMConfigDependency(t *testing.T) {
 	}
 }
 
+// TestDownloadRejectsDependencyMissingSize verifies artifact byte counts are required even for dry runs.
 func TestDownloadRejectsDependencyMissingSize(t *testing.T) {
 	body := []byte("image artifact")
 	manifest := Manifest{VMConfig: VMConfig{
@@ -413,6 +418,7 @@ func TestVerifyRequiresCachedVMConfigImages(t *testing.T) {
 	}
 }
 
+// TestFilterComponentsManifestExcludesAddonsAndProviderSpecificImagesByDefault verifies architecture, provider, and addon selection.
 func TestFilterComponentsManifestExcludesAddonsAndProviderSpecificImagesByDefault(t *testing.T) {
 	manifest := &ComponentsManifest{Components: Components{Images: []ComponentImage{
 		{Components: []string{"cilium"}, Image: "cilium"},
@@ -440,6 +446,7 @@ func TestFilterComponentsManifestExcludesAddonsAndProviderSpecificImagesByDefaul
 	}
 }
 
+// TestFilterComponentsManifestIncludesSharedImageForEitherAddon verifies selecting either owner includes a shared addon image.
 func TestFilterComponentsManifestIncludesSharedImageForEitherAddon(t *testing.T) {
 	manifest := &ComponentsManifest{Components: Components{Images: []ComponentImage{
 		{
@@ -457,6 +464,7 @@ func TestFilterComponentsManifestIncludesSharedImageForEitherAddon(t *testing.T)
 	}
 }
 
+// TestDownloadDryRunIncludesTemplateImages verifies dry-run summaries count template and vmconfig images.
 func TestDownloadDryRunIncludesTemplateImages(t *testing.T) {
 	dir := t.TempDir()
 	vmconfigPath := writeJSONFile(t, dir, "vmconfig.json", Manifest{VMConfig: VMConfig{
@@ -542,6 +550,7 @@ func TestDownloadRejectsVMConfigImageMissingSize(t *testing.T) {
 	}
 }
 
+// writeJSONFile serializes a fixture into a private file and returns its path.
 func writeJSONFile(t *testing.T, dir, name string, value any) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -555,6 +564,7 @@ func writeJSONFile(t *testing.T, dir, name string, value any) string {
 	return path
 }
 
+// componentImageNamesAt returns image references at the selected manifest indexes.
 func componentImageNamesAt(images []ComponentImage, indexes []int) []string {
 	names := make([]string, 0, len(indexes))
 	for _, index := range indexes {
@@ -563,6 +573,7 @@ func componentImageNamesAt(images []ComponentImage, indexes []int) []string {
 	return names
 }
 
+// TestNormalizeArchsParsesCommaSeparatedValues verifies architecture splitting, deduplication, and unsupported-value rejection.
 func TestNormalizeArchsParsesCommaSeparatedValues(t *testing.T) {
 	got, err := normalizeArchs([]string{"amd64, arm64", "amd64"}, "arm64")
 	if err != nil {
@@ -577,6 +588,7 @@ func TestNormalizeArchsParsesCommaSeparatedValues(t *testing.T) {
 	}
 }
 
+// TestDownloadRejectsRemoteManifestWithUnreleasedVMConfigStub verifies published manifests cannot contain development-only stubs.
 func TestDownloadRejectsRemoteManifestWithUnreleasedVMConfigStub(t *testing.T) {
 	imageBody := []byte("image artifact")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -624,11 +636,13 @@ func TestDownloadRejectsRemoteManifestWithUnreleasedVMConfigStub(t *testing.T) {
 	}
 }
 
+// sha256Hex returns the lowercase SHA-256 checksum of fixture bytes.
 func sha256Hex(body []byte) string {
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
 }
 
+// serverURL builds a fixture HTTP URL using the incoming request's host.
 func serverURL(r *http.Request, path string) string {
 	return "http://" + r.Host + path
 }

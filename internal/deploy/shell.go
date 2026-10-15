@@ -6,6 +6,7 @@ package deploy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/podplane/podplane/internal/execwrap"
+	"github.com/podplane/podplane/internal/kubectl"
 )
 
 // ConfirmDebugFunc asks whether to start an ephemeral debug container.
@@ -43,10 +45,14 @@ type ShellOptions struct {
 
 // Shell opens an app shell or runs one command in the selected app container.
 func Shell(opts ShellOptions) error {
+	selected, err := kubectl.ResolveContext(context.Background(), opts.Context, opts.Kubeconfig)
+	if err != nil {
+		return err
+	}
 	target := AppTargetOptions{
 		Name:            opts.Name,
 		Namespace:       opts.Namespace,
-		Context:         opts.Context,
+		Context:         selected.Name,
 		Kubeconfig:      opts.Kubeconfig,
 		Container:       opts.Container,
 		SelectContainer: opts.SelectContainer,

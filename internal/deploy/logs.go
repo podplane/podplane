@@ -5,9 +5,11 @@
 package deploy
 
 import (
+	"context"
 	"os"
 
 	"github.com/podplane/podplane/internal/execwrap"
+	"github.com/podplane/podplane/internal/kubectl"
 )
 
 // LogsOptions controls log streaming for a deployed app.
@@ -23,6 +25,11 @@ type LogsOptions struct {
 
 // Logs invokes `kubectl logs --follow` for pods belonging to the named app.
 func Logs(opts LogsOptions) error {
+	selected, err := kubectl.ResolveContext(context.Background(), opts.Context, opts.Kubeconfig)
+	if err != nil {
+		return err
+	}
+	opts.Context = selected.Name
 	if !opts.AllContainers && opts.Container == "" {
 		container, err := defaultLogsContainer(opts)
 		if err != nil {

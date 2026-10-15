@@ -37,11 +37,13 @@ func sortedKeys[V any](m map[string]V) []string {
 	return slices.Sorted(maps.Keys(m))
 }
 
+// hclDocument holds header comments and ordered top-level blocks for rendering.
 type hclDocument struct {
 	header []string
 	blocks []hclBlock
 }
 
+// hclBlock holds a block's comments, type, labels, and nested body.
 type hclBlock struct {
 	Comments []string
 	Type     string
@@ -49,38 +51,50 @@ type hclBlock struct {
 	Body     hclBody
 }
 
+// hclBody preserves the insertion order of attributes and nested blocks.
 type hclBody struct {
 	items []hclItem
 }
 
+// hclItem represents an attribute or nested block in a body.
 type hclItem struct {
 	attr  *hclAttribute
 	block *hclBlock
 }
 
+// hclAttribute pairs an assignment name with its renderable value.
 type hclAttribute struct {
 	Name  string
 	Value hclValue
 }
 
+// hclValue renders an HCL value at a requested indentation level.
 type hclValue interface {
 	renderHCL(indent int) string
 }
 
+// hclExpression renders raw HCL syntax without quoting it.
 type hclExpression string
 
+// hclString renders a quoted HCL string literal.
 type hclString string
 
+// hclNumber renders an integer literal in decimal notation.
 type hclNumber int
 
+// hclBool renders a true or false literal.
 type hclBool bool
 
+// hclList renders ordered values in comma-separated brackets.
 type hclList []hclValue
 
+// hclObject renders ordered fields as a multiline object.
 type hclObject []hclObjectField
 
+// hclInlineObject renders ordered fields as a compact single-line object.
 type hclInlineObject []hclObjectField
 
+// hclObjectField holds an object key, its quoting choice, and its value.
 type hclObjectField struct {
 	Key      string
 	BareName bool

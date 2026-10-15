@@ -12,6 +12,7 @@ import (
 	"testing"
 )
 
+// TestValidateTemplateValuesSchemaRequiresSchema checks that every template must provide a values schema.
 func TestValidateTemplateValuesSchemaRequiresSchema(t *testing.T) {
 	t.Parallel()
 	err := validateTemplateValuesSchema("worker", t.TempDir(), false, false)
@@ -20,6 +21,7 @@ func TestValidateTemplateValuesSchemaRequiresSchema(t *testing.T) {
 	}
 }
 
+// TestValidateTemplateValuesSchemaRejectsUnsupportedRouteFlag checks rejection of hostname flags absent from the schema.
 func TestValidateTemplateValuesSchemaRejectsUnsupportedRouteFlag(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -30,6 +32,7 @@ func TestValidateTemplateValuesSchemaRejectsUnsupportedRouteFlag(t *testing.T) {
 	}
 }
 
+// TestValidateTemplateValuesSchemaAcceptsSupportedRouteFlags checks acceptance of declared hostname and path properties.
 func TestValidateTemplateValuesSchemaAcceptsSupportedRouteFlags(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -39,6 +42,7 @@ func TestValidateTemplateValuesSchemaAcceptsSupportedRouteFlags(t *testing.T) {
 	}
 }
 
+// TestValidateTemplateValuesSchemaAcceptsChartArchive checks schema loading from a packaged chart.
 func TestValidateTemplateValuesSchemaAcceptsChartArchive(t *testing.T) {
 	t.Parallel()
 	chartPath := filepath.Join(t.TempDir(), "web-1.0.0.tgz")
@@ -48,6 +52,7 @@ func TestValidateTemplateValuesSchemaAcceptsChartArchive(t *testing.T) {
 	}
 }
 
+// writeSchema writes a chart values schema or fails the test.
 func writeSchema(t *testing.T, dir, schema string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, valuesSchemaFile), []byte(schema), 0o600); err != nil {
@@ -55,6 +60,7 @@ func writeSchema(t *testing.T, dir, schema string) {
 	}
 }
 
+// writeChartArchive creates a compressed chart containing the supplied values schema.
 func writeChartArchive(t *testing.T, chartPath, schema string) {
 	t.Helper()
 	f, err := os.Create(chartPath)

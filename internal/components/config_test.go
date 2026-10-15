@@ -12,6 +12,7 @@ import (
 	"testing"
 )
 
+// TestParseHelmRelease checks component lookup, dependencies, and explicit core settings in Helm values.
 func TestParseHelmRelease(t *testing.T) {
 	obj := map[string]any{
 		"apiVersion": "helm.toolkit.fluxcd.io/v2",
@@ -90,6 +91,7 @@ func TestParseHelmRelease(t *testing.T) {
 	}
 }
 
+// TestParseValuesMissingComponents checks rejection of values without platform components.
 func TestParseValuesMissingComponents(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"platform": map[string]any{}})
 	if _, err := parseValues(raw); err == nil {
@@ -97,6 +99,7 @@ func TestParseValuesMissingComponents(t *testing.T) {
 	}
 }
 
+// TestHelmErrorReleaseNotFoundMessage checks actionable guidance in place of raw Helm output.
 func TestHelmErrorReleaseNotFoundMessage(t *testing.T) {
 	err := &HelmError{
 		Stage:  "get values",

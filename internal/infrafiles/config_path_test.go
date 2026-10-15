@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+// TestDirectoryEmpty checks empty, populated, and missing directories.
 func TestDirectoryEmpty(t *testing.T) {
 	dir := t.TempDir()
 	empty, err := directoryEmpty(dir)
@@ -38,6 +39,7 @@ func TestDirectoryEmpty(t *testing.T) {
 	}
 }
 
+// TestValidateOutputDirectory checks rejection of blank and file paths while allowing existing and new directories.
 func TestValidateOutputDirectory(t *testing.T) {
 	dir := t.TempDir()
 	validate := validateOutputDirectory(dir)
@@ -74,6 +76,7 @@ func TestValidateOutputDirectory(t *testing.T) {
 	}
 }
 
+// TestResolveOutputDirectory checks relative resolution and preservation of absolute paths.
 func TestResolveOutputDirectory(t *testing.T) {
 	dir := t.TempDir()
 	if got, want := resolveOutputDirectory(dir, "my-cluster"), filepath.Join(dir, "my-cluster"); got != want {

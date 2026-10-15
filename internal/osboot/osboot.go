@@ -105,6 +105,7 @@ func Prepare(opts Options) (*vm.DirectBootOptions, error) {
 	}, nil
 }
 
+// extractFiles opens a qcow2 disk and extracts requested files from its partitions.
 func extractFiles(imagePath string, files []imageFile) error {
 	if len(files) == 0 {
 		return nil
@@ -151,6 +152,7 @@ func extractFiles(imagePath string, files []imageFile) error {
 	return nil
 }
 
+// extractFile verifies a partition file's digest before atomically caching it.
 func extractFile(filesystem fs.ReadFileFS, file imageFile) error {
 	algo, checksum, err := normalizeDigest(file.Algo, file.Checksum)
 	if err != nil {
@@ -197,6 +199,7 @@ func extractFile(filesystem fs.ReadFileFS, file imageFile) error {
 	return nil
 }
 
+// filesystemPaths returns relative paths with a fallback for a separate boot partition.
 func filesystemPaths(manifestPath string) []string {
 	fsPath := strings.TrimPrefix(path.Clean(manifestPath), "/")
 	if fsPath == "." || fsPath == "" {
@@ -213,6 +216,7 @@ func filesystemPaths(manifestPath string) []string {
 	return paths
 }
 
+// normalizeDigest requires both a digest algorithm and checksum.
 func normalizeDigest(algo, checksum string) (string, string, error) {
 	if algo != "" && checksum != "" {
 		return algo, checksum, nil
@@ -220,6 +224,7 @@ func normalizeDigest(algo, checksum string) (string, string, error) {
 	return "", "", fmt.Errorf("missing digest")
 }
 
+// newHash creates a SHA-256 or SHA-512 hasher, rejecting other algorithms.
 func newHash(algo string) (hash.Hash, error) {
 	switch algo {
 	case "sha256":
@@ -231,6 +236,7 @@ func newHash(algo string) (hash.Hash, error) {
 	}
 }
 
+// qcow2Storage adapts a qcow2 image to read-only diskfs storage.
 type qcow2Storage struct {
 	img    qcow2image.Image
 	name   string
@@ -240,16 +246,19 @@ type qcow2Storage struct {
 
 var _ backend.Storage = (*qcow2Storage)(nil)
 
+// Stat returns synthetic metadata for the uncompressed disk image.
 func (s *qcow2Storage) Stat() (fs.FileInfo, error) {
 	return qcow2FileInfo{name: s.name, size: s.size}, nil
 }
 
+// Read reads image bytes at the current offset and advances it.
 func (s *qcow2Storage) Read(p []byte) (int, error) {
 	n, err := s.ReadAt(p, s.offset)
 	s.offset += int64(n)
 	return n, err
 }
 
+// ReadAt reads image bytes without passing the virtual disk's end.
 func (s *qcow2Storage) ReadAt(p []byte, off int64) (int, error) {
 	if off >= s.size {
 		return 0, io.EOF
@@ -265,6 +274,7 @@ func (s *qcow2Storage) ReadAt(p []byte, off int64) (int, error) {
 	return n, err
 }
 
+// Seek updates the read offset, rejecting invalid origins and negative positions.
 func (s *qcow2Storage) Seek(offset int64, whence int) (int64, error) {
 	var next int64
 	switch whence {
@@ -284,30 +294,46 @@ func (s *qcow2Storage) Seek(offset int64, whence int) (int64, error) {
 	return s.offset, nil
 }
 
+// Close closes the underlying qcow2 image.
 func (s *qcow2Storage) Close() error {
 	return s.img.Close()
 }
 
+// Sys rejects access to a native file because storage exposes a virtual disk.
 func (s *qcow2Storage) Sys() (*os.File, error) {
 	return nil, backend.ErrNotSuitable
 }
 
+// Writable rejects write access to the read-only image.
 func (s *qcow2Storage) Writable() (backend.WritableFile, error) {
 	return nil, backend.ErrIncorrectOpenMode
 }
 
+// Path returns an empty path because the virtual disk has no host file path.
 func (s *qcow2Storage) Path() string {
 	return ""
 }
 
+// qcow2FileInfo supplies synthetic file metadata for a virtual disk.
 type qcow2FileInfo struct {
 	name string
 	size int64
 }
 
-func (i qcow2FileInfo) Name() string       { return i.name }
-func (i qcow2FileInfo) Size() int64        { return i.size }
-func (i qcow2FileInfo) Mode() fs.FileMode  { return 0644 }
+// Name returns the source image's basename.
+func (i qcow2FileInfo) Name() string { return i.name }
+
+// Size returns the virtual disk size in bytes.
+func (i qcow2FileInfo) Size() int64 { return i.size }
+
+// Mode returns the synthetic file permissions.
+func (i qcow2FileInfo) Mode() fs.FileMode { return 0644 }
+
+// ModTime returns a zero time because modification metadata is unavailable.
 func (i qcow2FileInfo) ModTime() time.Time { return time.Time{} }
-func (i qcow2FileInfo) IsDir() bool        { return false }
-func (i qcow2FileInfo) Sys() interface{}   { return nil }
+
+// IsDir reports that the virtual disk is not a directory.
+func (i qcow2FileInfo) IsDir() bool { return false }
+
+// Sys returns nil because native file metadata is unavailable.
+func (i qcow2FileInfo) Sys() interface{} { return nil }

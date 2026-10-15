@@ -101,6 +101,7 @@ func (m *Manager) fetchManifest(ctx context.Context, kind, arch string, client *
 	return &manifest, nil
 }
 
+// readVMConfigManifestFile reads and decodes a local vmconfig JSON manifest.
 func readVMConfigManifestFile(path string) (*Manifest, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

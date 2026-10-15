@@ -7,6 +7,7 @@ package local
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
@@ -16,7 +17,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/nstance-dev/nstance/pkg/fakeserver"
+	"github.com/nstance-dev/nstance/v2/pkg/fakeserver"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/deps"
@@ -218,6 +219,7 @@ func (w *Server) HTTPSPort() int {
 	return w.httpsPort
 }
 
+// staticFileHandler serves an empty successful plaintext cloud-init datasource file.
 func staticFileHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
@@ -321,6 +323,14 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vault
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build fake nstance server: %w", err)
+	}
+	nstanceCA, err := nstanceServer.CACert(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("load fake nstance CA for upstream TLS: %w", err)
+	}
+	upstreamRoots := x509.NewCertPool()
+	if !upstreamRoots.AppendCertsFromPEM(nstanceCA) {
+		return nil, fmt.Errorf("invalid fake nstance CA for upstream TLS")
 	}
 	if err := nstanceServer.Start(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to start fake nstance server: %w", err)
@@ -427,7 +437,7 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vault
 	// Configure local proxy using dynamically selected mkcert-generated TLS certificates.
 	ingressTLSConfig := localIngressTLSConfig(c.DataDirectory())
 	w.ingressServer = &http.Server{
-		Handler:   localIngressProxy(c.RuntimeDirectory()),
+		Handler:   localIngressProxy(c.RuntimeDirectory(), upstreamRoots),
 		TLSConfig: ingressTLSConfig,
 	}
 

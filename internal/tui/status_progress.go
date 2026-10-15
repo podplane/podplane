@@ -58,6 +58,7 @@ func RunStatusProgress(title string, items, required []StatusProgressItem, poll 
 	return nil
 }
 
+// statusProgressModel tracks polled item readiness and terminal progress display state.
 type statusProgressModel struct {
 	title     string
 	items     []StatusProgressItem
@@ -70,11 +71,13 @@ type statusProgressModel struct {
 	pollCount int
 }
 
+// statusProgressPollMsg delivers a status snapshot or polling failure to the update loop.
 type statusProgressPollMsg struct {
 	statuses map[string]StatusProgressStatus
 	err      error
 }
 
+// statusProgressTickMsg requests the next delayed status poll.
 type statusProgressTickMsg struct{}
 
 // Init starts the first status poll immediately.

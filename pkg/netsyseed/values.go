@@ -11,11 +11,12 @@ import (
 	"strings"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
+	"github.com/podplane/podplane/pkg/seeds"
 )
 
 // buildPlatformComponentsValues derives platform-components Helm values from
 // user-facing cluster config. The returned structure is JSON/YAML marshalable.
-func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig) (map[string]any, error) {
+func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, nodeCertificate bool) (map[string]any, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("cluster config is required")
 	}
@@ -36,6 +37,7 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig) (map[string
 	if registryHostname != "" {
 		componentValues = ensureChildMap(components, "values")
 		zotStorage := map[string]any{
+			"driver": registryDriver(cfg.Cluster),
 			"bucket": registryBucketName(cfg.Cluster),
 			"region": registryRegion(cfg.Cluster),
 		}
@@ -64,8 +66,14 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig) (map[string
 		componentValues["zot-registry"] = entry
 	}
 	applyProviderComponents(components, cfg.Cluster.Providers)
-	if err := applySecretsComponents(components, cfg); err != nil {
+	if err := applySecretsComponents(components, cfg, nodeCertificate); err != nil {
 		return nil, err
+	}
+	if err := applyRecommendedProviderComponents(components, cfg); err != nil {
+		return nil, err
+	}
+	if nodeCertificate {
+		applyNodeCertificateValues(values)
 	}
 	if len(cfg.Cluster.Domains) == 0 {
 		return values, nil
@@ -79,7 +87,7 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig) (map[string
 	if componentValues == nil {
 		componentValues = ensureChildMap(components, "values")
 	}
-	certificateDelivery, err := ingressCertificateDeliveryValues(cfg)
+	certificateDelivery, err := ingressCertificateDeliveryValues(cfg, nodeCertificate)
 	if err != nil {
 		return nil, err
 	}
@@ -97,9 +105,12 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig) (map[string
 	return values, nil
 }
 
-// ingressCertificateDeliveryValues derives the external certificate mount
+// ingressCertificateDeliveryValues derives the node-local or external certificate mount
 // contract consumed by the Envoy Gateway component.
-func ingressCertificateDeliveryValues(cfg *clusterconfig.ClusterConfig) (map[string]any, error) {
+func ingressCertificateDeliveryValues(cfg *clusterconfig.ClusterConfig, nodeCertificate bool) (map[string]any, error) {
+	if nodeCertificate {
+		return map[string]any{"provider": "node"}, nil
+	}
 	secrets := cfg.Cluster.Secrets
 	provider, ok := secrets.Providers[secrets.DefaultProvider]
 	if !ok {
@@ -140,7 +151,8 @@ func ingressCertificateDeliveryValues(cfg *clusterconfig.ClusterConfig) (map[str
 // registryBucketName returns the backing bucket name used by the in-cluster
 // zot-registry component. Local clusters use the fake-S3 bucket named
 // "registry"; AWS clusters use the same account-qualified name as generated
-// Terraform when the account is known from cluster config.
+// Terraform when the account is known from cluster config; Google clusters
+// use the project-qualified name.
 func registryBucketName(cluster clusterconfig.Cluster) string {
 	if len(cluster.Providers) == 0 {
 		return "registry"
@@ -149,8 +161,22 @@ func registryBucketName(cluster clusterconfig.Cluster) string {
 		if provider.Kind == "aws" && provider.Account != "" {
 			return fmt.Sprintf("%s-%s-registry", cluster.ID, provider.Account)
 		}
+		if provider.Kind == "google" && provider.Project != "" {
+			return fmt.Sprintf("%s-%s-registry", cluster.ID, provider.Project)
+		}
 	}
 	return cluster.ID + "-registry"
+}
+
+// registryDriver returns the zot-registry object storage driver, matching the
+// node-local registry: GCS on Google and S3 or S3-compatible storage otherwise.
+func registryDriver(cluster clusterconfig.Cluster) string {
+	for _, provider := range cluster.Providers {
+		if provider.Kind == "google" {
+			return "gcs"
+		}
+	}
+	return "s3"
 }
 
 // registryRegion returns the object-storage region for the in-cluster
@@ -193,10 +219,49 @@ func applyProviderComponents(components map[string]any, providers []clusterconfi
 	}
 }
 
+// applyRecommendedProviderComponents enables the recommended cloud lifecycle
+// stack after secrets configuration, retaining the charts' dependency graph.
+func applyRecommendedProviderComponents(components map[string]any, cfg *clusterconfig.ClusterConfig) error {
+	if cfg.Cluster.Seed.Name != seeds.Recommended || len(cfg.Cluster.Providers) != 1 {
+		return nil
+	}
+	switch cfg.Cluster.Providers[0].Kind {
+	case "aws", "google":
+	default:
+		return nil
+	}
+	if len(cfg.Cluster.Secrets.Providers) == 0 {
+		return fmt.Errorf("recommended cloud seed requires cluster.secrets.providers for Podplane workload certificates used by Cluster API and Nstance operator webhooks")
+	}
+	crds := ensureChildMap(components, "crds")
+	crds["cluster-api-crds"] = map[string]any{"enabled": true}
+	crds["nstance-operator-crds"] = map[string]any{"enabled": true}
+	apps := ensureChildMap(components, "apps")
+	apps["cluster-api"] = map[string]any{"enabled": true}
+	apps["nstance-operator"] = map[string]any{"enabled": true}
+	componentValues := ensureChildMap(components, "values")
+	componentValues["nstance-operator"] = map[string]any{
+		"config": map[string]any{
+			"clusterID": cfg.Cluster.ID,
+			"tenant":    "default",
+			"sleep":     map[string]any{"enabled": false},
+		},
+		"clusterCA": map[string]any{
+			"enabled": false,
+			"name":    "nstance-cluster-ca",
+		},
+		"registrationSecret": map[string]any{
+			"name": "nstance-operator-nonce",
+			"key":  "nonce.jwt",
+		},
+	}
+	return nil
+}
+
 // applySecretsComponents enables Secrets Store CSI Driver, provider components,
 // and Podplane operator provider configuration required by configured Podplane
 // Secrets providers.
-func applySecretsComponents(components map[string]any, cfg *clusterconfig.ClusterConfig) error {
+func applySecretsComponents(components map[string]any, cfg *clusterconfig.ClusterConfig, nodeCertificate bool) error {
 	secrets := cfg.Cluster.Secrets
 	if len(secrets.Providers) == 0 {
 		return nil
@@ -234,7 +299,7 @@ func applySecretsComponents(components map[string]any, cfg *clusterconfig.Cluste
 			},
 		},
 	}
-	if len(cfg.Cluster.Domains) > 0 {
+	if len(cfg.Cluster.Domains) > 0 && !nodeCertificate {
 		ingressCertificates, err := ingressCertificateValues(cfg)
 		if err != nil {
 			return err
@@ -263,6 +328,25 @@ func applySecretsComponents(components map[string]any, cfg *clusterconfig.Cluste
 		}
 	}
 	return nil
+}
+
+// applyNodeCertificateValues selects node-local delivery and removes inherited
+// issuer configuration, including configuration supplied by values overrides.
+func applyNodeCertificateValues(values map[string]any) {
+	componentValues := values
+	for _, key := range []string{"platform", "components", "values"} {
+		componentValues = ensureChildMap(componentValues, key)
+	}
+	config := componentValues
+	for _, key := range []string{"podplane-operator", "podplane", "operator", "config"} {
+		config = ensureChildMap(config, key)
+	}
+	config["ingressCertificates"] = nil
+	ingress := componentValues
+	for _, key := range []string{"envoy-gateway", "platform", "envoyGateway", "ingress"} {
+		ingress = ensureChildMap(ingress, key)
+	}
+	ingress["certificates"] = map[string]any{"provider": "node"}
 }
 
 // secretsValues converts cluster secrets config to platform-components values.

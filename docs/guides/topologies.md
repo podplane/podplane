@@ -126,7 +126,7 @@ Consider self-hosted CI/CD when:
 
 - You want to use a system which supports it, such as [Semaphore](https://semaphore.io/) or [Woodpecker](https://woodpecker-ci.org/)
 
-If you self-host CI/CD, keep it separate from production workloads. A compromised build system often has deployment credentials, so treat it as sensitive infrastructure.
+If you self-host CI/CD, keep it separate from production workloads. A compromised build system often has deployment credentials, so treat it as sensitive infrastructure. Ensure that builds which can be run without prior automated testing and code review/approval, run on build nodes which do not have access to sensitive environments like production.
 
 ### Observability
 

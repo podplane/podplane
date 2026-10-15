@@ -129,20 +129,24 @@ func HelmReleaseReadyStatus(conditions []HelmReleaseCondition) (bool, string, st
 	return false, status, message
 }
 
+// helmReleaseList decodes HelmRelease items returned by kubectl.
 type helmReleaseList struct {
 	Items []helmRelease `json:"items"`
 }
 
+// helmRelease retains the identity and conditions needed for readiness checks.
 type helmRelease struct {
 	Metadata helmReleaseMetadata `json:"metadata"`
 	Status   helmReleaseStatus   `json:"status"`
 }
 
+// helmReleaseMetadata identifies a HelmRelease by name and namespace.
 type helmReleaseMetadata struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
 }
 
+// helmReleaseStatus contains Flux reconciliation conditions.
 type helmReleaseStatus struct {
 	Conditions []HelmReleaseCondition `json:"conditions"`
 }
