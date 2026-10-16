@@ -1,6 +1,6 @@
-# Runtime configuration inputs. Changes are pushed to existing VMs and applied without replacement,
-# which means if you only change and apply one of these, you should only see the Nstance server
-# configuration file in the planned changes.
+# Runtime configuration inputs. Changes reconfigure agent-managed VMs without replacement.
+# Shared SSH, telemetry, and registry settings also provision NST VMs; changing them rolls those VMs.
+# Static access keys apply only to agent-managed VMs; NST uses its VM role credentials.
 
 variable "ssh_authorized_keys" {
   description = "SSH login keys; existing VMs are reconfigured when set."

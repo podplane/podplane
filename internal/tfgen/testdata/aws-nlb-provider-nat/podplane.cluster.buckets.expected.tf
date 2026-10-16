@@ -1,3 +1,5 @@
+# Object storage buckets for Netsy cluster state and the container registry.
+
 locals {
   buckets = {
     "netsy" = local.netsy_bucket_name

@@ -19,9 +19,21 @@ variable "enable_ipv6" {
 }
 
 variable "enable_ssm" {
-  description = "SSM access; changing it updates cloud infrastructure and VM bootstrap."
+  description = "SSM access; changing it updates AWS infrastructure and VM bootstrap."
   type = bool
   default = true
+}
+
+variable "nat_mode" {
+  description = "Choose provider-managed NAT or Nstance-managed NAT. Switching modes requires updating network routes."
+  type = string
+  default = "provider"
+}
+
+variable "fixed_public_ipv4_count" {
+  description = "Number of static public IPv4 addresses to reserve for each NAT subnet when using Nstance-managed NAT."
+  type = number
+  default = 0
 }
 
 locals {
@@ -40,7 +52,8 @@ locals {
     }
   }
   load_balancers = {
-    "main" = { listeners = [{ port = 443, target_port = 443 }, { port = 6443, target_port = 6443 }], subnets = "public", public = true }
+    "api" = { listeners = [{ port = 6443, target_port = 6443, proxy_port = 6443 }], subnets = "public", public = true }
+    "main" = { listeners = [{ port = 443, target_port = 443, proxy_port = 443 }], subnets = "public", public = true }
   }
 }
 

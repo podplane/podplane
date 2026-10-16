@@ -1,3 +1,5 @@
+# DNS records for provider load balancers. Tunnel DNS is user-managed.
+
 locals {
   managed_dns_zones = {
     "example.com" = {
@@ -15,7 +17,7 @@ locals {
     }
     "k8s.example.com" = {
       zone = "example.com"
-      load_balancer = "main"
+      load_balancer = "api"
     }
   }
 }

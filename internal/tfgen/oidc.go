@@ -41,6 +41,15 @@ func renderAWSOIDC(cfg *oidcconfig.Config) []File {
 	var mainDoc hclDocument
 	var variablesDoc hclDocument
 	var outputsDoc hclDocument
+	mainDoc.header = []string{
+		"OIDC server infrastructure, networking, and optional managed DNS records.",
+	}
+	variablesDoc.header = []string{
+		"OIDC input variables. Settings currently come directly from podplane.oidc.jsonc.",
+	}
+	outputsDoc.header = []string{
+		"OIDC issuer URL for configuring cluster authentication.",
+	}
 
 	terraform := block("terraform")
 	terraform.Body.Attr("required_version", str(">= 1.6.0"))

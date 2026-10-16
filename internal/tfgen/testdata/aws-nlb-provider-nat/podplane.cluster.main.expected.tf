@@ -1,3 +1,5 @@
+# Cluster providers, VM templates, and Nstance infrastructure, including bootstrap configuration.
+
 terraform {
   required_version = ">= 1.6.0"
 
@@ -45,13 +47,57 @@ data "podplane_userdata" "knd_arm64" {
   enable_ssm = var.enable_ssm
 }
 
+data "podplane_userdata" "nst_arm64_us_east_1a" {
+  manifest_json = file("${path.module}/podplane.cluster.vmconfig_nst_debian-13_arm64.json")
+  deps_mirror_url = "https://deps.podplane.dev"
+  provider_kind = local.provider_kind
+  aws_account_id = local.aws_account_id
+  immutable_ssh_authorized_keys = var.immutable_ssh_authorized_keys
+  enable_ssm = var.enable_ssm
+  server_env = merge(local.host_env, {
+    "CLUSTER_ID" = local.cluster_id
+    "PROVIDER_REGION" = local.provider_region
+    "PROVIDER_ZONE" = "us-east-1a"
+    "NSTANCE_SERVER_STORAGE" = "s3"
+    "NSTANCE_SERVER_BUCKET" = module.cluster.bucket
+    "NSTANCE_SERVER_SHARD" = "us-east-1a"
+    "NSTANCE_SERVER_PREFIX" = "shard/us-east-1a/"
+    "NSTANCE_SLEEP_ENABLED" = "true"
+    "NSTANCE_TUNNEL_ENABLED" = "false"
+    "NSTANCE_TUNNEL_STORAGE" = "s3"
+    "NSTANCE_TUNNEL_BUCKET" = module.cluster.bucket
+    "NSTANCE_TUNNEL_SHARD" = "us-east-1a"
+    "NSTANCE_TUNNEL_PREFIX" = "shard/us-east-1a/"
+  })
+}
+
 locals {
   aws_account_id = data.aws_caller_identity.current.account_id
   aws_region = data.aws_region.current.region
   netsy_bucket_name = "${local.cluster_id}-${local.aws_account_id}-netsy"
   registry_bucket_name = "${local.cluster_id}-${local.aws_account_id}-registry"
-  mutable_env = { for key, value in {
-    TELEMETRY_S3_REGION = local.aws_region
+  host_env = { for key, value in {
+    SSH_AUTHORIZED_KEYS = var.ssh_authorized_keys
+    TELEMETRY_ENABLED = var.telemetry_enabled == null ? null : tostring(var.telemetry_enabled)
+    TELEMETRY_LOG_CLOUDINIT = var.telemetry_log_cloudinit == null ? null : tostring(var.telemetry_log_cloudinit)
+    TELEMETRY_LOG_SERVICES = var.telemetry_log_services
+    TELEMETRY_OTLP_ENDPOINT = var.telemetry_otlp_endpoint
+    TELEMETRY_S3_BUCKET = var.telemetry_s3_bucket
+    TELEMETRY_S3_REGION = local.provider_region
+    TELEMETRY_S3_ENDPOINT = var.telemetry_s3_endpoint
+    TELEMETRY_S3_ASSUME_ROLE = var.telemetry_s3_assume_role
+    AWS_S3_USE_PATH_STYLE = var.aws_s3_use_path_style
+    REGISTRY_ENABLED = var.registry_enabled == null ? null : tostring(var.registry_enabled)
+    REGISTRY_BUCKET = aws_s3_bucket.podplane_cluster["registry"].bucket
+    REGISTRY_REGION = local.provider_region
+    REGISTRY_ENDPOINT = var.registry_endpoint
+    REGISTRY_HOSTNAME = var.registry_hostname
+  } : key => value if value != null }
+  mutable_env = merge(local.host_env, { for key, value in {
+    NETSY_BUCKET = aws_s3_bucket.podplane_cluster["netsy"].bucket
+    NETSY_ASSUME_ROLE = aws_iam_role.podplane_cluster["netsy"].arn
+    REGISTRY_ASSUME_ROLE = aws_iam_role.podplane_cluster["registry-read-only"].arn
+    NETSY_REGION = local.provider_region
     OIDC_ISSUER = var.oidc_issuer_url
     OIDC_USERNAME_CLAIM = local.oidc_username_claim
     OIDC_SIGNING_ALGS = var.oidc_signing_algs == null ? null : join(",", var.oidc_signing_algs)
@@ -60,20 +106,6 @@ locals {
     KUBE_CLUSTER_CIDR = join(",", var.kubernetes_cluster_cidr)
     KUBE_SERVICE_CLUSTER_IP_RANGE = join(",", var.kubernetes_service_cidr)
     KUBE_CLUSTER_DNS = "198.19.255.254,fdc6::ffff"
-    NETSY_BUCKET = aws_s3_bucket.podplane_cluster["netsy"].bucket
-    NETSY_REGION = local.aws_region
-    NETSY_ASSUME_ROLE = aws_iam_role.podplane_cluster["netsy"].arn
-    REGISTRY_BUCKET = aws_s3_bucket.podplane_cluster["registry"].bucket
-    REGISTRY_REGION = local.aws_region
-    REGISTRY_ASSUME_ROLE = aws_iam_role.podplane_cluster["registry-read-only"].arn
-    SSH_AUTHORIZED_KEYS = var.ssh_authorized_keys
-    TELEMETRY_ENABLED = var.telemetry_enabled == null ? null : tostring(var.telemetry_enabled)
-    TELEMETRY_LOG_CLOUDINIT = var.telemetry_log_cloudinit == null ? null : tostring(var.telemetry_log_cloudinit)
-    TELEMETRY_LOG_SERVICES = var.telemetry_log_services
-    TELEMETRY_OTLP_ENDPOINT = var.telemetry_otlp_endpoint
-    TELEMETRY_S3_BUCKET = var.telemetry_s3_bucket
-    TELEMETRY_S3_ENDPOINT = var.telemetry_s3_endpoint
-    TELEMETRY_S3_ASSUME_ROLE = var.telemetry_s3_assume_role
     TELEMETRY_S3_ACCESS_KEY_ID = var.telemetry_s3_access_key_id
     TELEMETRY_S3_SECRET_ACCESS_KEY = var.telemetry_s3_secret_access_key
     OIDC_CA_CERT = var.oidc_ca_cert
@@ -81,16 +113,12 @@ locals {
     KUBE_LOG_LEVEL = var.kube_log_level == null ? null : tostring(var.kube_log_level)
     KUBE_NODE_CIDR_MASK_SIZE_IPV4 = var.kubernetes_node_cidr_mask_size_ipv4 == null ? null : tostring(var.kubernetes_node_cidr_mask_size_ipv4)
     KUBE_NODE_CIDR_MASK_SIZE_IPV6 = var.kubernetes_node_cidr_mask_size_ipv6 == null ? null : tostring(var.kubernetes_node_cidr_mask_size_ipv6)
-    AWS_S3_USE_PATH_STYLE = var.aws_s3_use_path_style
     NETSY_ENDPOINT = var.netsy_endpoint
     NETSY_ACCESS_KEY_ID = var.netsy_access_key_id
     NETSY_SECRET_ACCESS_KEY = var.netsy_secret_access_key
-    REGISTRY_ENABLED = var.registry_enabled == null ? null : tostring(var.registry_enabled)
-    REGISTRY_ENDPOINT = var.registry_endpoint
     REGISTRY_ACCESS_KEY_ID = var.registry_access_key_id
     REGISTRY_SECRET_ACCESS_KEY = var.registry_secret_access_key
-    REGISTRY_HOSTNAME = var.registry_hostname
-  } : key => value if value != null }
+  } : key => value if value != null })
   certificates = {
     "front-proxy.client" = { kind = "client", cn = "front-proxy-client", dns = ["{{ .Instance.Hostname }}", "localhost"], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1"], ttl = 8760 }
     "kube-apiserver.client" = { kind = "client", cn = "kube-apiserver.client", dns = ["{{ .Instance.Hostname }}", "localhost"], ip = ["{{ .Instance.IP4 }}", "{{ .Instance.IP6 }}", "127.0.0.1", "::1"], ttl = 8760, organization = ["system:masters"], uri = ["netsy://{{ .Cluster.ID }}/client/kube-apiserver"] }
@@ -109,16 +137,20 @@ locals {
       arch = "arm64"
       vars = local.mutable_env
       userdata = { source = "inline", encoding = "base64", content = base64encode(data.podplane_userdata.knc_arm64.content) }
-      files = { "mutable.env" = { kind = "env", template = local.mutable_env }, "kube2iam.client.crt" = { kind = "certificate", template = "kube2iam.client", key = { source = "agent", name = "kube2iam.client" } }, "kubelet.client.crt" = { kind = "certificate", template = "kubelet.client", key = { source = "agent", name = "kubelet.client" } }, "kubelet.server.crt" = { kind = "certificate", template = "kubelet.server", key = { source = "agent", name = "kubelet.server" } }, "front-proxy.client.crt" = { kind = "certificate", template = "front-proxy.client", key = { source = "agent", name = "front-proxy.client" } }, "kube-apiserver.client.crt" = { kind = "certificate", template = "kube-apiserver.client", key = { source = "agent", name = "kube-apiserver.client" } }, "kube-apiserver.server.crt" = { kind = "certificate", template = "kube-apiserver.server", key = { source = "agent", name = "kube-apiserver.server" } }, "kube-controller-manager.client.crt" = { kind = "certificate", template = "kube-controller-manager.client", key = { source = "agent", name = "kube-controller-manager.client" } }, "kube-scheduler.client.crt" = { kind = "certificate", template = "kube-scheduler.client", key = { source = "agent", name = "kube-scheduler.client" } }, "netsy.client.crt" = { kind = "certificate", template = "netsy.client", key = { source = "agent", name = "netsy.client" } }, "netsy.server.crt" = { kind = "certificate", template = "netsy.server", key = { source = "agent", name = "netsy.server" } } }
-      args = { ImageId = "{{ .Image.debian_13_arm64 }}" }
+      files = { "mutable.env" = { kind = "env", template = merge(local.mutable_env, { NSTANCE_EBPF_PORTS = "{{ .Vars.NSTANCE_EBPF_PORTS }}" }) }, "kube2iam.client.crt" = { kind = "certificate", template = "kube2iam.client", key = { source = "agent", name = "kube2iam.client" } }, "kubelet.client.crt" = { kind = "certificate", template = "kubelet.client", key = { source = "agent", name = "kubelet.client" } }, "kubelet.server.crt" = { kind = "certificate", template = "kubelet.server", key = { source = "agent", name = "kubelet.server" } }, "front-proxy.client.crt" = { kind = "certificate", template = "front-proxy.client", key = { source = "agent", name = "front-proxy.client" } }, "kube-apiserver.client.crt" = { kind = "certificate", template = "kube-apiserver.client", key = { source = "agent", name = "kube-apiserver.client" } }, "kube-apiserver.server.crt" = { kind = "certificate", template = "kube-apiserver.server", key = { source = "agent", name = "kube-apiserver.server" } }, "kube-controller-manager.client.crt" = { kind = "certificate", template = "kube-controller-manager.client", key = { source = "agent", name = "kube-controller-manager.client" } }, "kube-scheduler.client.crt" = { kind = "certificate", template = "kube-scheduler.client", key = { source = "agent", name = "kube-scheduler.client" } }, "netsy.client.crt" = { kind = "certificate", template = "netsy.client", key = { source = "agent", name = "netsy.client" } }, "netsy.server.crt" = { kind = "certificate", template = "netsy.server", key = { source = "agent", name = "netsy.server" } } }
+      args = {
+        ImageId = "{{ .Image.debian_13_arm64 }}"
+      }
     }
     "ingress" = {
       kind = "knd"
       arch = "arm64"
       vars = local.mutable_env
       userdata = { source = "inline", encoding = "base64", content = base64encode(data.podplane_userdata.knd_arm64.content) }
-      files = { "mutable.env" = { kind = "env", template = local.mutable_env }, "kube2iam.client.crt" = { kind = "certificate", template = "kube2iam.client", key = { source = "agent", name = "kube2iam.client" } }, "kubelet.client.crt" = { kind = "certificate", template = "kubelet.client", key = { source = "agent", name = "kubelet.client" } }, "kubelet.server.crt" = { kind = "certificate", template = "kubelet.server", key = { source = "agent", name = "kubelet.server" } } }
-      args = { ImageId = "{{ .Image.debian_13_arm64 }}" }
+      files = { "mutable.env" = { kind = "env", template = merge(local.mutable_env, { NSTANCE_EBPF_PORTS = "{{ .Vars.NSTANCE_EBPF_PORTS }}" }) }, "kube2iam.client.crt" = { kind = "certificate", template = "kube2iam.client", key = { source = "agent", name = "kube2iam.client" } }, "kubelet.client.crt" = { kind = "certificate", template = "kubelet.client", key = { source = "agent", name = "kubelet.client" } }, "kubelet.server.crt" = { kind = "certificate", template = "kubelet.server", key = { source = "agent", name = "kubelet.server" } } }
+      args = {
+        ImageId = "{{ .Image.debian_13_arm64 }}"
+      }
     }
   }
 }
@@ -127,6 +159,8 @@ module "cluster" {
   source = "../../cache/deps/tf/modules/nstance/2.0.1/modules/cluster"
   cluster_id = local.cluster_id
   name_prefix = local.name_prefix
+  shards = ["us-east-1a"]
+  secrets_prefix = "/test-cluster/"
 }
 
 module "account_123456789012_us_east_1" {
@@ -141,7 +175,9 @@ module "network_123456789012_us_east_1" {
   enable_ssm = var.enable_ssm
   vpc_id = var.vpc_id
   vpc_cidr_ipv4 = var.vpc_cidr_ipv4
-  enable_ipv6 = var.enable_ipv6
+  ipv6_enabled = var.enable_ipv6
+  nat_mode = var.nat_mode
+  fixed_public_ipv4_count = var.fixed_public_ipv4_count
   subnets = local.subnets
   load_balancers = local.load_balancers
 }
@@ -163,34 +199,76 @@ module "shard_us_east_1a" {
         size = var.pool_sizes["control-plane"]
         subnet_pool = "control-plane"
         instance_type = var.pool_instance_types["control-plane"]
-        vars = local.mutable_env
-        load_balancers = {
-          "main" = [6443]
-        }
+        vars = merge(local.mutable_env, { NSTANCE_EBPF_PORTS = "6443" })
+        load_balancers = ["api"]
       }
       "ingress" = {
         template = "ingress"
         size = var.pool_sizes["ingress"]
         subnet_pool = "ingress"
         instance_type = var.pool_instance_types["ingress"]
-        vars = local.mutable_env
-        load_balancers = {
-          "main" = [443]
-        }
+        vars = merge(local.mutable_env, { NSTANCE_EBPF_PORTS = "443" })
+        load_balancers = ["main"]
       }
     }
   }
+  server_arch = "arm64"
+  server_userdata = data.podplane_userdata.nst_arm64_us_east_1a.content
 }
 
 resource "podplane_workload_ca_key" "cluster" {
   key_prefix = "test-cluster"
   provider = "aws_secrets_manager"
   region = "us-east-1"
+  depends_on = [module.cluster]
+}
+
+resource "podplane_nstance_registration_key" "cluster" {
+  secrets_provider = "aws_ssm"
+  secret_prefix = "/test-cluster/"
+  region = local.provider_region
+  depends_on = [module.cluster]
 }
 
 resource "podplane_netsy_seed_s3" "cluster" {
   cluster_config_path = "${path.module}/podplane.cluster.jsonc"
   bucket = aws_s3_bucket.podplane_cluster["netsy"].bucket
   region = local.aws_region
+  values_content = yamlencode({
+    platform = {
+      components = {
+        values = {
+          "nstance-operator" = {
+            config = {
+              shards = {
+                "us-east-1a" = {
+                  registration_addr = format("%s:8992", module.shard_us_east_1a.server_ips[0])
+                  operator_addr = format("%s:8993", module.shard_us_east_1a.server_ips[0])
+                }
+              }
+            }
+          }
+          "zot-registry" = {
+            platform = { zotRegistry = { storage = { bucket = aws_s3_bucket.podplane_cluster["registry"].bucket, region = local.aws_region } } }
+            zot = { podAnnotations = { "iam.amazonaws.com/role" = aws_iam_role.podplane_cluster["registry-read-write"].arn } }
+          }
+        }
+        apps = {
+          "zot-registry" = { namespaceAnnotations = { "iam.amazonaws.com/allowed-roles" = jsonencode([aws_iam_role.podplane_cluster["registry-read-write"].arn]) } }
+        }
+      }
+    }
+  })
+  nstance_bootstrap = {
+    provider = "aws_ssm"
+    secret_prefix = "/test-cluster/"
+    signing_key_id = podplane_nstance_registration_key.cluster.id
+    signing_key_version = podplane_nstance_registration_key.cluster.backend_version
+    signing_key_fingerprint = podplane_nstance_registration_key.cluster.public_key_fingerprint
+    cluster_id = local.cluster_id
+    tenant = "default"
+    namespace = "platform-nstance-operator"
+    ca_bucket = module.cluster.bucket
+  }
   depends_on = [podplane_workload_ca_key.cluster, aws_iam_role_policy.podplane_workload_ca_key]
 }

@@ -54,6 +54,8 @@ Podplane classifies configuration by the impact of applying a change:
 
 The impact follows the complete configuration path rather than the component being configured. For example, the OIDC issuer is runtime configuration because it is delivered through the `mutable.env` file by Nstance; an instance type is VM infrastructure because it participates in Nstance's infrastructure configuration hash and Nstance handles VM replacement.
 
+Shared SSH, telemetry, and node-local registry settings reconfigure agent-managed nodes but replace nstance-server `nst` VMs, which receive these settings in user-data. Static access keys remain limited to agent-managed nodes; `nst` uses its VM role credentials.
+
 OpenTofu/Terraform shows cloud-resource changes in its plan. Nstance separately distinguishes runtime configuration from VM infrastructure: changes to Nstance server configuration `vars` and `files` are pushed to existing VMs, while changes to userdata, instance type, subnet pool, VM kind, architecture, or provider arguments cause rolling VM replacement.
 
 ## Design Philosophy
@@ -78,6 +80,8 @@ does not copy dependency packages or reuse an initialized `.terraform`
 directory.
 
 To set generated variables, create a user-owned `terraform.tfvars` or `*.auto.tfvars` file in the same directory. To add custom infrastructure (e.g. lifecycle rules on a bucket, additional IAM policies, extra cloud resources), create separate `.tf` files in the same directory. These files can reference outputs from the generated modules. The CLI will never modify files it didn't generate.
+
+Remote access defaults to enabled: AWS exposes `enable_ssm`; Google exposes `enable_iap` for SSH and operator API firewall access, and `enable_os_login` for IAM-based SSH on Nstance server VMs. Google users still need the appropriate IAM permissions.
 
 ```
 ├── internaltools-production/

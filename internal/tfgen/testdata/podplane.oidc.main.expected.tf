@@ -1,3 +1,5 @@
+# OIDC server infrastructure, networking, and optional managed DNS records.
+
 terraform {
   required_version = ">= 1.6.0"
 

@@ -46,29 +46,34 @@ func sampleVMConfigManifest(kind string, arch string) *deps.Manifest {
 
 // testClusterOptions returns fixed dependency inputs so cluster tfgen tests do
 // not read the local deps cache or fetch remote manifests.
-func testClusterOptions() ClusterOptions {
-	kncManifest, err := json.MarshalIndent(sampleVMConfigManifest("knc", "arm64"), "", "  ")
-	if err != nil {
-		panic(err)
-	}
-	kndManifest, err := json.MarshalIndent(sampleVMConfigManifest("knd", "arm64"), "", "  ")
-	if err != nil {
-		panic(err)
-	}
-	return ClusterOptions{
+func testClusterOptions(cfg *clusterconfig.ClusterConfig) ClusterOptions {
+	opts := ClusterOptions{
 		DepsMirrorURL:    "https://deps.podplane.dev",
 		NstanceModuleDir: "../../cache/deps/tf/modules/nstance/2.0.1",
-		VMConfigManifests: []VMConfigManifest{
-			{Kind: "knc", Arch: "arm64", Filename: "vmconfig_knc_debian-13_arm64.json", JSON: append(kncManifest, '\n')},
-			{Kind: "knd", Arch: "arm64", Filename: "vmconfig_knd_debian-13_arm64.json", JSON: append(kndManifest, '\n')},
-		},
 	}
+	for _, target := range RequiredVMTargets(cfg) {
+		manifest := sampleVMConfigManifest(target.Kind, target.Arch)
+		if cfg.Cluster.Tunnel != nil && (target.Kind == "knc" || target.Kind == "nst") {
+			manifest.VMConfig.Images = []deps.VMConfigImage{{
+				Image: "cloudflare/cloudflared:2026.1.0", Digest: "sha256:" + strings.Repeat("c", 64),
+				Size: 1024, Platform: "linux/" + target.Arch,
+			}}
+		}
+		raw, err := json.MarshalIndent(manifest, "", "  ")
+		if err != nil {
+			panic(err)
+		}
+		opts.VMConfigManifests = append(opts.VMConfigManifests, VMConfigManifest{
+			Kind: target.Kind, Arch: target.Arch,
+			Filename: "vmconfig_" + target.Kind + "_debian-13_" + target.Arch + ".json", JSON: append(raw, '\n'),
+		})
+	}
+	return opts
 }
 
-// TestGenerateAWSClusterTerraform verifies the generated AWS cluster Terraform
-// contains the expected provider modules and group references.
-func TestGenerateAWSClusterTerraform(t *testing.T) {
-	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+// sampleClusterConfig returns an AWS cluster with NLBs and provider-managed NAT.
+func sampleClusterConfig() *clusterconfig.ClusterConfig {
+	return &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
 		ID:     "test-cluster",
 		Name:   "Test Cluster",
 		OIDC:   clusterconfig.OIDC{IssuerURL: "https://auth.example.com", SigningAlgs: []string{"RS256", "ES256"}},
@@ -84,9 +89,10 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		Kubernetes: clusterconfig.Kubernetes{
 			APIHostname:     "k8s.example.com",
 			APIPort:         6443,
-			APILoadBalancer: "main",
+			APILoadBalancer: "api",
 		},
 		Seed: clusterconfig.Seed{Name: "recommended", Version: "v1.0.0-1", Digest: "sha512:" + strings.Repeat("0", 128)},
+		NAT:  &clusterconfig.NAT{Mode: "provider"},
 		Pools: map[string]clusterconfig.Pool{
 			"control-plane": {Arch: "arm64", InstanceType: "t4g.medium", Size: 1},
 			"ingress":       {Arch: "arm64", InstanceType: "t4g.medium", Size: 2},
@@ -110,18 +116,89 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 					Subnets: "public",
 					Listeners: []clusterconfig.Listener{
 						{Port: 443, Pool: "ingress"},
+					},
+				},
+				"api": {
+					Public:  true,
+					Subnets: "public",
+					Listeners: []clusterconfig.Listener{
 						{Port: 6443, Pool: "control-plane"},
 					},
 				},
 			},
 		}},
 	}}
-	files, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions())
+}
+
+// TestGenerateClusterScenarios compares complete Terraform output for two representative deployments.
+func TestGenerateClusterScenarios(t *testing.T) {
+	for _, scenario := range []string{"aws-nlb-provider-nat", "google-tunnel-nstance-nat"} {
+		t.Run(scenario, func(t *testing.T) {
+			cfg := sampleClusterConfig()
+			if scenario == "google-tunnel-nstance-nat" {
+				provider := &cfg.Cluster.Providers[0]
+				provider.Kind, provider.Region, provider.Project = "google", "us-central1", "test-project"
+				provider.Account = ""
+				provider.LoadBalancers = nil
+				subnets := provider.Zones["us-east-1a"]
+				subnets[0].Services = []string{"nat"}
+				subnets[1].Public = true
+				provider.Zones = map[string][]clusterconfig.Subnet{"us-central1-a": subnets}
+				for name, pool := range cfg.Cluster.Pools {
+					pool.Arch, pool.InstanceType = "amd64", "e2-medium"
+					cfg.Cluster.Pools[name] = pool
+				}
+				cfg.Cluster.Secrets = clusterconfig.Secrets{
+					DefaultProvider: "google-secret-manager",
+					Providers: map[string]clusterconfig.SecretsProvider{
+						"google-secret-manager": {Kind: "gcp", ProjectID: "test-project"},
+					},
+				}
+				cfg.Cluster.Domains = []clusterconfig.Domain{{Zone: "example.com"}}
+				cfg.Cluster.Kubernetes.APIPort = 443
+				cfg.Cluster.Kubernetes.APILoadBalancer = ""
+				cfg.Cluster.Tunnel = &clusterconfig.Tunnel{
+					Kind: "cloudflare", ID: "cbe15ed8-50dc-4e69-a1d0-9e1909ec4ce8", CredentialSecret: "tunnel-credentials",
+				}
+				cfg.Cluster.NAT = &clusterconfig.NAT{
+					Mode: "nstance", FixedPublicIPv4Count: 2,
+					Groups: map[string]clusterconfig.NATGroup{
+						"nat": {Arch: "amd64", InstanceType: "e2-small", SubnetPool: "public"},
+					},
+					Tenants: map[string]clusterconfig.TenantNAT{
+						"default": {Group: "nat", InstanceTypeLadder: []string{"e2-small", "e2-medium", "e2-standard-2"}},
+					},
+				}
+			}
+			files, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions(cfg))
+			if err != nil {
+				t.Fatal(err)
+			}
+			terraformFiles := 0
+			for _, file := range files {
+				if file.Type == FileTypeTerraform {
+					terraformFiles++
+					name := strings.TrimSuffix(file.Name, ".tf") + ".expected.tf"
+					assertExpectedTerraform(t, filepath.Join(scenario, name), file.Content)
+				}
+			}
+			if terraformFiles != 8 {
+				t.Fatalf("generated %d Terraform files, want 8", terraformFiles)
+			}
+		})
+	}
+}
+
+// TestGenerateAWSClusterTerraform verifies the generated AWS cluster Terraform
+// contains the expected provider modules and group references.
+func TestGenerateAWSClusterTerraform(t *testing.T) {
+	cfg := sampleClusterConfig()
+	files, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions(cfg))
 	if err != nil {
 		t.Fatalf("GenerateCluster returned error: %v", err)
 	}
-	if len(files) != 10 {
-		t.Fatalf("len(files) = %d, want 10", len(files))
+	if len(files) != 11 {
+		t.Fatalf("len(files) = %d, want 11", len(files))
 	}
 	contents := fileContents(files)
 	for _, name := range []string{
@@ -135,19 +212,12 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		"podplane.cluster.outputs.tf",
 		"podplane.cluster.vmconfig_knc_debian-13_arm64.json",
 		"podplane.cluster.vmconfig_knd_debian-13_arm64.json",
+		"podplane.cluster.vmconfig_nst_debian-13_arm64.json",
 	} {
 		if _, ok := contents[name]; !ok {
 			t.Fatalf("generated files missing %s: %#v", name, files)
 		}
 	}
-	assertExpectedTerraform(t, "podplane.cluster.main.expected.tf", contents["podplane.cluster.main.tf"])
-	assertExpectedTerraform(t, "podplane.cluster.buckets.expected.tf", contents["podplane.cluster.buckets.tf"])
-	assertExpectedTerraform(t, "podplane.cluster.dns.expected.tf", contents["podplane.cluster.dns.tf"])
-	assertExpectedTerraform(t, "podplane.cluster.roles.expected.tf", contents["podplane.cluster.roles.tf"])
-	assertExpectedTerraform(t, "podplane.cluster.inputs.runtime.expected.tf", contents["podplane.cluster.inputs.runtime.tf"])
-	assertExpectedTerraform(t, "podplane.cluster.inputs.vm.expected.tf", contents["podplane.cluster.inputs.vm.tf"])
-	assertExpectedTerraform(t, "podplane.cluster.inputs.infra.expected.tf", contents["podplane.cluster.inputs.infra.tf"])
-	assertExpectedTerraform(t, "podplane.cluster.outputs.expected.tf", contents["podplane.cluster.outputs.tf"])
 	got := contents["podplane.cluster.main.tf"] + contents["podplane.cluster.buckets.tf"] + contents["podplane.cluster.dns.tf"] + contents["podplane.cluster.roles.tf"] + contents["podplane.cluster.inputs.runtime.tf"] + contents["podplane.cluster.inputs.vm.tf"] + contents["podplane.cluster.inputs.infra.tf"] + contents["podplane.cluster.outputs.tf"]
 	for _, want := range []string{
 		`provider "aws"`,
@@ -168,12 +238,15 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		`immutable_ssh_authorized_keys = var.immutable_ssh_authorized_keys`,
 		`enable_ssm = var.enable_ssm`,
 		`content = base64encode(data.podplane_userdata.knc_arm64.content)`,
-		`vars = local.mutable_env`,
-		`"main" = { listeners = [{ port = 443, target_port = 443 }, { port = 6443, target_port = 6443 }]`,
+		`vars = merge(local.mutable_env, { NSTANCE_EBPF_PORTS = "6443" })`,
+		`vars = merge(local.mutable_env, { NSTANCE_EBPF_PORTS = "443" })`,
+		`"main" = { listeners = [{ port = 443, target_port = 443, proxy_port = 443 }]`,
+		`"api" = { listeners = [{ port = 6443, target_port = 6443, proxy_port = 6443 }]`,
 		`subnets = "public", public = true`,
 		`load_balancers = {`,
-		`"main" = [443]`,
-		`"main" = [6443]`,
+		`load_balancers = ["main"]`,
+		`load_balancers = ["api"]`,
+		`server_userdata = data.podplane_userdata.nst_arm64_us_east_1a.content`,
 		`managed_dns_zones = {`,
 		`managed_dns_records = {`,
 		`resource "aws_route53_record" "managed_ipv4"`,
@@ -216,7 +289,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	// ACME adds a dedicated Route53 role and passes runtime-generated values
 	// through the generic Netsy seed values overlay.
 	cfg.Cluster.ACME = &clusterconfig.ACME{Email: "ops@example.com"}
-	acmeFiles, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions())
+	acmeFiles, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions(cfg))
 	if err != nil {
 		t.Fatalf("GenerateCluster with ACME returned error: %v", err)
 	}
@@ -228,7 +301,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		`values = ["TXT"]`,
 		`resources = [for zone in data.aws_route53_zone.managed : zone.arn]`,
 		`values_content = yamlencode({`,
-		`podplane-operator = {`,
+		`"podplane-operator" = {`,
 		`roleARN = aws_iam_role.acme_route53[0].arn`,
 		`hostedZoneID = zone.zone_id`,
 		`region = local.aws_region`,
@@ -261,7 +334,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 
 	// CIDRs are runtime inputs. A JSON CIDR change must affect only runtime inputs.
 	cfg.Cluster.Kubernetes.ClusterCIDR = []string{"100.64.0.0/10"}
-	changedFiles, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions())
+	changedFiles, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions(cfg))
 	if err != nil {
 		t.Fatalf("GenerateCluster after CIDR change returned error: %v", err)
 	}
@@ -278,7 +351,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	cfg.Cluster.Providers[0].VPC.ID = "vpc-0123456789abcdef0"
 	cfg.Cluster.Providers[0].VPC.V4CIDR = ""
 	cfg.Cluster.Providers[0].VPC.V6CIDR = ""
-	existingFiles, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions())
+	existingFiles, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions(cfg))
 	if err != nil {
 		t.Fatalf("GenerateCluster for existing VPC returned error: %v", err)
 	}
@@ -343,6 +416,7 @@ func TestSubnetsValueAssignsUniqueIPv6Netnums(t *testing.T) {
 // recognizing provider metadata does not advertise Terraform generation.
 func TestValidateDNSProvidersRejectsUnsupportedTerraformProviders(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+		Providers: []clusterconfig.Provider{{Kind: "aws"}},
 		Domains: []clusterconfig.Domain{{
 			Zone:     "example.com",
 			Provider: &clusterconfig.DomainProvider{Kind: "cloudflare"},
@@ -368,7 +442,8 @@ func TestValidateDNSProvidersRejectsUnsupportedTerraformProviders(t *testing.T) 
 // provider-managed records.
 func TestDNSOutputValues(t *testing.T) {
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
-		Domains: []clusterconfig.Domain{{Zone: "example.com"}},
+		Providers: []clusterconfig.Provider{{Kind: "aws"}},
+		Domains:   []clusterconfig.Domain{{Zone: "example.com"}},
 		Kubernetes: clusterconfig.Kubernetes{
 			APIHostname:     "k8s.example.com",
 			APILoadBalancer: "api",
@@ -423,7 +498,7 @@ func TestGenerateAWSClusterTerraformWithoutSeed(t *testing.T) {
 			},
 		}},
 	}}
-	files, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions())
+	files, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions(cfg))
 	if err != nil {
 		t.Fatalf("GenerateCluster returned error: %v", err)
 	}
@@ -466,7 +541,7 @@ func TestGenerateAWSClusterTerraformWithVaultDefault(t *testing.T) {
 			},
 		}},
 	}}
-	files, err := GenerateCluster("podplane.cluster.jsonc", cfg, testClusterOptions())
+	files, err := GenerateCluster("podplane.cluster.jsonc", cfg, testClusterOptions(cfg))
 	if err != nil {
 		t.Fatalf("GenerateCluster returned error: %v", err)
 	}
@@ -503,7 +578,7 @@ func TestGenerateAWSClusterTerraformUsesSecretsProviderRegionInGrant(t *testing.
 			},
 		}},
 	}}
-	files, err := GenerateCluster("podplane.cluster.jsonc", cfg, testClusterOptions())
+	files, err := GenerateCluster("podplane.cluster.jsonc", cfg, testClusterOptions(cfg))
 	if err != nil {
 		t.Fatalf("GenerateCluster error = %v", err)
 	}
@@ -628,6 +703,7 @@ func TestTerraformDependencyRootUsesClusterRequirements(t *testing.T) {
 	got := TerraformDependencyRoot("")
 	for _, want := range []string{
 		`source = "hashicorp/aws"`,
+		`source = "hashicorp/google"`,
 		`source = "podplane/podplane"`,
 		`source = "nstance-dev/nstance/aws//modules/cluster"`,
 		`source = "nstance-dev/nstance/aws//modules/account"`,
@@ -643,7 +719,7 @@ func TestTerraformDependencyRootUsesClusterRequirements(t *testing.T) {
 // TestTerraformDependencyRootCanPinModuleVersion verifies recovery roots request an exact module version.
 func TestTerraformDependencyRootCanPinModuleVersion(t *testing.T) {
 	got := TerraformDependencyRoot("2.0.1")
-	if strings.Count(got, `version = "2.0.1"`) != 4 {
+	if strings.Count(got, `version = "2.0.1"`) != 8 {
 		t.Fatalf("dependency root did not pin all module versions:\n%s", got)
 	}
 }
@@ -670,17 +746,7 @@ func TestGenerateClusterDiskSize(t *testing.T) {
 				secrets.ProjectID = "example-project"
 				cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider] = secrets
 			}
-			opts := testClusterOptions()
-			opts.VMConfigManifests = nil
-			for _, target := range RequiredVMTargets(cfg) {
-				raw, err := json.Marshal(sampleVMConfigManifest(target.Kind, target.Arch))
-				if err != nil {
-					t.Fatal(err)
-				}
-				opts.VMConfigManifests = append(opts.VMConfigManifests, VMConfigManifest{
-					Kind: target.Kind, Arch: target.Arch, Filename: target.Kind + ".json", JSON: raw,
-				})
-			}
+			opts := testClusterOptions(cfg)
 			for _, size := range []int{0, 64} {
 				pool := cfg.Cluster.Pools["control-plane"]
 				pool.DiskSize = size
@@ -702,36 +768,45 @@ func TestGenerateClusterDiskSize(t *testing.T) {
 	}
 }
 
-// TestWriteClusterRejectsUnrenderedInputsWithoutWriting checks unsupported settings leave existing Terraform and directory contents intact.
-func TestWriteClusterRejectsUnrenderedInputsWithoutWriting(t *testing.T) {
-	for _, feature := range []string{"nat", "tunnel", "google", "proxy"} {
+// TestWriteClusterRejectsUnsupportedInputsWithoutWriting checks generation failures leave existing files intact.
+func TestWriteClusterRejectsUnsupportedInputsWithoutWriting(t *testing.T) {
+	for _, feature := range []string{"mixed-pools", "dns-provider", "missing-manifest"} {
 		t.Run(feature, func(t *testing.T) {
 			cfg, err := clusterconfig.NewDraftConfig("aws")
 			if err != nil {
 				t.Fatal(err)
 			}
 			p := &cfg.Cluster.Providers[0]
+			var want string
 			switch feature {
-			case "nat":
-				cfg.Cluster.NAT = &clusterconfig.NAT{Mode: "provider"}
-			case "tunnel":
-				cfg.Cluster.Tunnel = &clusterconfig.Tunnel{
-					Kind: "cloudflare",
-					ID:   "cbe15ed8-50dc-4e69-a1d0-9e1909ec4ce8", CredentialSecret: "tunnel-credentials",
-				}
-			case "google":
-				p.Kind, p.Region, p.Project = "google", "us-central1", "test-project"
-				p.Zones = map[string][]clusterconfig.Subnet{"us-central1-a": p.Zones["us-east-1a"]}
-			case "proxy":
-				p.LoadBalancers = map[string]clusterconfig.LoadBalancer{"api": {Public: true, Subnets: "public", Listeners: []clusterconfig.Listener{{Port: 6443, Pool: "control-plane", ProxyPort: new(16443)}}}}
+			case "mixed-pools":
+				cfg.Cluster.Pools["ingress"] = cfg.Cluster.Pools["control-plane"]
+				p.Zones["us-east-1a"] = append(p.Zones["us-east-1a"], clusterconfig.Subnet{V4CIDR: "172.18.2.0/26", Pool: "ingress"})
+				p.LoadBalancers = map[string]clusterconfig.LoadBalancer{"main": {Public: true, Subnets: "public", Listeners: []clusterconfig.Listener{
+					{Port: 443, Pool: "ingress"}, {Port: 6443, Pool: "control-plane"},
+				}}}
+				want = `load balancer "main" listeners must share one pool`
+			case "dns-provider":
+				cfg.Cluster.Domains = []clusterconfig.Domain{{Zone: "example.com", Provider: &clusterconfig.DomainProvider{Kind: "cloudflare"}}}
+				p.LoadBalancers = map[string]clusterconfig.LoadBalancer{"main": {Public: true, Subnets: "public", Listeners: []clusterconfig.Listener{{Port: 443, Pool: "control-plane"}}}}
+				want = `provider.kind "cloudflare" is not supported by Terraform generation`
+			case "missing-manifest":
+				want = "missing vmconfig manifest nst/arm64"
+			}
+			if err := clusterconfig.Validate(cfg); err != nil {
+				t.Fatalf("invalid test fixture: %v", err)
+			}
+			opts := testClusterOptions(cfg)
+			if feature == "missing-manifest" {
+				opts.VMConfigManifests = opts.VMConfigManifests[:1]
 			}
 			dir := t.TempDir()
 			path := filepath.Join(dir, "podplane.cluster.main.tf")
 			if err := os.WriteFile(path, []byte("existing stack"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := WriteCluster(filepath.Join(dir, "cluster.jsonc"), cfg, testClusterOptions()); err == nil || !strings.Contains(err.Error(), "cannot be represented by this Terraform generator") {
-				t.Fatalf("unsafe generation: %v", err)
+			if err := WriteCluster(filepath.Join(dir, "cluster.jsonc"), cfg, opts); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("WriteCluster error = %v, want %q", err, want)
 			}
 			got, err := os.ReadFile(path)
 			if err != nil || string(got) != "existing stack" {

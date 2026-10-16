@@ -1,3 +1,5 @@
+# Cluster endpoints, DNS setup details, and infrastructure references used by the CLI.
+
 output "cluster_id" {
   value = local.cluster_id
 }
@@ -7,7 +9,7 @@ output "kubernetes_api_url" {
 }
 
 output "domain_targets" {
-  description = "Configured domain names and their load-balancer DNS targets."
+  description = "Configured domain names and their external routing targets."
   value = {
     "example.com" = {
       names = ["example.com", "*.example.com"]
@@ -18,7 +20,7 @@ output "domain_targets" {
 }
 
 output "manual_dns_records" {
-  description = "DNS records requiring manual setup. Use CNAME where valid, or an apex alias or flattening record."
+  description = "DNS records requiring manual setup. Tunnel DNS and HTTPS edge settings are user-managed."
   value = {}
 }
 

@@ -131,7 +131,7 @@ func WriteCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts Clus
 // An empty moduleVersion uses the normal version constraint.
 func TerraformDependencyRoot(moduleVersion string) string {
 	var doc hclDocument
-	addClusterTerraformRequirements(&doc)
+	addClusterTerraformRequirements(&doc, "aws", "google")
 	if moduleVersion == "" {
 		moduleVersion = NstanceModuleVersion
 	}
@@ -149,19 +149,23 @@ func TerraformDependencyRoot(moduleVersion string) string {
 	return doc.String()
 }
 
-// addClusterTerraformRequirements adds the engine and provider constraints used by cluster stacks.
-func addClusterTerraformRequirements(doc *hclDocument) {
+// addClusterTerraformRequirements adds engine, cloud provider, and Podplane constraints.
+func addClusterTerraformRequirements(doc *hclDocument, cloudProviders ...string) {
 	terraform := block("terraform")
 	terraform.Body.Attr("required_version", str(">= 1.6.0"))
 	requiredProviders := block("required_providers")
-	requiredProviders.Body.Attr("aws", object(
-		identField("source", str(AWSProviderSource)),
-		identField("version", str(AWSProviderVersion)),
-	))
-	requiredProviders.Body.Attr("google", object(
-		identField("source", str("hashicorp/google")),
-		identField("version", str(">= 6.0")),
-	))
+	if slices.Contains(cloudProviders, "aws") {
+		requiredProviders.Body.Attr("aws", object(
+			identField("source", str(AWSProviderSource)),
+			identField("version", str(AWSProviderVersion)),
+		))
+	}
+	if slices.Contains(cloudProviders, "google") {
+		requiredProviders.Body.Attr("google", object(
+			identField("source", str("hashicorp/google")),
+			identField("version", str(">= 6.0")),
+		))
+	}
 	requiredProviders.Body.Attr("podplane", object(
 		identField("source", str(PodplaneProviderSource)),
 		identField("version", str(PodplaneProviderVersion)),
@@ -190,10 +194,25 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 	var vmInputsDoc hclDocument
 	var infraInputsDoc hclDocument
 	var outputsDoc hclDocument
+	mainDoc.header = []string{
+		"Cluster providers, VM templates, and Nstance infrastructure, including bootstrap configuration.",
+	}
+	bucketsDoc.header = []string{
+		"Object storage buckets for Netsy cluster state and the container registry.",
+	}
+	dnsDoc.header = []string{
+		"DNS records for provider load balancers. Tunnel DNS is user-managed.",
+	}
+	rolesDoc.header = []string{
+		"Cloud permissions for cluster storage and secrets, including ingress certificates where needed.",
+	}
+	outputsDoc.header = []string{
+		"Cluster endpoints, DNS setup details, and infrastructure references used by the CLI.",
+	}
 	runtimeInputsDoc.header = []string{
-		"Runtime configuration inputs. Changes are pushed to existing VMs and applied without replacement,",
-		"which means if you only change and apply one of these, you should only see the Nstance server",
-		"configuration file in the planned changes.",
+		"Runtime configuration inputs. Changes reconfigure agent-managed VMs without replacement.",
+		"Shared SSH, telemetry, and registry settings also provision NST VMs; changing them rolls those VMs.",
+		"Static access keys apply only to agent-managed VMs; NST uses its VM role credentials.",
 	}
 	vmInputsDoc.header = []string{
 		"VM infrastructure inputs. Changes reconcile VM counts or trigger rolling VM replacement.",
@@ -202,7 +221,7 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		"Cluster infrastructure inputs. Changes may add, replace, or remove provider resources.",
 	}
 
-	addClusterTerraformRequirements(&mainDoc)
+	addClusterTerraformRequirements(&mainDoc, provider.Kind)
 
 	if provider.Kind == "aws" {
 		awsProvider := block("provider", "aws")
@@ -266,7 +285,9 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 				userdata.Body.Attr("google_project_id", expr("local.provider_project"))
 			}
 			userdata.Body.Attr("immutable_ssh_authorized_keys", expr("var.immutable_ssh_authorized_keys"))
-			userdata.Body.Attr("enable_ssm", expr("var.enable_ssm"))
+			if provider.Kind == "aws" {
+				userdata.Body.Attr("enable_ssm", expr("var.enable_ssm"))
+			}
 			if target.Kind == "nst" {
 				userdata.Body.Attr("server_env", serverEnvValue(cfg, zone))
 			}
@@ -368,15 +389,21 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 	addInputVariable(&infraInputsDoc, "vpc_id", "string", str(provider.VPC.ID), "Existing VPC ID; changing it replaces network placement.")
 	addInputVariable(&infraInputsDoc, "vpc_cidr_ipv4", "string", str(provider.VPC.V4CIDR), "Managed VPC IPv4 CIDR; changing it may replace networking.")
 	addInputVariable(&infraInputsDoc, "enable_ipv6", "bool", boolean(provider.VPC.V6CIDR == "auto"), "IPv6 state; changing it updates cloud networking.")
-	addInputVariable(&infraInputsDoc, "enable_ssm", "bool", boolean(provider.Kind == "aws"), "SSM access; changing it updates AWS infrastructure and VM bootstrap.")
+	switch provider.Kind {
+	case "aws":
+		addInputVariable(&infraInputsDoc, "enable_ssm", "bool", boolean(true), "SSM access; changing it updates AWS infrastructure and VM bootstrap.")
+	case "google":
+		addInputVariable(&infraInputsDoc, "enable_iap", "bool", boolean(true), "IAP access to SSH and the Nstance operator API; changing it updates firewall rules.")
+		addInputVariable(&vmInputsDoc, "enable_os_login", "bool", boolean(true), "IAM-based SSH on Nstance server VMs; changing it rolls those VMs.")
+	}
 	natMode := "provider"
 	fixedAddresses := 0
 	if nat := cfg.Cluster.NAT; nat != nil && nat.Mode == "nstance" {
 		natMode = "nstance"
 		fixedAddresses = nat.FixedPublicIPv4Count
 	}
-	addInputVariable(&infraInputsDoc, "nat_mode", "string", str(natMode), "Egress implementation; coordinate route handoff when changing NAT mode.")
-	addInputVariable(&infraInputsDoc, "fixed_public_ipv4_count", "number", num(fixedAddresses), "Fixed IPv4 addresses to reserve per NAT service subnet.")
+	addInputVariable(&infraInputsDoc, "nat_mode", "string", str(natMode), "Choose provider-managed NAT or Nstance-managed NAT. Switching modes requires updating network routes.")
+	addInputVariable(&infraInputsDoc, "fixed_public_ipv4_count", "number", num(fixedAddresses), "Number of static public IPv4 addresses to reserve for each NAT subnet when using Nstance-managed NAT.")
 	topology := block("locals")
 	topology.Body.Attr("subnets", subnetsValue(provider))
 	topology.Body.Attr("load_balancers", loadBalancersValue(provider))
@@ -390,9 +417,13 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 	identity.Body.Attr("spiffe_trust_domain", str(cfg.Cluster.SPIFFE.TrustDomain))
 	identity.Body.Attr("name_prefix", str(cfg.Cluster.ID))
 	identity.Body.Attr("provider_kind", str(provider.Kind))
-	identity.Body.Attr("provider_account", str(provider.Account))
+	switch provider.Kind {
+	case "aws":
+		identity.Body.Attr("provider_account", str(provider.Account))
+	case "google":
+		identity.Body.Attr("provider_project", str(provider.Project))
+	}
 	identity.Body.Attr("provider_region", str(provider.Region))
-	identity.Body.Attr("provider_project", str(provider.Project))
 	infraInputsDoc.AddBlock(identity)
 
 	locals := block("locals")
@@ -405,6 +436,7 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		locals.Body.Attr("netsy_bucket_name", str("${local.cluster_id}-${local.provider_project}-netsy"))
 		locals.Body.Attr("registry_bucket_name", str("${local.cluster_id}-${local.provider_project}-registry"))
 	}
+	locals.Body.Attr("host_env", hostEnvValue(provider.Kind))
 	locals.Body.Attr("mutable_env", mutableEnvValue(serviceNetwork, provider.Kind))
 	apiServiceIPs := make([]string, len(serviceNetwork.API))
 	for i, ip := range serviceNetwork.API {
@@ -455,13 +487,17 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 	account := block("module", accountName)
 	addNstanceModuleSource(&account, opts, "account")
 	account.Body.Attr("cluster", expr("module.cluster"))
-	account.Body.Attr("enable_ssm", expr("var.enable_ssm"))
+	if provider.Kind == "aws" {
+		account.Body.Attr("enable_ssm", expr("var.enable_ssm"))
+	}
 	mainDoc.AddBlock(account)
 
 	network := block("module", networkName)
 	addNstanceModuleSource(&network, opts, "network")
 	network.Body.Attr("cluster", expr("module.cluster"))
-	network.Body.Attr("enable_ssm", expr("var.enable_ssm"))
+	if provider.Kind == "aws" {
+		network.Body.Attr("enable_ssm", expr("var.enable_ssm"))
+	}
 	network.Body.Attr("vpc_id", expr("var.vpc_id"))
 	network.Body.Attr("vpc_cidr_ipv4", expr("var.vpc_cidr_ipv4"))
 	network.Body.Attr("ipv6_enabled", expr("var.enable_ipv6"))
@@ -496,7 +532,13 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		shard.Body.Attr("network", expr("module."+networkName))
 		shard.Body.Attr("shard", str(zone))
 		shard.Body.Attr("zone", str(zone))
-		shard.Body.Attr("enable_ssm", expr("var.enable_ssm"))
+		switch provider.Kind {
+		case "aws":
+			shard.Body.Attr("enable_ssm", expr("var.enable_ssm"))
+		case "google":
+			shard.Body.Attr("enable_iap", expr("var.enable_iap"))
+			shard.Body.Attr("enable_os_login", expr("var.enable_os_login"))
+		}
 		shard.Body.Attr("certificates", expr("local.certificates"))
 		shard.Body.Attr("templates", expr("local.templates"))
 		shard.Body.Attr("groups", groupsValue(cfg, provider))
@@ -701,8 +743,32 @@ func manualDNSRecordsValue(cfg *clusterconfig.ClusterConfig, networkName string)
 	return object(fields...)
 }
 
-// mutableEnvValue returns the Terraform expression for vmconfig mutable.env
-// values generated from Terraform-managed resources and generated variables.
+// hostEnvValue supplies shared non-secret settings for managed nodes and NST VMs.
+func hostEnvValue(providerKind string) hclExpression {
+	registry := `aws_s3_bucket.podplane_cluster["registry"].bucket`
+	if providerKind == "google" {
+		registry = `google_storage_bucket.podplane_cluster["registry"].name`
+	}
+	return expr(`{ for key, value in {
+  SSH_AUTHORIZED_KEYS = var.ssh_authorized_keys
+  TELEMETRY_ENABLED = var.telemetry_enabled == null ? null : tostring(var.telemetry_enabled)
+  TELEMETRY_LOG_CLOUDINIT = var.telemetry_log_cloudinit == null ? null : tostring(var.telemetry_log_cloudinit)
+  TELEMETRY_LOG_SERVICES = var.telemetry_log_services
+  TELEMETRY_OTLP_ENDPOINT = var.telemetry_otlp_endpoint
+  TELEMETRY_S3_BUCKET = var.telemetry_s3_bucket
+  TELEMETRY_S3_REGION = local.provider_region
+  TELEMETRY_S3_ENDPOINT = var.telemetry_s3_endpoint
+  TELEMETRY_S3_ASSUME_ROLE = var.telemetry_s3_assume_role
+  AWS_S3_USE_PATH_STYLE = var.aws_s3_use_path_style
+  REGISTRY_ENABLED = var.registry_enabled == null ? null : tostring(var.registry_enabled)
+  REGISTRY_BUCKET = ` + registry + `
+  REGISTRY_REGION = local.provider_region
+  REGISTRY_ENDPOINT = var.registry_endpoint
+  REGISTRY_HOSTNAME = var.registry_hostname
+} : key => value if value != null }`)
+}
+
+// mutableEnvValue adds managed-node settings to the shared host configuration.
 func mutableEnvValue(network clusterconfig.ServiceNetwork, providerKind string) hclExpression {
 	dns := make([]string, len(network.CoreDNS))
 	for i := range network.CoreDNS {
@@ -710,17 +776,13 @@ func mutableEnvValue(network clusterconfig.ServiceNetwork, providerKind string) 
 	}
 	storage := `NETSY_BUCKET = aws_s3_bucket.podplane_cluster["netsy"].bucket
   NETSY_ASSUME_ROLE = aws_iam_role.podplane_cluster["netsy"].arn
-  REGISTRY_BUCKET = aws_s3_bucket.podplane_cluster["registry"].bucket
   REGISTRY_ASSUME_ROLE = aws_iam_role.podplane_cluster["registry-read-only"].arn`
 	if providerKind == "google" {
-		storage = `NETSY_BUCKET = google_storage_bucket.podplane_cluster["netsy"].name
-  REGISTRY_BUCKET = google_storage_bucket.podplane_cluster["registry"].name`
+		storage = `NETSY_BUCKET = google_storage_bucket.podplane_cluster["netsy"].name`
 	}
-	return expr(`{ for key, value in {
+	return expr(`merge(local.host_env, { for key, value in {
   ` + storage + `
-  TELEMETRY_S3_REGION = local.provider_region
   NETSY_REGION = local.provider_region
-  REGISTRY_REGION = local.provider_region
   OIDC_ISSUER = var.oidc_issuer_url
   OIDC_USERNAME_CLAIM = local.oidc_username_claim
   OIDC_SIGNING_ALGS = var.oidc_signing_algs == null ? null : join(",", var.oidc_signing_algs)
@@ -729,14 +791,6 @@ func mutableEnvValue(network clusterconfig.ServiceNetwork, providerKind string) 
   KUBE_CLUSTER_CIDR = join(",", var.kubernetes_cluster_cidr)
   KUBE_SERVICE_CLUSTER_IP_RANGE = join(",", var.kubernetes_service_cidr)
   KUBE_CLUSTER_DNS = ` + quote(strings.Join(dns, ",")) + `
-  SSH_AUTHORIZED_KEYS = var.ssh_authorized_keys
-  TELEMETRY_ENABLED = var.telemetry_enabled == null ? null : tostring(var.telemetry_enabled)
-  TELEMETRY_LOG_CLOUDINIT = var.telemetry_log_cloudinit == null ? null : tostring(var.telemetry_log_cloudinit)
-  TELEMETRY_LOG_SERVICES = var.telemetry_log_services
-  TELEMETRY_OTLP_ENDPOINT = var.telemetry_otlp_endpoint
-  TELEMETRY_S3_BUCKET = var.telemetry_s3_bucket
-  TELEMETRY_S3_ENDPOINT = var.telemetry_s3_endpoint
-  TELEMETRY_S3_ASSUME_ROLE = var.telemetry_s3_assume_role
   TELEMETRY_S3_ACCESS_KEY_ID = var.telemetry_s3_access_key_id
   TELEMETRY_S3_SECRET_ACCESS_KEY = var.telemetry_s3_secret_access_key
   OIDC_CA_CERT = var.oidc_ca_cert
@@ -744,16 +798,12 @@ func mutableEnvValue(network clusterconfig.ServiceNetwork, providerKind string) 
   KUBE_LOG_LEVEL = var.kube_log_level == null ? null : tostring(var.kube_log_level)
   KUBE_NODE_CIDR_MASK_SIZE_IPV4 = var.kubernetes_node_cidr_mask_size_ipv4 == null ? null : tostring(var.kubernetes_node_cidr_mask_size_ipv4)
   KUBE_NODE_CIDR_MASK_SIZE_IPV6 = var.kubernetes_node_cidr_mask_size_ipv6 == null ? null : tostring(var.kubernetes_node_cidr_mask_size_ipv6)
-  AWS_S3_USE_PATH_STYLE = var.aws_s3_use_path_style
   NETSY_ENDPOINT = var.netsy_endpoint
   NETSY_ACCESS_KEY_ID = var.netsy_access_key_id
   NETSY_SECRET_ACCESS_KEY = var.netsy_secret_access_key
-  REGISTRY_ENABLED = var.registry_enabled == null ? null : tostring(var.registry_enabled)
-  REGISTRY_ENDPOINT = var.registry_endpoint
   REGISTRY_ACCESS_KEY_ID = var.registry_access_key_id
   REGISTRY_SECRET_ACCESS_KEY = var.registry_secret_access_key
-  REGISTRY_HOSTNAME = var.registry_hostname
-} : key => value if value != null }`)
+} : key => value if value != null })`)
 }
 
 // subnetsValue converts provider zones into the network module subnets object.

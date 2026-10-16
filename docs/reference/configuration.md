@@ -242,7 +242,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.nat.tenants.default` | NAT deployment group and instance type ladder for the default Kubernetes tenant. Timing and utilization thresholds use Nstance defaults. |
 | `cluster.nat.tenants.default.group` | Name of the NAT deployment group. |
 | `cluster.nat.tenants.default.instance_type_ladder` | Ordered, unique scaling choices; must include the group's starting instance type. |
-| `cluster.nat.fixed_public_ipv4_count` | Optional number of fixed public IPv4 addresses to reserve per zone. Defaults to `0`. |
+| `cluster.nat.fixed_public_ipv4_count` | Number of static public IPv4 addresses to reserve for each NAT subnet when using Nstance-managed NAT. Defaults to `0`. |
 | `cluster.kubernetes.api_hostname` | Required Kubernetes API hostname used by kubeconfig and the API server certificate. |
 | `cluster.spiffe.trust_domain` | Required immutable SPIFFE trust domain for workload certificates. New clusters persist the initial `cluster.kubernetes.api_hostname`; existing clusters must explicitly add a valid value before upgrading infrastructure or enabling the operator. It allows only lowercase ASCII letters, digits, `.`, `-`, and `_`, up to 255 bytes. |
 | `cluster.kubernetes.api_port` | External Kubernetes API port. Defaults to `6443` for NLB; tunnels require `443`. |

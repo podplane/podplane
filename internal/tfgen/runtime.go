@@ -56,12 +56,10 @@ func serverArch(provider clusterconfig.Provider) string {
 func serverEnvValue(cfg *clusterconfig.ClusterConfig, zone string) hclValue {
 	provider := cfg.Cluster.Providers[0]
 	storage := "s3"
-	registry := `aws_s3_bucket.podplane_cluster["registry"].bucket`
 	if provider.Kind == "google" {
 		storage = "gcs"
-		registry = `google_storage_bucket.podplane_cluster["registry"].name`
 	}
-	return object(
+	settings := object(
 		field("CLUSTER_ID", expr("local.cluster_id")),
 		field("PROVIDER_REGION", expr("local.provider_region")),
 		field("PROVIDER_ZONE", str(zone)),
@@ -75,11 +73,8 @@ func serverEnvValue(cfg *clusterconfig.ClusterConfig, zone string) hclValue {
 		field("NSTANCE_TUNNEL_BUCKET", expr("module.cluster.bucket")),
 		field("NSTANCE_TUNNEL_SHARD", str(zone)),
 		field("NSTANCE_TUNNEL_PREFIX", str("shard/"+zone+"/")),
-		field("REGISTRY_ENABLED", str("true")),
-		field("REGISTRY_BUCKET", expr(registry)),
-		field("REGISTRY_REGION", expr("local.provider_region")),
-		field("REGISTRY_HOSTNAME", expr("var.registry_hostname")),
 	)
+	return expr("merge(local.host_env, " + settings.renderHCL(0) + ")")
 }
 
 // activityPorts returns the ports monitored for activity when deciding whether a pool can sleep.
@@ -371,7 +366,7 @@ func seedValues(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provide
 	if provider.Kind == "aws" {
 		values = append(values, field("zot-registry", expr(`{
   platform = { zotRegistry = { storage = { bucket = aws_s3_bucket.podplane_cluster["registry"].bucket, region = local.aws_region } } }
-  zot = { serviceAccount = { annotations = { "eks.amazonaws.com/role-arn" = aws_iam_role.podplane_cluster["registry-read-write"].arn } } }
+  zot = { podAnnotations = { "iam.amazonaws.com/role" = aws_iam_role.podplane_cluster["registry-read-write"].arn } }
 }`)))
 	}
 	if provider.Kind == "google" {
@@ -379,5 +374,11 @@ func seedValues(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provide
   platform = { zotRegistry = { storage = { driver = "gcs", bucket = google_storage_bucket.podplane_cluster["registry"].name } } }
 }`)))
 	}
-	return expr("yamlencode(" + object(identField("platform", object(identField("components", object(identField("values", object(values...))))))).renderHCL(0) + ")")
+	components := object(identField("values", object(values...)))
+	if provider.Kind == "aws" {
+		components = append(components, identField("apps", expr(`{
+  "zot-registry" = { namespaceAnnotations = { "iam.amazonaws.com/allowed-roles" = jsonencode([aws_iam_role.podplane_cluster["registry-read-write"].arn]) } }
+}`)))
+	}
+	return expr("yamlencode(" + object(identField("platform", object(identField("components", components)))).renderHCL(0) + ")")
 }

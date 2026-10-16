@@ -1,3 +1,5 @@
+# Cloud permissions for cluster storage and secrets, including ingress certificates where needed.
+
 locals {
   roles = {
     "netsy" = {
@@ -54,6 +56,12 @@ resource "aws_iam_role_policy" "podplane_cluster" {
   name = "${local.name_prefix}-${each.key}-policy"
   role = aws_iam_role.podplane_cluster[each.key].id
   policy = data.aws_iam_policy_document.podplane_cluster[each.key].json
+}
+
+resource "aws_iam_role_policy" "podplane_server_registry" {
+  name = "${local.name_prefix}-server-registry-read-only"
+  role = basename(module.account_123456789012_us_east_1.server_iam_role_arn)
+  policy = data.aws_iam_policy_document.podplane_cluster["registry-read-only"].json
 }
 
 data "aws_iam_policy_document" "podplane_knc" {
