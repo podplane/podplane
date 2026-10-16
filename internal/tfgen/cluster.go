@@ -211,8 +211,8 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 	}
 	runtimeInputsDoc.header = []string{
 		"Runtime configuration inputs. Changes reconfigure agent-managed VMs without replacement.",
-		"Shared SSH, telemetry, and registry settings also provision NST VMs; changing them rolls those VMs.",
-		"Static access keys apply only to agent-managed VMs; NST uses its VM role credentials.",
+		"Shared SSH, telemetry, and registry settings also provision nst VMs; changing them rolls those VMs.",
+		"Static access keys apply only to agent-managed VMs; nst uses its VM role credentials.",
 	}
 	vmInputsDoc.header = []string{
 		"VM infrastructure inputs. Changes reconcile VM counts or trigger rolling VM replacement.",
@@ -660,11 +660,11 @@ func addWorkloadCAKey(doc *hclDocument, cfg *clusterconfig.ClusterConfig, infras
 	resource.Body.Attr("key_prefix", str(prefix))
 	switch {
 	case provider.Kind == "aws" && provider.ObjectType == "secretsmanager":
-		resource.Body.Attr("provider", str("aws_secrets_manager"))
+		resource.Body.Attr("secrets_provider", str("aws_secrets_manager"))
 	case provider.Kind == "aws" && provider.ObjectType == "ssmparameter":
-		resource.Body.Attr("provider", str("aws_ssm"))
+		resource.Body.Attr("secrets_provider", str("aws_ssm"))
 	case provider.Kind == "gcp":
-		resource.Body.Attr("provider", str("gcp_secret_manager"))
+		resource.Body.Attr("secrets_provider", str("gcp_secret_manager"))
 		resource.Body.Attr("project", str(provider.ProjectID))
 	}
 	if provider.Kind == "aws" {

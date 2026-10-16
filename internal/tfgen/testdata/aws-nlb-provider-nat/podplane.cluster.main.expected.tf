@@ -218,7 +218,7 @@ module "shard_us_east_1a" {
 
 resource "podplane_workload_ca_key" "cluster" {
   key_prefix = "test-cluster"
-  provider = "aws_secrets_manager"
+  secrets_provider = "aws_secrets_manager"
   region = "us-east-1"
   depends_on = [module.cluster]
 }

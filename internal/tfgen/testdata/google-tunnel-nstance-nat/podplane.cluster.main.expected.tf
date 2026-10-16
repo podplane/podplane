@@ -331,7 +331,7 @@ module "shard_us_central1_a" {
 
 resource "podplane_workload_ca_key" "cluster" {
   key_prefix = "test-cluster"
-  provider = "gcp_secret_manager"
+  secrets_provider = "gcp_secret_manager"
   project = "test-project"
   depends_on = [module.cluster]
 }
