@@ -129,7 +129,8 @@ kubectl get namespaces -l runtime.podplane.dev/runc=allowed
 ```
 
 Rejected Pods appear as a `FailedCreate` event and a `ReplicaFailure` condition
-on the Deployment:
+on the Deployment. `podplane deploy` explains these rejections when a deploy
+times out; for other workloads, check the Deployment:
 
 ```sh
 kubectl describe deployment <name>

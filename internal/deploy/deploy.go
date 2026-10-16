@@ -63,7 +63,8 @@ func Run(opts Options) error {
 		return runHelm(helmUpgradeInstallArgs(opts, valuesPath))
 	})
 	if err != nil && opts.Wait {
-		// Helm only reports a readiness timeout; explain Pod Security failures.
+		// Helm only reports a readiness timeout; explain Pod Security and
+		// runtime failures.
 		target := AppTargetOptions{Name: opts.Name, Namespace: opts.Namespace, Context: opts.Context, Kubeconfig: opts.Kubeconfig}
 		if problems := podSecurityProblems(target); len(problems) > 0 {
 			return fmt.Errorf("%s\n%w", strings.Join(problems, "\n"), err)

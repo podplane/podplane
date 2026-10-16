@@ -225,7 +225,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		`source = "podplane/podplane"`,
 		`resource "podplane_netsy_seed_s3" "cluster"`,
 		`resource "podplane_workload_ca_key" "cluster"`,
-		`secrets_provider = "aws_secrets_manager"`,
+		`secrets_provider = "aws-secrets-manager"`,
 		`key_prefix = "test-cluster"`,
 		`depends_on = [podplane_workload_ca_key.cluster, aws_iam_role_policy.podplane_workload_ca_key]`,
 		`cluster_config_path = "${path.module}/podplane.cluster.jsonc"`,
@@ -506,7 +506,7 @@ func TestGenerateAWSClusterTerraformWithoutSeed(t *testing.T) {
 	if strings.Contains(got, `resource "podplane_netsy_seed_s3" "cluster"`) {
 		t.Fatalf("generated cluster tf unexpectedly contains seed resource:\n%s", got)
 	}
-	if !strings.Contains(got, `resource "podplane_workload_ca_key" "cluster"`) || !strings.Contains(got, `secrets_provider = "aws_ssm"`) {
+	if !strings.Contains(got, `resource "podplane_workload_ca_key" "cluster"`) || !strings.Contains(got, `secrets_provider = "aws-parameter-store"`) {
 		t.Fatalf("bare cluster must provision the workload CA key:\n%s", got)
 	}
 	roles := fileContents(files)["podplane.cluster.roles.tf"]

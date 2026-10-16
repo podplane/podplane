@@ -315,9 +315,9 @@ func addTunnelCAFiles(doc *hclDocument, provider clusterconfig.Provider) {
 
 // addNstanceBootstrap orders metadata-only registration-key creation before seed bootstrap.
 func addNstanceBootstrap(doc *hclDocument, seed *hclBlock, provider clusterconfig.Provider, prefix string) {
-	secretProvider := "aws_ssm"
+	secretProvider := "aws-parameter-store"
 	if provider.Kind == "google" {
-		secretProvider = "gcp_secret_manager"
+		secretProvider = "google-secret-manager"
 	}
 	key := block("resource", "podplane_nstance_registration_key", "cluster")
 	key.Body.Attr("secrets_provider", str(secretProvider))

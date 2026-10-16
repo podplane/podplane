@@ -13,8 +13,8 @@ import (
 )
 
 // podSecurityProblems explains why an app's Pods were rejected or could not
-// start because of Pod Security settings. It returns nil when it finds none
-// or cannot read the app's state.
+// start because of Pod Security or container runtime settings. It returns nil
+// when it finds none or cannot read the app's state.
 func podSecurityProblems(target AppTargetOptions) []string {
 	args := kubectlContextArgs(target)
 	args = append(args, "get", "deployments,pods", "-l", appSelector(target.Name), "-o", "json")
@@ -61,9 +61,16 @@ func podSecurityProblemsFromList(data []byte) []string {
 		case "Deployment":
 			// The ReplicaSet controller reports admission rejections here.
 			for _, condition := range item.Status.Conditions {
-				if condition.Type == "ReplicaFailure" && condition.Status == "True" && strings.Contains(condition.Message, "violates PodSecurity") {
+				if condition.Type != "ReplicaFailure" || condition.Status != "True" {
+					continue
+				}
+				switch {
+				case strings.Contains(condition.Message, "violates PodSecurity"):
 					add("Pod Security rejected the app's Pods: " + condition.Message + "\n" +
 						"Remove the disallowed setting, or ask a cluster admin to label the namespace with a less strict pod-security.kubernetes.io/enforce level.")
+				case strings.Contains(condition.Message, "runtime.podplane.dev/runc=allowed"):
+					add("The namespace does not allow the runc runtime: " + condition.Message + "\n" +
+						"Deploy without --set runtimeClassName=runc to use gVisor, or ask a cluster admin to allow runc in the namespace.")
 				}
 			}
 		case "Pod":

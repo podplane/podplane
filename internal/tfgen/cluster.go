@@ -660,11 +660,11 @@ func addWorkloadCAKey(doc *hclDocument, cfg *clusterconfig.ClusterConfig, infras
 	resource.Body.Attr("key_prefix", str(prefix))
 	switch {
 	case provider.Kind == "aws" && provider.ObjectType == "secretsmanager":
-		resource.Body.Attr("secrets_provider", str("aws_secrets_manager"))
+		resource.Body.Attr("secrets_provider", str("aws-secrets-manager"))
 	case provider.Kind == "aws" && provider.ObjectType == "ssmparameter":
-		resource.Body.Attr("secrets_provider", str("aws_ssm"))
+		resource.Body.Attr("secrets_provider", str("aws-parameter-store"))
 	case provider.Kind == "gcp":
-		resource.Body.Attr("secrets_provider", str("gcp_secret_manager"))
+		resource.Body.Attr("secrets_provider", str("google-secret-manager"))
 		resource.Body.Attr("project", str(provider.ProjectID))
 	}
 	if provider.Kind == "aws" {

@@ -331,13 +331,13 @@ module "shard_us_central1_a" {
 
 resource "podplane_workload_ca_key" "cluster" {
   key_prefix = "test-cluster"
-  secrets_provider = "gcp_secret_manager"
+  secrets_provider = "google-secret-manager"
   project = "test-project"
   depends_on = [module.cluster]
 }
 
 resource "podplane_nstance_registration_key" "cluster" {
-  secrets_provider = "gcp_secret_manager"
+  secrets_provider = "google-secret-manager"
   secret_prefix = "test-cluster-"
   project = local.provider_project
   depends_on = [module.cluster]
@@ -369,7 +369,7 @@ resource "podplane_netsy_seed_gcs" "cluster" {
     }
   })
   nstance_bootstrap = {
-    provider = "gcp_secret_manager"
+    provider = "google-secret-manager"
     secret_prefix = "test-cluster-"
     signing_key_id = podplane_nstance_registration_key.cluster.id
     signing_key_version = podplane_nstance_registration_key.cluster.backend_version

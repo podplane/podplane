@@ -16,6 +16,9 @@ func TestPodSecurityProblemsFromList(t *testing.T) {
 	    {"type": "Available", "status": "False", "message": "Deployment does not have minimum availability."},
 	    {"type": "ReplicaFailure", "status": "True", "reason": "FailedCreate",
 	     "message": "pods \"api-7d9c-x2x\" is forbidden: violates PodSecurity \"baseline:latest\": hostPath volumes (volume \"h\")"}]}},
+	  {"kind": "Deployment", "metadata": {"name": "native"}, "status": {"conditions": [
+	    {"type": "ReplicaFailure", "status": "True", "reason": "FailedCreate",
+	     "message": "pods \"native-5c4d-x\" is forbidden: ValidatingAdmissionPolicy 'platform-runtime-class-vap' with binding 'platform-runtime-class-vapb' denied request: RuntimeClass \"runc\" requires namespace \"team-a\" to have the label runtime.podplane.dev/runc=allowed, which only a cluster administrator can grant. Otherwise set runtimeClassName to \"gvisor\", which is also the default outside platform runc namespaces."}]}},
 	  {"kind": "Deployment", "metadata": {"name": "quota"}, "status": {"conditions": [
 	    {"type": "ReplicaFailure", "status": "True", "reason": "FailedCreate",
 	     "message": "pods \"quota-1\" is forbidden: exceeded quota: compute"}]}},
@@ -35,6 +38,7 @@ func TestPodSecurityProblemsFromList(t *testing.T) {
 	problems := podSecurityProblemsFromList([]byte(list))
 	want := []string{
 		`violates PodSecurity "baseline:latest": hostPath volumes`,
+		`The namespace does not allow the runc runtime: pods "native-5c4d-x" is forbidden`,
 		`Container "migrate" cannot start: its image sets a non-numeric USER`,
 		`Container "api-container" cannot start: its image runs as root`,
 	}
@@ -46,7 +50,10 @@ func TestPodSecurityProblemsFromList(t *testing.T) {
 			t.Errorf("problem %d = %q, want it to contain %q", i, problems[i], fragment)
 		}
 	}
-	if !strings.Contains(problems[2], "--set podSecurityContext.runAsNonRoot=false") {
-		t.Errorf("root image problem should explain the opt-out: %q", problems[2])
+	if !strings.Contains(problems[1], "Deploy without --set runtimeClassName=runc") {
+		t.Errorf("runc problem should explain how to use gVisor: %q", problems[1])
+	}
+	if !strings.Contains(problems[3], "--set podSecurityContext.runAsNonRoot=false") {
+		t.Errorf("root image problem should explain the opt-out: %q", problems[3])
 	}
 }

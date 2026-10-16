@@ -218,13 +218,13 @@ module "shard_us_east_1a" {
 
 resource "podplane_workload_ca_key" "cluster" {
   key_prefix = "test-cluster"
-  secrets_provider = "aws_secrets_manager"
+  secrets_provider = "aws-secrets-manager"
   region = "us-east-1"
   depends_on = [module.cluster]
 }
 
 resource "podplane_nstance_registration_key" "cluster" {
-  secrets_provider = "aws_ssm"
+  secrets_provider = "aws-parameter-store"
   secret_prefix = "/test-cluster/"
   region = local.provider_region
   depends_on = [module.cluster]
@@ -260,7 +260,7 @@ resource "podplane_netsy_seed_s3" "cluster" {
     }
   })
   nstance_bootstrap = {
-    provider = "aws_ssm"
+    provider = "aws-parameter-store"
     secret_prefix = "/test-cluster/"
     signing_key_id = podplane_nstance_registration_key.cluster.id
     signing_key_version = podplane_nstance_registration_key.cluster.backend_version
