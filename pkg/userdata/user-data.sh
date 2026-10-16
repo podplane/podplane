@@ -191,7 +191,7 @@ fi
 
 log "Running install.sh..."
 chmod +x /opt/podplane/bin/install.sh
-/opt/podplane/bin/install.sh
+PROVIDER_KIND='{{.Provider.Kind}}' /opt/podplane/bin/install.sh
 
 # --- 10. Run configure.sh ---------------------------------------------------
 {{if eq .Manifest.VMConfig.Kind "nst" -}}

@@ -135,8 +135,8 @@ func TestRender_Local_HasDebianPasswordLine(t *testing.T) {
 		t.Errorf("expected nstance registration nonce to be written directly to nonce.jwt; got:\n%s", out)
 	}
 	// install.sh and configure.sh invoked
-	if !strings.Contains(out, "/opt/podplane/bin/install.sh") {
-		t.Errorf("expected install.sh invocation; got:\n%s", out)
+	if !strings.Contains(out, "\nPROVIDER_KIND='local' /opt/podplane/bin/install.sh\n") {
+		t.Errorf("expected install.sh invocation with explicit local provider; got:\n%s", out)
 	}
 	if !strings.Contains(out, "/opt/podplane/bin/configure.sh") {
 		t.Errorf("expected configure.sh invocation; got:\n%s", out)
@@ -170,6 +170,9 @@ func TestRender_AWS_NoDebianPasswordLine(t *testing.T) {
 	}
 	if strings.Contains(out, "Local provider VM preparation") {
 		t.Errorf("did not expect local provider preparation for aws provider; got:\n%s", out)
+	}
+	if !strings.Contains(out, "\nPROVIDER_KIND='aws' /opt/podplane/bin/install.sh\n") {
+		t.Errorf("expected install.sh invocation with explicit AWS provider; got:\n%s", out)
 	}
 	if strings.Contains(out, "/opt/podplane/bin/configure.sh false") {
 		t.Errorf("did not expect aws user-data to suppress service restarts; got:\n%s", out)
