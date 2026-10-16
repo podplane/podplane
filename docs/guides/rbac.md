@@ -78,7 +78,9 @@ beginning with `trusted:`.
 ## Implementation
 
 The `platform-rbac` [component](../reference/components.md) installs the
-`podplane:admins` ClusterRoleBinding and the admission policies.
+`podplane:admins` ClusterRoleBinding and the admission policies. Only admins can
+allow a namespace to use the runc container runtime; see
+[Container Runtimes](container-runtimes.md).
 
 The `podplane-operator` component keeps a RoleBinding for each other group in
 every tenant namespace that is not restricted. It manages only RoleBindings

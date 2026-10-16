@@ -36,6 +36,8 @@ Both templates run Pods with restricted [Pod Security](../guides/pod-security.md
 
 If your image must run as root, opt out with `--set podSecurityContext.runAsNonRoot=false`. If `podplane deploy` times out because of these settings, it explains which container could not start and how to fix it.
 
+Both templates run in gVisor by default. Set `--set runtimeClassName=runc` only in a namespace an admin has allowed to use runc; see [Container Runtimes](../guides/container-runtimes.md).
+
 ## `web`
 
 The `web` template deploys a web application with ingress routing and two separate TLS layers. Envoy Gateway terminates browser-facing ingress TLS, while the web Pod uses an operator-signed Service certificate for encrypted gateway-to-workload traffic.
@@ -72,6 +74,7 @@ Template-specific values can be set with `--set` e.g.:
 | `route.hostname` | `""` | External hostname for routing; `--hostname` maps here |
 | `route.path` | `/` | URL path prefix for routing; `--path` maps here |
 | `route.port` | `443` | External HTTPS port for the browser-facing route URL |
+| `runtimeClassName` | `gvisor` | Pod runtime: `gvisor` or `runc` |
 | `certificates.server` | `sidecar` | Terminate service TLS in the Envoy `sidecar` or `direct` in the app |
 | `certificates.client` | `false` | Project a ServiceAccount SPIFFE identity and workload trust bundle |
 | `podSecurityContext` | non-root, `RuntimeDefault` seccomp, `fsGroup: 65532` | Pod security context |
@@ -81,10 +84,11 @@ Kubernetes projects the serving key and certificate chain together at
 `/var/run/secrets/podplane/server-certificate/credential-bundle.pem`. The
 Podplane signer authorizes the chart's selecting Service and issues its four
 cluster DNS names. Kubelet projects the certificate directly, without creating
-a Kubernetes TLS Secret. In sidecar mode, Envoy's filesystem SDS watches the
-projected directory and reloads valid rotations without restarting the Pod. In
-direct mode the app reads the same bundle and must reload it after atomic
-rotation.
+a Kubernetes TLS Secret. In sidecar mode, Envoy reloads valid rotations without
+restarting the Pod. Under gVisor, a small reloader sidecar polls the certificate
+and signals Envoy, because gVisor doesn't report kubelet's updates to file
+watchers. In direct mode the app reads the same bundle and must reload it after
+atomic rotation, by polling the file under gVisor.
 
 When `certificates.client=true`, the app receives a separate SPIFFE credential
 at `/var/run/secrets/podplane/client-certificate/credential-bundle.pem` and the
@@ -140,7 +144,7 @@ This is suitable for queue consumers, cron-like processors, or any workload that
 
 ### Template values
 
-Use [`podplane deploy`](cli/commands/deploy.md) flags for universal inputs such as worker name, optional image override, and environment variables. Worker-specific configuration should be exposed as schema-backed template values and set with `--set`.
+Use [`podplane deploy`](cli/commands/deploy.md) flags for universal inputs such as worker name, optional image override, and environment variables. Worker-specific configuration should be exposed as schema-backed template values and set with `--set`, such as `runtimeClassName` (`gvisor` by default, or `runc`).
 
 Set `certificates.client=true` to project the worker's SPIFFE credential and
 workload trust bundle at

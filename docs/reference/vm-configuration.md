@@ -62,6 +62,7 @@ __Data Plane & Control Plane VMs__:
 - [kube2iam](https://github.com/jtblin/kube2iam) for providing IAM Roles to pods
 - [containerd](https://containerd.io/docs/main/) the container runtime 
 - [runc](https://github.com/opencontainers/runc) for containerd to spawn OCI containers
+- [gVisor](https://gvisor.dev/) the sandboxed runtime Pods use by default (`knd` and `knc` only; `nst` runs only runc)
 - [kubelet](https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/) for running node pods
   - [uidmap](https://packages.debian.org/sid/uidmap) runtime dependency of kubelet for getsubids
   - [libsubid5](https://packages.debian.org/trixie/libsubid5) runtime dependency of kubelet for getsubids

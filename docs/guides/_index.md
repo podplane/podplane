@@ -18,8 +18,9 @@ Follow each guide in order, or jump directly to the task you need:
 6. [Set up team and CI access](team-and-ci-access.md) with OIDC authentication for people and automation.
 7. [Role-based Access Control](rbac.md) explains Podplane's default groups and Kubernetes permissions.
 8. [Pod Security](pod-security.md) explains Podplane's secure Pod defaults and how to relax them.
-9. [Operate and upgrade a cluster](operations.md) safely over time.
-10. [Plan your infrastructure topology](topologies.md) as you add production, staging, CI/CD, and observability environments.
+9. [Container Runtimes](container-runtimes.md) explains how Pods run in gVisor by default, and when to use runc.
+10. [Operate and upgrade a cluster](operations.md) safely over time.
+11. [Plan your infrastructure topology](topologies.md) as you add production, staging, CI/CD, and observability environments.
 
 For a concise overview of what Podplane provides, see [Features](../features/_index.md).
 

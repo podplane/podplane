@@ -8,6 +8,7 @@ Podplane is designed to make deploying a secure container platform easy, with th
 
 - [Container Registry](container-registry.md) stores app and mirrored platform images in object storage for use in your cluster.
 - [Secrets Management](secrets-management.md) stores encrypted secrets in your preferred backend and securely mount them into workloads.
+- [Sandboxed Workloads](sandboxed-workloads.md) run every Pod in its own gVisor sandbox by default, with runc available where an admin allows it.
 - [Workload Certificates](workload-certificates.md) automatically generates and rotates server certificates and SPIFFE SVID client certificates directly in Pods.
 - [Ingress Certificates](ingress-certificates.md) automatically generates and rotates wildcard certificates for your ingress domains with ACME e.g. Let's Encrypt.
 - [Deployment Templates](deployment-templates.md) make it easy to deploy common workload types with one command and an opinionated Helm chart.

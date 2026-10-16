@@ -62,6 +62,10 @@ Pod runs there with host networking.
 Only admins can create `kube-*` and `platform-*` namespaces or change namespace
 labels, so other groups cannot use these levels. See [RBAC](rbac.md).
 
+A namespace's Pod Security level doesn't choose its Pods' runtime: a
+`privileged` namespace still runs Pods in gVisor unless an admin also allows
+runc. See [Container Runtimes](container-runtimes.md).
+
 ## Relaxing the Defaults
 
 ### Images that run as root
@@ -108,6 +112,9 @@ kubectl label namespace monitoring pod-security.kubernetes.io/enforce=privileged
 
 Keep such namespaces separate from application namespaces. Anyone who can
 create Pods in a `privileged` namespace can gain control of its nodes.
+
+Pods that use host networking or the node's Unix sockets also need runc, which
+an admin allows separately. See [Container Runtimes](container-runtimes.md).
 
 ### Stricter namespaces
 

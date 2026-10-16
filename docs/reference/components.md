@@ -20,7 +20,7 @@ During cluster creation, users are given three initial state options to choose f
 
 2. __Minimal__ - deploys just the Core Components. From there, users can manually install Components using `podplane install` as required.
 
-3. __None__ - does not install any Podplane Components, meaning you get a bare Kubernetes cluster and Nodes will be `NotReady` until a CNI is installed and they can become `Ready` and able to schedule Pods. For advanced users only.
+3. __None__ - does not install any Podplane Components, meaning you get a bare Kubernetes cluster and Nodes will be `NotReady` until a CNI is installed and they can become `Ready` and able to schedule Pods. Pods run under runc, without Podplane's [runtime policies](../guides/container-runtimes.md), until components are installed. For advanced users only.
 
 Components are deployed with an opinionated, tested configuration - not the full surface area of each component's underlying official Helm chart.
 
@@ -36,6 +36,7 @@ The current component charts require Kubernetes 1.37 or later. This is also the 
 - `gateway-api-crds` for ingress controllers using Gateway API
 - `platform-components` for Podplane component management. This chart creates the Flux source, platform namespaces, and HelmReleases for enabled components.
 - `platform-rbac` for default Podplane platform [RBAC](../guides/rbac.md) and admission policies
+- `platform-runtime` for the `gvisor` and `runc` RuntimeClasses and the policies that run Pods in gVisor by default; see [Container Runtimes](../guides/container-runtimes.md)
 
 ### Provider-Specific Components
 
