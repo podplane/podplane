@@ -10,7 +10,7 @@ terraform {
     }
     podplane = {
       source = "podplane/podplane"
-      version = ">= 1.3.0"
+      version = ">= 0.0.0"
     }
   }
 }

@@ -118,9 +118,17 @@ func (c *CLI) Destroy(ctx context.Context, dir string, autoApprove bool) error {
 
 // OutputJSON runs OpenTofu/Terraform output -json in dir.
 func (c *CLI) OutputJSON(ctx context.Context, dir string) ([]byte, error) {
+	config, cleanup, err := c.commandConfig()
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
 	cmd := exec.CommandContext(ctx, c.binary, "output", "-json")
 	cmd.Dir = dir
 	cmd.Stderr = os.Stderr
+	if config != "" {
+		cmd.Env = append(withoutEnv(os.Environ(), "TF_CLI_CONFIG_FILE"), "TF_CLI_CONFIG_FILE="+config)
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("run OpenTofu/Terraform output -json in %s: %w", dir, err)
@@ -130,11 +138,16 @@ func (c *CLI) OutputJSON(ctx context.Context, dir string) ([]byte, error) {
 
 // run invokes the configured executable with args in dir.
 func (c *CLI) run(ctx context.Context, dir string, args ...string) error {
+	config, cleanup, err := c.commandConfig()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	cmd := exec.CommandContext(ctx, c.binary, args...)
 	cmd.Dir = dir
-	if c.cliConfigFile != "" {
+	if config != "" {
 		cmd.Env = withoutEnv(os.Environ(), "TF_CLI_CONFIG_FILE")
-		cmd.Env = append(cmd.Env, "TF_CLI_CONFIG_FILE="+c.cliConfigFile)
+		cmd.Env = append(cmd.Env, "TF_CLI_CONFIG_FILE="+config)
 	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

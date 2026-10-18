@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/podplane/podplane/internal/buildvars"
 )
 
 // fakeEngine simulates module resolution and provider mirroring while recording requests.
@@ -18,6 +20,7 @@ type fakeEngine struct {
 	platforms       []string
 	moduleVersion   string
 	providerVersion string
+	podplaneVersion string
 	roots           []string
 }
 
@@ -59,7 +62,22 @@ func (e *fakeEngine) InitBackendDisabled(_ context.Context, dir string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return writeFakeLock(filepath.Join(dir, lockFileName), e.providerVersion)
+	if err := writeFakeLock(filepath.Join(dir, lockFileName), e.providerVersion); err != nil {
+		return err
+	}
+	if e.podplaneVersion != "" {
+		file, err := os.OpenFile(filepath.Join(dir, lockFileName), os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		_, err = file.WriteString("provider \"registry.terraform.io/podplane/podplane\" {\n version = \"" + e.podplaneVersion + "\"\n hashes = []\n}\n")
+		closeErr := file.Close()
+		if err != nil {
+			return err
+		}
+		return closeErr
+	}
+	return nil
 }
 
 // ProvidersMirror writes fake provider packages for one platform.
@@ -69,14 +87,18 @@ func (e *fakeEngine) ProvidersMirror(_ context.Context, dir, mirrorDir, platform
 	if err != nil {
 		return err
 	}
-	provider := providers[0]
-	parts := strings.Split(provider.address, "/")
-	providerDir := filepath.Join(mirrorDir, parts[0], parts[1], parts[2])
-	if err := os.MkdirAll(providerDir, 0o755); err != nil {
-		return err
+	for _, provider := range providers {
+		parts := strings.Split(provider.address, "/")
+		providerDir := filepath.Join(mirrorDir, parts[0], parts[1], parts[2])
+		if err := os.MkdirAll(providerDir, 0o755); err != nil {
+			return err
+		}
+		name := "terraform-provider-" + parts[2] + "_" + provider.version + "_" + platform + ".zip"
+		if err := os.WriteFile(filepath.Join(providerDir, name), []byte(platform), 0o644); err != nil {
+			return err
+		}
 	}
-	name := "terraform-provider-" + parts[2] + "_" + provider.version + "_" + platform + ".zip"
-	return os.WriteFile(filepath.Join(providerDir, name), []byte(platform), 0o644)
+	return nil
 }
 
 // ProvidersLock accepts the fake mirror's existing lock data.
@@ -361,5 +383,55 @@ func TestDownloadRejectsInvalidPlatform(t *testing.T) {
 	err := New(t.TempDir()).Download(context.Background(), &fakeEngine{}, []string{"linux/amd64"})
 	if err == nil || !strings.Contains(err.Error(), "expected OS_ARCH") {
 		t.Fatalf("Download error = %v", err)
+	}
+}
+
+// TestReleaseProviderSelection runs in CI with a release version injected. It
+// checks regeneration of new-stack caches without silently upgrading old stacks.
+func TestReleaseProviderSelection(t *testing.T) {
+	if buildvars.BuildVersion() != "v0.10.2" {
+		t.Skip("run with -ldflags '-X github.com/podplane/podplane/internal/buildvars.buildVersion=v0.10.2'")
+	}
+	cache := New(t.TempDir())
+	engine := &fakeEngine{podplaneVersion: "1.109.8"}
+	if err := cache.Download(context.Background(), engine, nil); err != nil {
+		t.Fatal(err)
+	}
+	oldStack := t.TempDir()
+	oldMain := "module \"cluster\" {\n source = \"../../cache/tf/modules/nstance/2.0.1/modules/cluster\"\n}\n"
+	if err := os.WriteFile(filepath.Join(oldStack, clusterMainFile), []byte(oldMain), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldLock, err := os.ReadFile(filepath.Join(cache.root, lockFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldStack, lockFileName), oldLock, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.Ensure(context.Background(), engine, oldStack, "aws"); err == nil || !strings.Contains(err.Error(), "cluster upgrade") {
+		t.Fatalf("old stack was silently upgraded: %v", err)
+	}
+	engine.podplaneVersion = "1.110.2"
+	newStack := t.TempDir()
+	if _, err := cache.Ensure(context.Background(), engine, newStack, "aws"); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.ReadFile(filepath.Join(newStack, lockFileName))
+	if err != nil || !strings.Contains(string(lock), `version = "1.110.2"`) {
+		t.Fatalf("new stack reused stale provider lock: %s, %v", lock, err)
+	}
+	if !strings.Contains(engine.roots[len(engine.roots)-1], `version = "= 1.110.2"`) {
+		t.Fatal("dependency root did not request the coordinated provider")
+	}
+	if _, err := cache.Upgrade(context.Background(), engine, oldStack, "aws"); err != nil {
+		t.Fatal(err)
+	}
+	lock, err = os.ReadFile(filepath.Join(oldStack, lockFileName))
+	if err != nil || !strings.Contains(string(lock), `version = "1.110.2"`) {
+		t.Fatalf("explicit upgrade failed to update lock: %s, %v", lock, err)
+	}
+	if _, err := cache.Ensure(context.Background(), engine, oldStack, "aws"); err != nil {
+		t.Fatalf("matching release could not reuse upgraded stack: %v", err)
 	}
 }

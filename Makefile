@@ -13,10 +13,16 @@ BUILDVARS_PKG=github.com/podplane/podplane/internal/buildvars
 
 VERSION_TAG=$(shell if git diff --quiet && git diff --cached --quiet; then git describe --tags --exact-match 2>/dev/null; fi)
 BUILD_VERSION=$(if $(VERSION_TAG),$(VERSION_TAG),dev)
-BUILD_DATE=$(shell date -u '+%Y-%m-%dT%H:%M:%S')
-COMMIT_HASH=$(shell git rev-parse --short HEAD)
-COMMIT_DATE=$(shell git log -1 --format=%cd --date=format:'%Y-%m-%dT%H:%M:%S')
+BUILD_DATE=$(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+COMMIT_HASH=$(shell git rev-parse HEAD)
+COMMIT_DATE=$(shell TZ=UTC git log -1 --format=%cd --date=format-local:'%Y-%m-%dT%H:%M:%SZ')
 COMMIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD)
+
+BUILD_LD_FLAGS := -X $(BUILDVARS_PKG).buildVersion=$(BUILD_VERSION) \
+	-X $(BUILDVARS_PKG).buildDate=$(BUILD_DATE) \
+	-X $(BUILDVARS_PKG).commitHash=$(COMMIT_HASH) \
+	-X $(BUILDVARS_PKG).commitDate=$(COMMIT_DATE) \
+	-X $(BUILDVARS_PKG).commitBranch=$(COMMIT_BRANCH)
 
 # Cross-compilation settings, defaulting OS/ARCH to the current platform
 GOOS ?= $(shell go env GOOS)
@@ -40,7 +46,7 @@ else ifeq ($(GOOS),darwin)
 	endif
 endif
 
-.PHONY: help setup fmt lint precommit test build clean
+.PHONY: help setup fmt lint precommit test build build-cli build-provider clean
 
 help: ## Show available targets
 	@echo "Usage: make <target>"
@@ -48,6 +54,7 @@ help: ## Show available targets
 
 setup: ## Verify required tools and enable git hooks
 	@command -v go >/dev/null 2>&1 || { echo "go is required but not installed"; exit 1; }
+	@go tool -modfile=tools/go.mod golangci-lint version
 	@command -v kubectl >/dev/null 2>&1 || { echo "kubectl is required but not installed"; exit 1; }
 	@command -v qemu-img >/dev/null 2>&1 || { echo "qemu-img is required but not installed"; exit 1; }
 	@command -v mkcert >/dev/null 2>&1 || { echo "mkcert is required but not installed"; exit 1; }
@@ -64,8 +71,7 @@ fmt: ## Format Go source files
 	@go fmt ./...
 
 lint: ## Run linters
-	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint is required but not installed"; exit 1; }
-	@golangci-lint run --timeout=5m
+	@go tool -modfile=tools/go.mod golangci-lint run --timeout=5m
 
 precommit: ## Check formatting and run linters (read-only)
 	@echo "Checking formatting..."
@@ -75,26 +81,31 @@ precommit: ## Check formatting and run linters (read-only)
 		echo "$$UNFORMATTED"; \
 		exit 1; \
 	fi
+	@bash -n scripts/tf-provider-release.sh
 	@$(MAKE) lint
 
 test: ## Run tests with race detector
 	go test -v -race ./...
+	go test -v -race -ldflags '-X $(BUILDVARS_PKG).buildVersion=v0.10.2' ./internal/tfdeps -run TestReleaseProviderSelection
 
-build: ## Build the podplane binary
+build: build-cli build-provider ## Build the CLI and Terraform provider binaries
+
+build-cli: ## Build the podplane CLI binary
 	mkdir -p $(BINDIR)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) \
 	CGO_ENABLED=$(CGO_ENABLED) CC=$(CC) CXX=$(CXX) \
 	go build $(if $(BUILD_TAGS),-tags "$(BUILD_TAGS)") \
 		-o $(BINDIR)/$(BINARY_NAME) \
 		-trimpath \
-		-ldflags "$(EXTRA_LD_FLAGS) \
-		-X $(BUILDVARS_PKG).buildVersion=$(BUILD_VERSION) \
-		-X $(BUILDVARS_PKG).buildDate=$(BUILD_DATE) \
-		-X $(BUILDVARS_PKG).commitHash=$(COMMIT_HASH) \
-		-X $(BUILDVARS_PKG).commitDate=$(COMMIT_DATE) \
-		-X $(BUILDVARS_PKG).commitBranch=$(COMMIT_BRANCH) \
-		" $(MAIN_PKG)
+		-ldflags "$(EXTRA_LD_FLAGS) $(BUILD_LD_FLAGS)" $(MAIN_PKG)
 	printf "%s" "$(BUILD_VERSION)-$(COMMIT_HASH)" > $(BINDIR)/version.txt
+
+build-provider: ## Build the Terraform provider binary for local overrides
+	mkdir -p $(BINDIR)
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 \
+	go build -trimpath \
+		-o $(BINDIR)/terraform-provider-podplane \
+		-ldflags "$(BUILD_LD_FLAGS)" ./cmd/terraform-provider-podplane
 
 clean: ## Remove build artifacts
 	rm -rf $(BINDIR)

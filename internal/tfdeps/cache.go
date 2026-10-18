@@ -201,6 +201,13 @@ func (c *Cache) Ensure(ctx context.Context, engine Engine, clusterDir, providerK
 			}
 			return Configuration{}, fmt.Errorf("inspect cluster provider lock: %w", err)
 		}
+		matches, err := podplaneLockMatches(lockPath)
+		if err != nil {
+			return Configuration{}, err
+		}
+		if !matches {
+			return Configuration{}, fmt.Errorf("cluster provider lock does not match this CLI (%s); run `podplane cluster upgrade` to explicitly update the stack, or use its original CLI release", tfgen.PodplaneProviderVersion())
+		}
 		platform, err := engine.Platform(ctx)
 		if err != nil {
 			return Configuration{}, err
@@ -234,6 +241,13 @@ func (c *Cache) Ensure(ctx context.Context, engine Engine, clusterDir, providerK
 			return Configuration{}, err
 		}
 		download = !available
+		if available {
+			matches, err := podplaneLockMatches(filepath.Join(c.root, lockFileName))
+			if err != nil {
+				return Configuration{}, err
+			}
+			download = !matches
+		}
 	}
 	if download {
 		if err := c.Download(ctx, engine, nil); err != nil {
@@ -406,6 +420,26 @@ func (c *Cache) dependenciesAvailable(moduleVersion, lockPath, platform string) 
 type providerLock struct {
 	address string
 	version string
+}
+
+// podplaneLockMatches keeps a new CLI from silently rewriting an existing stack
+// against a different provider. Development builds use runtime overrides and
+// retain the installed registry provider only for Terraform initialization.
+func podplaneLockMatches(path string) (bool, error) {
+	requirement := tfgen.PodplaneProviderVersion()
+	if !strings.HasPrefix(requirement, "= ") {
+		return true, nil
+	}
+	providers, err := readProviderLocks(path)
+	if err != nil {
+		return false, err
+	}
+	for _, provider := range providers {
+		if provider.address == "registry.terraform.io/"+tfgen.PodplaneProviderSource || provider.address == "registry.opentofu.org/"+tfgen.PodplaneProviderSource {
+			return provider.version == strings.TrimPrefix(requirement, "= "), nil
+		}
+	}
+	return false, nil
 }
 
 // readProviderLocks reads exact provider addresses and versions from a lock file.

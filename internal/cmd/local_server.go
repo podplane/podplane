@@ -109,7 +109,7 @@ func newLocalServerCmd(c *config.Config) *cobra.Command {
 		if !serverBackground {
 			fmt.Println("Press Ctrl+C to stop the local server")
 		}
-		<-shutdownErrsCh
+		_ = <-shutdownErrsCh //nolint:staticcheck // Explicitly discard the shutdown signal; it is not a command failure.
 		if !serverBackground {
 			fmt.Printf("\nStopping local server...\n")
 		}

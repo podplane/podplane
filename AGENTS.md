@@ -9,13 +9,18 @@
 ## Build & Test Commands
 
 - **Setup**: `make setup` — verify required tools and install git hooks
-- **Build**: `make build` — build `bin/podplane` with version metadata
+- **Build**: `make build` — build `bin/podplane` and `bin/terraform-provider-podplane` with version metadata
 - **Test**: `make test` — run all tests with race detector
 - **Format**: `make fmt` — format Go source files
 - **Lint**: `make lint` — run golangci-lint
 - **Precommit**: `make precommit` — check formatting and run lint
 - **Clean**: `make clean` — remove `bin/`
 - **Focused tests**: `go test ./internal/cmd ./internal/kubectl` — acceptable for targeted iteration
+
+Go development tools are pinned separately in `tools/go.mod` and `tools/go.sum`
+so their dependencies do not affect the application module. Make targets invoke
+them from the repository root with `go tool -modfile=tools/go.mod`; a globally
+installed golangci-lint is not required. `make setup` warms the tool build cache.
 
 ## CLI Command & Flag Conventions
 
@@ -73,6 +78,7 @@ When building or changing Podplane CLI TUI output:
 ## Directory Structure
 
 ```
+cmd/                    # Executable entrypoints
 docs/                   # Comprehensive Podplane documentation
 internal/cmd/           # Cobra command wiring
 internal/clusterconfig/ # Cluster config parsing, validation, mutation
@@ -82,6 +88,19 @@ internal/deploy/        # App deploy/remove helpers
 internal/kubectl/       # kubeconfig key conventions and kubectl integration
 internal/local/         # Local VM cluster lifecycle and generated local config
 internal/tfgen/         # Generated Terraform/OpenTofu files
+internal/tfprovider/    # OpenTofu/Terraform Provider implementation and tests
 internal/tui/           # Terminal prompts and progress UI
 pkg/                    # Public packages consumed outside internal code
 ```
+
+## Releases
+
+One source tag builds the CLI and standalone OpenTofu/Terraform provider from
+the same commit. `.github/workflows/release.yaml` publishes the provider
+through `podplane/terraform-provider-podplane`, then the CLI and Homebrew
+formula.
+
+See [provider release documentation](cmd/terraform-provider-podplane/docs.md#releases) for more details.
+
+Use `make build` for local validation. `scripts/tf-provider-release.sh publish`
+writes to Git and GitHub and must not be run for validation.

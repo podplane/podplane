@@ -26,7 +26,7 @@ builds:
       - -s -w
       - -X github.com/podplane/podplane/internal/buildvars.buildVersion={{ .Tag }}
       - -X github.com/podplane/podplane/internal/buildvars.buildDate={{ .Date }}
-      - -X github.com/podplane/podplane/internal/buildvars.commitHash={{ .ShortCommit }}
+      - -X github.com/podplane/podplane/internal/buildvars.commitHash={{ .FullCommit }}
       - -X github.com/podplane/podplane/internal/buildvars.commitDate={{ .CommitDate }}
       - -X github.com/podplane/podplane/internal/buildvars.commitBranch={{ .Branch }}
     mod_timestamp: "{{ .CommitTimestamp }}"
@@ -48,6 +48,9 @@ signs:
 checksum:
   name_template: '{{ .ProjectName }}_{{ .Version }}_checksums.txt'
   algorithm: sha512
+  extra_files:
+    - glob: '{{ .Env.RELEASE_METADATA }}'
+      name_template: release-metadata.json
 
 sboms:
   - id: archive
@@ -69,6 +72,9 @@ changelog:
       - "^ci:"
 
 release:
+  extra_files:
+    - glob: '{{ .Env.RELEASE_METADATA }}'
+      name_template: release-metadata.json
   github:
     owner: podplane
     name: podplane

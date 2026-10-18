@@ -1,0 +1,146 @@
+# Podplane <https://podplane.dev>
+# Copyright The Podplane Authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+  id-token: write
+concurrency:
+  group: coordinated-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    environment: release
+    defaults:
+      run:
+        working-directory: source
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_METADATA: bin/release-metadata.json
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          path: source
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: source/go.mod
+          cache-dependency-path: |
+            source/go.sum
+            source/tools/go.sum
+
+      - name: Validate both implementations
+        run: make precommit test
+
+      - name: Prepare release metadata
+        run: |
+          mkdir -p bin
+          echo "TF_PROVIDER_RELEASE_VERSION=$(go run ./scripts/tf-provider-version "$RELEASE_TAG")" >> "$GITHUB_ENV"
+          bash scripts/tf-provider-release.sh metadata "$RELEASE_TAG" > "$RELEASE_METADATA"
+
+      - name: Generate TF provider publication token
+        id: tf-provider-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
+        with:
+          app-id: ${{ secrets.TF_PROVIDER_RELEASE_APP_ID }}
+          private-key: ${{ secrets.TF_PROVIDER_RELEASE_APP_PRIVATE_KEY }}
+          owner: podplane
+          repositories: terraform-provider-podplane
+
+      - name: Checkout TF provider publication repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: podplane/terraform-provider-podplane
+          token: ${{ steps.tf-provider-token.outputs.token }}
+          path: publication
+          fetch-depth: 0
+
+      - name: Import TF provider signing key
+        id: tf-provider-gpg
+        uses: crazy-max/ghaction-import-gpg@e89d40939c28e39f97cf32126055eeae86ba74ec # v6.3.0
+        with:
+          gpg_private_key: ${{ secrets.TF_PROVIDER_RELEASE_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.TF_PROVIDER_RELEASE_GPG_PASSPHRASE }}
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@a930d0ac434e3182448fe678398ba5713717112a # v0.21.0
+        with:
+          syft-version: v1.37.0
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+        with:
+          cosign-release: v3.0.6
+
+      - name: Check TF provider publication
+        id: tf-provider
+        env:
+          GH_TOKEN: ${{ steps.tf-provider-token.outputs.token }}
+          GPG_FINGERPRINT: ${{ steps.tf-provider-gpg.outputs.fingerprint }}
+        run: bash scripts/tf-provider-release.sh check "$RELEASE_TAG" "$GITHUB_WORKSPACE/publication"
+
+      - name: Package TF provider with GoReleaser
+        if: steps.tf-provider.outputs.publish == 'true'
+        uses: goreleaser/goreleaser-action@9c156ee8a17a598857849441385a2041ef570552 # v6.3.0
+        with:
+          distribution: goreleaser
+          version: v2.8.2
+          workdir: source
+          args: release --config .goreleaser.tf-provider.yaml --skip=publish --clean
+        env:
+          GPG_FINGERPRINT: ${{ steps.tf-provider-gpg.outputs.fingerprint }}
+
+      - name: Publish TF provider before CLI
+        if: steps.tf-provider.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ steps.tf-provider-token.outputs.token }}
+          GPG_FINGERPRINT: ${{ steps.tf-provider-gpg.outputs.fingerprint }}
+          TF_PROVIDER_RELEASE_ASSETS: ${{ runner.temp }}/tf-provider-assets
+        run: |
+          mkdir "$TF_PROVIDER_RELEASE_ASSETS"
+          cp dist/tf-provider/*.zip dist/tf-provider/*.spdx.json dist/tf-provider/*_SHA256SUMS dist/tf-provider/*_SHA256SUMS.sig "$TF_PROVIDER_RELEASE_ASSETS/"
+          bash scripts/tf-provider-release.sh publish "$RELEASE_TAG" "$GITHUB_WORKSPACE/publication"
+
+      - name: Check whether CLI is already published
+        id: cli
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" > "$RUNNER_TEMP/cli-releases.json"
+          state=$(jq -r --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | if length == 0 then "new" elif .[0].draft then "draft" else "published" end' "$RUNNER_TEMP/cli-releases.json")
+          if [ "$state" = draft ]; then
+            echo 'CLI draft exists; inspect and recover it manually. No assets will be replaced.' >&2
+            exit 1
+          fi
+          echo "publish=$([ "$state" = new ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Homebrew tap token
+        if: steps.cli.outputs.publish == 'true'
+        id: homebrew-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
+        with:
+          app-id: 3948556
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: podplane
+          repositories: homebrew-tap
+
+      - name: Publish CLI with GoReleaser
+        if: steps.cli.outputs.publish == 'true'
+        uses: goreleaser/goreleaser-action@9c156ee8a17a598857849441385a2041ef570552 # v6.3.0
+        with:
+          distribution: goreleaser
+          version: v2.8.2
+          workdir: source
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ steps.homebrew-token.outputs.token }}

@@ -101,6 +101,15 @@ Remote access defaults to enabled: AWS exposes `enable_ssm`; Google exposes `ena
 
 `podplane cluster upgrade` downloads the latest compatible cached Terraform modules and providers, updates `.terraform.lock.hcl`, and regenerates all `podplane.cluster.*.tf` files and `podplane.cluster.schema.json` without touching user-owned files in the directory.
 
+Podplane CLI requires the Podplane OpenTofu/Terraform provider built for the
+same release version. If an existing TF configuration locks another Podplane
+TF provider version, `cluster create` stops rather than silently changing that
+lock. Use `cluster upgrade` explicitly, or the original CLI release version.
+
+See also:
+[provider development instructions](https://github.com/podplane/podplane/blob/main/cmd/terraform-provider-podplane/docs.md#local-development)
+and [coordinated release contract](https://github.com/podplane/podplane/blob/main/cmd/terraform-provider-podplane/docs.md#releases).
+
 ## Dependencies
 
 ### Infrastructure

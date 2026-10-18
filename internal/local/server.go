@@ -144,7 +144,7 @@ func (m *Local) ServerEnsure(output io.Writer) error {
 			return fmt.Errorf("local server failed to start\nLog: %s", logPath)
 		default:
 			_ = cmd.Process.Kill()
-			<-waitCh
+			<-waitCh //nolint:errcheck // Reap the killed process; report the startup failure below.
 			return fmt.Errorf("local server failed to start\nLog: %s", logPath)
 		}
 	}

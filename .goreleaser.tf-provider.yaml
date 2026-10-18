@@ -1,0 +1,70 @@
+# Podplane <https://podplane.dev>
+# Copyright The Podplane Authors
+# SPDX-License-Identifier: Apache-2.0
+
+version: 2
+project_name: terraform-provider-podplane
+dist: dist/tf-provider
+
+# Package from the CLI tag. Publication uses the calculated provider tag.
+builds:
+  - id: provider
+    main: ./cmd/terraform-provider-podplane
+    binary: '{{ .ProjectName }}_v{{ .Env.TF_PROVIDER_RELEASE_VERSION }}'
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath, -buildvcs=false]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/podplane/podplane/internal/buildvars.buildVersion={{ .Env.RELEASE_TAG }}
+      - -X github.com/podplane/podplane/internal/buildvars.buildDate={{ .CommitDate }}
+      - -X github.com/podplane/podplane/internal/buildvars.commitHash={{ .FullCommit }}
+      - -X github.com/podplane/podplane/internal/buildvars.commitDate={{ .CommitDate }}
+      - -X github.com/podplane/podplane/internal/buildvars.commitBranch={{ .Env.RELEASE_TAG }}
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+archives:
+  - id: provider
+    ids: [provider]
+    formats: [zip]
+    name_template: '{{ .ProjectName }}_{{ .Env.TF_PROVIDER_RELEASE_VERSION }}_{{ .Os }}_{{ .Arch }}'
+    files: [LICENSE]
+
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Env.TF_PROVIDER_RELEASE_VERSION }}_SHA256SUMS'
+  algorithm: sha256
+  extra_files:
+    - glob: cmd/terraform-provider-podplane/terraform-registry-manifest.json
+      name_template: '{{ .ProjectName }}_{{ .Env.TF_PROVIDER_RELEASE_VERSION }}_manifest.json'
+    - glob: '{{ .Env.RELEASE_METADATA }}'
+      name_template: release-metadata.json
+
+signs:
+  - artifacts: checksum
+    args:
+      - --batch
+      - --local-user
+      - '{{ .Env.GPG_FINGERPRINT }}'
+      - --output
+      - '${signature}'
+      - --detach-sign
+      - '${artifact}'
+
+sboms:
+  - id: archive
+    artifacts: archive
+    documents: ['{{ .ArtifactName }}.spdx.json']
+  - id: binary
+    artifacts: binary
+    documents: ['{{ .ProjectName }}_{{ .Env.TF_PROVIDER_RELEASE_VERSION }}_{{ .Os }}_{{ .Arch }}_binary.spdx.json']
+
+changelog:
+  disable: true
+
+# The publication script supplies the mapped tag without rewriting source tags.
+release:
+  disable: true

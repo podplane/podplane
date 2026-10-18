@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/podplane/podplane/internal/buildvars"
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/clusterspec"
 	"github.com/podplane/podplane/pkg/seeds"
@@ -19,11 +20,20 @@ import (
 const (
 	// PodplaneProviderSource is the registry address of the Podplane provider.
 	PodplaneProviderSource = "podplane/podplane"
-	// PodplaneProviderVersion is the supported Podplane provider version constraint.
-	PodplaneProviderVersion = ">= 1.3.0"
 	// NstanceModuleVersion is the supported Nstance module version constraint.
 	NstanceModuleVersion = "~> 2.1"
 )
+
+// PodplaneProviderVersion selects the provider built with this CLI release.
+// Development overrides replace the installed provider at runtime; init still
+// needs a published provider selection, without requiring a new release.
+func PodplaneProviderVersion() string {
+	version := buildvars.ProviderVersion()
+	if version == "0.0.0-dev" {
+		return ">= 0.0.0"
+	}
+	return "= " + version
+}
 
 // ClusterOptions provides dependency inputs needed to render cluster Terraform.
 type ClusterOptions struct {
@@ -168,7 +178,7 @@ func addClusterTerraformRequirements(doc *hclDocument, cloudProviders ...string)
 	}
 	requiredProviders.Body.Attr("podplane", object(
 		identField("source", str(PodplaneProviderSource)),
-		identField("version", str(PodplaneProviderVersion)),
+		identField("version", str(PodplaneProviderVersion())),
 	))
 	terraform.Body.Block(requiredProviders)
 	doc.AddBlock(terraform)

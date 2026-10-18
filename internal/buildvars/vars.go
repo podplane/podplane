@@ -6,11 +6,11 @@ package buildvars
 
 // set during build time
 var (
-	buildVersion = ""
-	buildDate    = ""
-	commitHash   = ""
-	commitDate   = ""
-	commitBranch = ""
+	buildVersion = "dev"
+	buildDate    = "unknown"
+	commitHash   = "unknown"
+	commitDate   = "unknown"
+	commitBranch = "unknown"
 )
 
 // BuildVersion returns immutable build version

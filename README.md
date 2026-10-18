@@ -30,6 +30,10 @@ Podplane is easy to use and operate because of three sibling projects which form
 - Auto-scaling & provisioning is faster with [Nstance](https://nstance.dev).
 - OIDC & RBAC is simplified with [Truster](https://truster.dev).
 
+## Development
+
+See the [Contributing](docs/contributing.md) and [Development](docs/development.md) guides.
+
 ## Learn More
 
 Learn more about Podplane at the official project website: [podplane.dev](https://podplane.dev)

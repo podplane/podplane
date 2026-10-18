@@ -112,3 +112,71 @@ func TestCLIPlatformAndConfigFile(t *testing.T) {
 		t.Fatalf("TF_CLI_CONFIG_FILE = %q", raw)
 	}
 }
+
+// TestCLIDevelopmentProvider verifies explicit local selection survives the
+// managed mirror config, preserves unrelated settings and never persists there.
+func TestCLIDevelopmentProvider(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "terraform-provider-podplane")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	engine := filepath.Join(dir, "tofu")
+	if err := os.WriteFile(engine, []byte("#!/bin/sh\nprintf '%s\\n' \"$TF_CLI_CONFIG_FILE\"\n/bin/cat \"$TF_CLI_CONFIG_FILE\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(CommandEnvVar, engine)
+	t.Setenv(ProviderDirEnvVar, dir)
+	t.Setenv("TF_CLI_CONFIG_FILE", filepath.Join(dir, "must-not-be-read"))
+	base := `credentials "example.test" { token = "test-only" }
+provider_installation {
+  # Braces in strings/comments must not affect the insertion point: }
+  dev_overrides { "registry.terraform.io/podplane/podplane" = "/old/{provider}" }
+  dev_overrides { "example.test/acme/other" = "/other" }
+  filesystem_mirror { path = "/shared/mirror" }
+}
+`
+	path := filepath.Join(dir, "managed.tfrc")
+	if err := os.WriteFile(path, []byte(base), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cli, err := NewCLI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli = cli.WithCLIConfig(path)
+	out, err := cli.OutputJSON(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.SplitN(string(out), "\n", 2)
+	if len(parts) != 2 || parts[0] == path {
+		t.Fatalf("missing private configuration: %s", out)
+	}
+	if _, err := os.Stat(parts[0]); !os.IsNotExist(err) {
+		t.Fatalf("private config was not removed: %v", err)
+	}
+	config := parts[1]
+	for _, want := range []string{`token = "test-only"`, `"example.test/acme/other" = "/other"`, `path = "/shared/mirror"`, `"registry.opentofu.org/podplane/podplane" = "` + dir + `"`} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("development config missing %q: %s", want, config)
+		}
+	}
+	local := strings.Index(config, `"registry.terraform.io/podplane/podplane" = "`+dir+`"`)
+	if local < strings.Index(config, `"example.test/acme/other"`) || local > strings.Index(config, "filesystem_mirror") {
+		t.Fatalf("override not between existing overrides and mirror: %s", config)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || string(raw) != base {
+		t.Fatalf("managed config changed: %s, %v", raw, err)
+	}
+	t.Setenv(ProviderDirEnvVar, "")
+	out, err = cli.OutputJSON(context.Background(), dir)
+	if err != nil || string(out) != path+"\n"+base {
+		t.Fatalf("override leaked into ordinary run: %s, %v", out, err)
+	}
+	t.Setenv(ProviderDirEnvVar, filepath.Join(dir, "missing"))
+	if _, err := cli.OutputJSON(context.Background(), dir); err == nil || !strings.Contains(err.Error(), "make build") {
+		t.Fatalf("missing provider silently fell back to registry: %v", err)
+	}
+}
