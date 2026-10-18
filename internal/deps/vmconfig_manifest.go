@@ -328,13 +328,11 @@ func (d Dependency) Filename() string {
 // LocalFilename returns the filename used when the dependency is placed in
 // /opt/podplane/artifacts/ on the VM. The naming convention is <name>.<ext> where
 // ext is derived from Type: binary has no extension, deb → .deb,
-// tar.gz → .tar.gz.
+// tar.gz → .tar.gz, tar.bz2 → .tar.bz2.
 func (it Item) LocalFilename() string {
 	switch it.Dep.Type {
-	case "deb":
-		return it.Name + ".deb"
-	case "tar.gz":
-		return it.Name + ".tar.gz"
+	case "deb", "tar.gz", "tar.bz2":
+		return it.Name + "." + it.Dep.Type
 	default:
 		return it.Name
 	}

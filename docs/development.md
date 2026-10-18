@@ -33,9 +33,9 @@ Before the first `local start`, download dependencies using the local `component
 go run . deps download \
   --components ../components/manifests/components.json \
   --templates ../templates/manifests/templates.json \
-  --vmconfig ../vmconfig/manifests/vmconfig_knc_debian-13_arm64.json
+  --vmconfig ../vmconfig/manifests/knc.debian-13.arm64.json
   # or for x86 dev machines:
-  # --vmconfig ../vmconfig/manifests/vmconfig_knc_debian-13_amd64.json
+  # --vmconfig ../vmconfig/manifests/knc.debian-13.amd64.json
 ```
 
 By default this downloads all templates, provider-neutral dependencies, core component images, recommended addon component images, and the components Git source declared by the components manifest. If you are testing provider-specific components or extra addons locally, add filters such as `--providers aws` and `--addons snapshot`.
@@ -78,7 +78,7 @@ make knc-watch
 `podplane deps download` normally fetches the published manifests from `https://deps.podplane.dev`. Passing local paths changes that behavior:
 
 - `--components ../components/manifests/components.json` uses the local components manifest, mirrors the component images it names into the local dependency cache, and clones/fetches the manifest-declared components Git source unless `--skip-components-git` is set. It does not cache the published Podplane seed files (`recommended.netsy` / `minimal.netsy`), so pair this workflow with `go run . local start --components none` when you want to bootstrap components manually from your local `components` checkout.
-- `--vmconfig ../vmconfig/manifests/vmconfig_knc_debian-13_arm64.json` uses the local vmconfig manifest, which contains a vmconfig dependency stub instead of a released vmconfig tarball. That makes the local VM user-data skip extracting and running a prebuilt vmconfig package. For the OS image and other dependencies in the manifest, these will be mirrored into the local dependency cache, so using the local manifest means you can test out new dependencies as well as new configuration.
+- `--vmconfig ../vmconfig/manifests/knc.debian-13.arm64.json` uses the local vmconfig manifest, which contains a vmconfig dependency stub instead of a released vmconfig tarball. That makes the local VM user-data skip extracting and running a prebuilt vmconfig package. For the OS image and other dependencies in the manifest, these will be mirrored into the local dependency cache, so using the local manifest means you can test out new dependencies as well as new configuration.
 - `--templates ../templates/manifests/templates.json` uses the local templates manifest. Entries with `type: "chart"` point at unpacked chart directories; the CLI runs `helm package` and writes the result into the local template chart cache used by `podplane deploy`.
 
 Note that the CLI checks the age of the cached manifests, so you need to re-run `deps download` on your development manifests at least once every 7 days to continue using them for new VMs.
