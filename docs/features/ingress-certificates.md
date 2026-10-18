@@ -17,7 +17,9 @@ Ingress certificate bundles and ACME account state are stored through the config
 
 Envoy data-plane Pods receive the bundle through the Secrets Store CSI Driver and filesystem SDS, rather than through an ordinary Kubernetes TLS Secret.
 
-When ACME is not configured, Podplane maintains a self-signed fallback certificate so the ingress data plane can still start. Browsers and other external clients will not trust that fallback by default.
+For NLB clusters, the operator maintains self-signed per-domain fallback certificates, delivered through CSI and SDS, whether or not ACME is configured. ACME replaces those fallbacks with public certificates for supported domains. Clients do not trust the self-signed fallbacks by default.
+
+Local and tunnel clusters instead use node-local Nstance-issued certificates, without ingress CSI mounts or operator-managed issuance. Clients must trust the issuing CA. Tunnel mode rejects ACME configuration.
 
 ACME DNS automation currently supports AWS Route 53, with more coming soon. Support for a secrets backend such as Google Secret Manager, Vault, or OpenBao does not imply support for that provider's DNS service.
 

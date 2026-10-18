@@ -43,7 +43,7 @@ func interpolateEnvoyIngress(records []*datafile.Record, cfg *clusterconfig.Clus
 		case envoySPCKey:
 			spc = record
 		default:
-			if strings.HasPrefix(string(record.Key), envoySecretBase) {
+			if strings.HasPrefix(string(record.Key), envoySecretBase) || string(record.Key) == "/registry/secrets/platform-envoy-gateway/node" {
 				return nil, fmt.Errorf("generic seed unexpectedly contains domain-specific Envoy SDS Secret %s", record.Key)
 			}
 		}
@@ -51,7 +51,7 @@ func interpolateEnvoyIngress(records []*datafile.Record, cfg *clusterconfig.Clus
 	if gateway == nil && proxy == nil && spc == nil {
 		return records, nil
 	}
-	if gateway == nil || proxy == nil || (spc == nil && !nodeCertificate) {
+	if gateway == nil || proxy == nil {
 		return nil, fmt.Errorf("podplane seed file contains incomplete Envoy ingress resources")
 	}
 
@@ -68,6 +68,30 @@ func interpolateEnvoyIngress(records []*datafile.Record, cfg *clusterconfig.Clus
 	if nodeCertificate {
 		records = slices.DeleteFunc(records, func(record *datafile.Record) bool { return record == spc })
 	} else {
+		// Seeds captured from local bootstrap use node certificates, so have no
+		// ingress SecretProviderClass. NLB targets need one before Envoy starts,
+		// for operator-managed fallback certificates as well as ACME.
+		if spc == nil {
+			spc = &datafile.Record{Key: []byte(envoySPCKey), Created: true, Version: 1, LeaderID: cfg.Cluster.ID}
+			if err := encodeEnvoyRecord(spc, map[string]any{
+				"apiVersion": "secrets-store.csi.x-k8s.io/v1",
+				"kind":       "SecretProviderClass",
+				"metadata": map[string]any{
+					"name":      "platform-envoy-gateway-ingress-certificates",
+					"namespace": "platform-envoy-gateway",
+					"uid":       envoyResourceUID(envoySPCKey),
+					"annotations": map[string]any{
+						"meta.helm.sh/release-name":      "platform-envoy-gateway",
+						"meta.helm.sh/release-namespace": "platform-envoy-gateway",
+					},
+					"labels": map[string]any{"app.kubernetes.io/managed-by": "Helm"},
+				},
+				"spec": map[string]any{},
+			}); err != nil {
+				return nil, err
+			}
+			records = append(records, spc)
+		}
 		if err := rewriteEnvoySPC(spc, cfg, domains); err != nil {
 			return nil, err
 		}
@@ -160,23 +184,29 @@ func rewriteEnvoyProxy(record *datafile.Record, domains []string, nodeCertificat
 	if err != nil {
 		return err
 	}
-	if nodeCertificate {
-		volumes, err := nestedSlice(obj, envoyProxyKey, "spec", "provider", "kubernetes", "envoyDaemonSet", "patch", "value", "spec", "template", "spec", "volumes")
-		if err != nil {
-			return err
-		}
-		found := false
-		for _, value := range volumes {
-			volume, ok := value.(map[string]any)
-			if ok && stringValue(volume["name"]) == "ingress-certificates" {
+	volumes, err := nestedSlice(obj, envoyProxyKey, "spec", "provider", "kubernetes", "envoyDaemonSet", "patch", "value", "spec", "template", "spec", "volumes")
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, value := range volumes {
+		volume, ok := value.(map[string]any)
+		if ok && stringValue(volume["name"]) == "ingress-certificates" {
+			if nodeCertificate {
 				delete(volume, "csi")
 				volume["hostPath"] = map[string]any{"path": "/opt/podplane/secrets/ingress", "type": "Directory"}
-				found = true
+			} else {
+				delete(volume, "hostPath")
+				volume["csi"] = map[string]any{
+					"driver": "secrets-store.csi.k8s.io", "readOnly": true,
+					"volumeAttributes": map[string]any{"secretProviderClass": "platform-envoy-gateway-ingress-certificates"},
+				}
 			}
+			found = true
 		}
-		if !found {
-			return fmt.Errorf("record at %s does not contain the ingress-certificates volume", envoyProxyKey)
-		}
+	}
+	if !found {
+		return fmt.Errorf("record at %s does not contain the ingress-certificates volume", envoyProxyKey)
 	}
 	containers, err := nestedSlice(obj, envoyProxyKey, "spec", "provider", "kubernetes", "envoyDaemonSet", "patch", "value", "spec", "template", "spec", "containers")
 	if err != nil {
@@ -264,7 +294,11 @@ func rewriteEnvoySPC(record *datafile.Record, cfg *clusterconfig.ClusterConfig, 
 			return fmt.Errorf("unsupported Envoy ingress certificate provider %q", provider)
 		}
 	}
-	parameters["objects"] = strings.TrimSuffix(objects.String(), "\n")
+	objectKey := "objects"
+	if provider == "gcp" {
+		objectKey = "secrets"
+	}
+	parameters[objectKey] = strings.TrimSuffix(objects.String(), "\n")
 	switch provider {
 	case "aws", "gcp":
 	case "vault":
@@ -301,7 +335,7 @@ func envoySDSSecretRecord(domain string, revision int64, leaderID string, nodeCe
 			"name":            bundle,
 			"namespace":       "platform-envoy-gateway",
 			"resourceVersion": strconv.FormatInt(revision, 10),
-			"uid":             envoySecretUID(domain),
+			"uid":             envoyResourceUID(domain),
 			"annotations": map[string]any{
 				"meta.helm.sh/release-name":      "platform-envoy-gateway",
 				"meta.helm.sh/release-namespace": "platform-envoy-gateway",
@@ -359,9 +393,9 @@ func envoyListenerSuffix(domain string) string {
 	return name + "-" + hex.EncodeToString(sum[:])[:8]
 }
 
-// envoySecretUID returns a stable UID for a synthesized domain SDS Secret.
-func envoySecretUID(domain string) string {
-	sum := sha256.Sum256([]byte("podplane-envoy-sds-secret:" + domain))
+// envoyResourceUID returns a stable UID for a synthesized ingress resource.
+func envoyResourceUID(name string) string {
+	sum := sha256.Sum256([]byte("podplane-envoy-sds-secret:" + name))
 	h := hex.EncodeToString(sum[:16])
 	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }

@@ -191,7 +191,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.oidc.groups_claim` | Token claim used for group membership (default: `groups`) |
 | `cluster.oidc.signing_algs` | Allowed OIDC signing algorithms. Passed to kube-apiserver at runtime; vmconfig defaults to `["RS256"]` when omitted. |
 | `cluster.acme.server` | Optional ACME directory override. Defaults to the Let's Encrypt production directory. |
-| `cluster.acme.email` | Required ACME account email. Configuring `cluster.acme` enables operator-managed apex-and-wildcard ingress certificates for supported DNS providers; currently AWS Route53. Without a tunnel, omitting ACME retains operator-managed self-signed certificates delivered through Secrets Store CSI and SDS. Tunnel mode uses node-local Nstance-issued certificates instead and rejects ACME. Neither path stores certificate keys in Kubernetes Secrets. |
+| `cluster.acme.email` | Required ACME account email. For NLB clusters, configuring `cluster.acme` enables public apex-and-wildcard ingress certificates for supported DNS providers (currently AWS Route53). Without ACME, the operator maintains self-signed per-domain fallbacks; both use Secrets Store CSI and SDS. Local and tunnel clusters instead use node-local Nstance-issued certificates; tunnel mode rejects ACME. Neither path stores certificate keys in Kubernetes Secrets. |
 | `cluster.domains[]` | Array of domain configurations. The first domain is used as the default for ingress routing. |
 | `cluster.domains[].zone` | Exact ingress apex (e.g. `staging.example.com`); Podplane creates apex and wildcard DNS records. |
 | `cluster.domains[].load_balancer` | Named provider load balancer targeted by the apex and wildcard records. Defaults to `main`. |

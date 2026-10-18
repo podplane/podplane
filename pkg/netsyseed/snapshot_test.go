@@ -352,12 +352,13 @@ func TestWriteSnapshotNodeCertificates(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg.Cluster.Domains = []clusterconfig.Domain{{Zone: "example.com"}, {Zone: "second.example.net"}}
-			if mode == "tunnel" {
+			switch mode {
+			case "tunnel":
 				cfg.Cluster.Tunnel = &clusterconfig.Tunnel{
 					Kind: "cloudflare",
 					ID:   "cbe15ed8-50dc-4e69-a1d0-9e1909ec4ce8", CredentialSecret: "tunnel-credentials",
 				}
-			} else {
+			case "local":
 				cfg.Cluster.Providers = nil
 			}
 			raw, err := json.Marshal(cfg)
@@ -477,6 +478,122 @@ func TestWriteSnapshotNodeCertificates(t *testing.T) {
 				t.Fatalf("shared SDS pointers = %d, want 1", secretCount)
 			}
 		})
+	}
+}
+
+// TestWriteSnapshotNLBFromNodeSeed verifies a local node-certificate capture
+// can bootstrap NLB ingress with operator-managed fallback and optional ACME.
+func TestWriteSnapshotNLBFromNodeSeed(t *testing.T) {
+	for _, provider := range []string{"aws", "gcp"} {
+		for _, mode := range []string{"fallback", "acme"} {
+			t.Run(provider+"/"+mode, func(t *testing.T) {
+				dir := t.TempDir()
+				cfg, err := clusterconfig.NewDraftConfig("aws")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if provider == "gcp" {
+					cfg.Cluster.Secrets = clusterconfig.Secrets{
+						DefaultProvider: "google",
+						Providers:       map[string]clusterconfig.SecretsProvider{"google": {Kind: "gcp", ProjectID: "test-project", KeyPrefix: "target"}},
+					}
+				}
+				if mode == "acme" {
+					cfg.Cluster.ACME = &clusterconfig.ACME{Email: "admin@example.com"}
+				}
+				cfg.Cluster.Domains = []clusterconfig.Domain{{Zone: "example.com", Provider: &clusterconfig.DomainProvider{Kind: "aws-route53", Region: "us-east-1"}}}
+				raw, err := json.Marshal(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				configPath := filepath.Join(dir, "cluster.jsonc")
+				if err := os.WriteFile(configPath, raw, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				records := []*datafile.Record{
+					{Revision: 1, Key: []byte(platformComponentsHelmReleaseKey), Value: []byte(`{"apiVersion":"helm.toolkit.fluxcd.io/v2","kind":"HelmRelease","metadata":{"name":"platform-components"},"spec":{"values":{}}}`)},
+					{Revision: 2, Key: []byte(serviceCIDRKey), Value: []byte(`{"kind":"ServiceCIDR","spec":{"cidrs":["198.18.0.0/15"]}}`)},
+					{Revision: 3, Key: []byte(envoyGatewayKey), Value: []byte(`{"kind":"Gateway","spec":{"listeners":[{"name":"https-old","protocol":"HTTPS","hostname":"default.localhost","tls":{"certificateRefs":[{"name":"node"}]}}]}}`)},
+					{Revision: 4, Key: []byte(envoyProxyKey), Value: []byte(`{"kind":"EnvoyProxy","spec":{"provider":{"kubernetes":{"envoyDaemonSet":{"patch":{"value":{"spec":{"template":{"spec":{"containers":[{"name":"podplane-sds","args":["sds","--node-certificate=default.localhost"],"volumeMounts":[{"name":"ingress-certificates","mountPath":"/var/run/podplane/ingress-certificates","readOnly":true}]}],"volumes":[{"name":"ingress-certificates","hostPath":{"path":"/opt/podplane/secrets/ingress","type":"Directory"}}]}}}}}}}}}}`)},
+				}
+				var seed bytes.Buffer
+				if err := datafile.WriteSnapshot(&seed, records, cfg.Cluster.ID); err != nil {
+					t.Fatal(err)
+				}
+				seedPath := filepath.Join(dir, "seed.netsy")
+				if err := os.WriteFile(seedPath, seed.Bytes(), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				var output bytes.Buffer
+				if err := WriteSnapshot(&output, SnapshotOptions{ClusterConfigPath: configPath, SeedPath: seedPath}); err != nil {
+					t.Fatal(err)
+				}
+				got, err := datafile.ReadSnapshot(bytes.NewReader(output.Bytes()))
+				if err != nil {
+					t.Fatal(err)
+				}
+				objects := map[string]map[string]any{}
+				for i, record := range got {
+					if record.Revision != int64(i+1) {
+						t.Fatalf("noncontiguous revision: %d", record.Revision)
+					}
+					objects[string(record.Key)] = decodeTestObject(t, record)
+				}
+				values := objects[platformComponentsHelmReleaseKey]["spec"].(map[string]any)["values"].(map[string]any)
+				config := componentValues(values, "podplane-operator")["podplane"].(map[string]any)["operator"].(map[string]any)["config"].(map[string]any)
+				issuer, ok := config["ingressCertificates"].(map[string]any)
+				if !ok || issuer["domains"].(map[string]any)["example.com"] == nil {
+					t.Fatalf("missing NLB ingress issuer: %v", config)
+				}
+				if mode == "acme" {
+					if issuer["acme"].(map[string]any)["email"] != "admin@example.com" {
+						t.Fatalf("ACME issuer = %v", issuer)
+					}
+				} else if issuer["acme"] != nil {
+					t.Fatalf("fallback-only issuer contains ACME: %v", issuer)
+				}
+				proxy := objects[envoyProxyKey]
+				volumes, err := nestedSlice(proxy, "test", "spec", "provider", "kubernetes", "envoyDaemonSet", "patch", "value", "spec", "template", "spec", "volumes")
+				if err != nil {
+					t.Fatal(err)
+				}
+				volume := volumes[0].(map[string]any)
+				if volume["hostPath"] != nil {
+					t.Fatalf("NLB still uses node certificate volume: %v", volume)
+				}
+				csi := volume["csi"].(map[string]any)
+				if csi["driver"] != "secrets-store.csi.k8s.io" || csi["readOnly"] != true || csi["volumeAttributes"].(map[string]any)["secretProviderClass"] != "platform-envoy-gateway-ingress-certificates" {
+					t.Fatalf("CSI volume = %v", csi)
+				}
+				spc := objects[envoySPCKey]
+				if spc == nil || spc["spec"].(map[string]any)["provider"] != provider {
+					t.Fatalf("NLB SecretProviderClass = %v", spc)
+				}
+				parameters := spc["spec"].(map[string]any)["parameters"].(map[string]any)
+				if provider == "gcp" {
+					if parameters["objects"] != nil || !strings.Contains(stringValue(parameters["secrets"]), "projects/test-project/secrets/target_platform-cluster_ingress-certificates_bundle-a379a6f6eeafb9a55e378c11/versions/latest") {
+						t.Fatalf("GCP SecretProviderClass parameters = %v", parameters)
+					}
+				} else if !strings.Contains(stringValue(parameters["objects"]), `objectType: "secretsmanager"`) {
+					t.Fatalf("AWS SecretProviderClass parameters = %v", parameters)
+				}
+				metadata := spc["metadata"].(map[string]any)
+				if metadata["name"] != "platform-envoy-gateway-ingress-certificates" || metadata["namespace"] != "platform-envoy-gateway" || metadata["annotations"].(map[string]any)["meta.helm.sh/release-name"] != "platform-envoy-gateway" {
+					t.Fatalf("SecretProviderClass metadata = %v", metadata)
+				}
+				if objects["/registry/secrets/platform-envoy-gateway/bundle-a379a6f6eeafb9a55e378c11"] == nil || objects["/registry/secrets/platform-envoy-gateway/node"] != nil {
+					t.Fatal("NLB snapshot must contain domain SDS references, not a node reference")
+				}
+				containers, err := nestedSlice(proxy, "test", "spec", "provider", "kubernetes", "envoyDaemonSet", "patch", "value", "spec", "template", "spec", "containers")
+				if err != nil {
+					t.Fatal(err)
+				}
+				args := containers[0].(map[string]any)["args"].([]any)
+				if len(args) != 2 || args[1] != "--domain-certificate=bundle-a379a6f6eeafb9a55e378c11=example.com" {
+					t.Fatalf("NLB SDS args = %v", args)
+				}
+			})
+		}
 	}
 }
 

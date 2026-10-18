@@ -161,6 +161,7 @@
     },
     "acme": {
       "type": "object",
+      "description": "Enables public ingress certificates for supported DNS providers on NLB clusters, alongside operator-managed self-signed fallbacks. Local and tunnel clusters use Nstance-issued node certificates instead; tunnel mode rejects ACME.",
       "additionalProperties": false,
       "required": ["email"],
       "properties": {

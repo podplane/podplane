@@ -189,6 +189,32 @@ func TestGenerateClusterScenarios(t *testing.T) {
 	}
 }
 
+// TestGenerateNLBIngressCertificates checks NLB clusters do not provision node
+// ingress certificates, whether or not ACME is enabled.
+func TestGenerateNLBIngressCertificates(t *testing.T) {
+	for _, acme := range []bool{false, true} {
+		cfg := sampleClusterConfig()
+		if acme {
+			cfg.Cluster.ACME = &clusterconfig.ACME{Email: "admin@example.com"}
+		}
+		files, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions(cfg))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var contents strings.Builder
+		for _, file := range files {
+			if file.Type == FileTypeTerraform {
+				contents.WriteString(file.Content)
+			}
+		}
+		for _, want := range []string{`"ingress.server"`, `"ingress.server.crt"`} {
+			if strings.Contains(contents.String(), want) {
+				t.Errorf("ACME=%v: NLB cluster unexpectedly provisions %s", acme, want)
+			}
+		}
+	}
+}
+
 // TestGenerateAWSClusterTerraform verifies the generated AWS cluster Terraform
 // contains the expected provider modules and group references.
 func TestGenerateAWSClusterTerraform(t *testing.T) {
