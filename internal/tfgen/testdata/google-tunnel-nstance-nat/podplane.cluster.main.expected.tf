@@ -385,8 +385,34 @@ resource "podplane_netsy_seed_gcs" "cluster" {
             }
           }
           "zot-registry" = {
-            platform = { zotRegistry = { storage = { driver = "gcs", bucket = google_storage_bucket.podplane_cluster["registry"].name } } }
+            platform = { zotRegistry = { storage = {
+              driver = "gcs"
+              bucket = google_storage_bucket.podplane_cluster["registry"].name
+              keyfile = "/var/run/google/identity/credentials.json"
+              googleSecretVersion = podplane_google_service_account_key.registry.secret_version
+            } } }
+            zot = {
+              serviceAccount = { create = true, name = "zot-registry" }
+              extraVolumes = [
+                { name = "podplane-zot-config", configMap = { name = "zot-registry-config" } },
+                { name = "google-identity", csi = {
+                  driver = "secrets-store.csi.k8s.io"
+                  readOnly = true
+                  volumeAttributes = { secretProviderClass = "zot-registry" }
+                } }
+              ]
+              extraVolumeMounts = [
+                { name = "podplane-zot-config", mountPath = "/etc/zot/config.json", subPath = "config.json", readOnly = true },
+                { name = "google-identity", mountPath = "/var/run/google/identity", readOnly = true }
+              ]
+            }
           }
+        }
+        crds = { "secrets-store-csi-driver-crds" = { enabled = true } }
+        apps = {
+          "secrets-store-csi-driver" = { enabled = true }
+          "secrets-store-csi-provider-gcp" = { enabled = true }
+          "zot-registry" = { dependsOn = ["secrets-store-csi-provider-gcp"] }
         }
       }
     }
@@ -402,7 +428,7 @@ resource "podplane_netsy_seed_gcs" "cluster" {
     namespace = "platform-nstance-operator"
     ca_bucket = module.cluster.bucket
   }
-  depends_on = [podplane_workload_ca_key.cluster, google_secret_manager_secret_iam_member.podplane_workload_ca_key]
+  depends_on = [google_storage_bucket_iam_member.podplane_registry_writer, google_secret_manager_secret_iam_member.podplane_registry_key, podplane_workload_ca_key.cluster, google_secret_manager_secret_iam_member.podplane_workload_ca_key]
 }
 
 data "google_storage_bucket_object_content" "nstance_ca" {

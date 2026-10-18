@@ -32,7 +32,7 @@ func addPodplaneGooglePermissions(doc *hclDocument, cfg *clusterconfig.ClusterCo
 	buckets := block("resource", "google_storage_bucket_iam_member", "podplane_agent")
 	buckets.Body.Attr("for_each", expr("google_storage_bucket.podplane_cluster"))
 	buckets.Body.Attr("bucket", expr("each.value.name"))
-	buckets.Body.Attr("role", str("roles/storage.objectAdmin"))
+	buckets.Body.Attr("role", expr(`each.key == "registry" ? "roles/storage.objectViewer" : "roles/storage.objectAdmin"`))
 	buckets.Body.Attr("member", str(agent))
 	doc.AddBlock(buckets)
 
@@ -41,6 +41,8 @@ func addPodplaneGooglePermissions(doc *hclDocument, cfg *clusterconfig.ClusterCo
 	server.Body.Attr("role", str("roles/storage.objectViewer"))
 	server.Body.Attr("member", str("serviceAccount:${module."+accountName+".server_iam_role_arn}"))
 	doc.AddBlock(server)
+
+	addGoogleRegistryIdentity(doc, agent)
 
 	provider := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]
 	if provider.Kind != "gcp" {
@@ -96,6 +98,34 @@ func addPodplaneGooglePermissions(doc *hclDocument, cfg *clusterconfig.ClusterCo
 	createMember.Body.Attr("role", expr("google_project_iam_custom_role.podplane_ingress_create.id"))
 	createMember.Body.Attr("member", str(agent))
 	doc.AddBlock(createMember)
+}
+
+// addGoogleRegistryIdentity gives Zot its own bucket writer and stores its key
+// outside Terraform state. CSI reads that key using the node identity.
+func addGoogleRegistryIdentity(doc *hclDocument, agent string) {
+	account := block("resource", "google_service_account", "podplane_registry")
+	account.Body.Attr("project", expr("local.provider_project"))
+	account.Body.Attr("account_id", str("pp-zot-${substr(sha256(module.cluster.bucket), 0, 20)}"))
+	account.Body.Attr("display_name", str("Podplane registry writer"))
+	doc.AddBlock(account)
+
+	key := block("resource", "podplane_google_service_account_key", "registry")
+	key.Body.Attr("project", expr("local.provider_project"))
+	key.Body.Attr("service_account", expr("google_service_account.podplane_registry.email"))
+	key.Body.Attr("secret_id", str("${google_service_account.podplane_registry.account_id}-key"))
+	doc.AddBlock(key)
+
+	reader := block("resource", "google_secret_manager_secret_iam_member", "podplane_registry_key")
+	reader.Body.Attr("secret_id", expr("podplane_google_service_account_key.registry.id"))
+	reader.Body.Attr("role", str("roles/secretmanager.secretAccessor"))
+	reader.Body.Attr("member", str(agent))
+	doc.AddBlock(reader)
+
+	writer := block("resource", "google_storage_bucket_iam_member", "podplane_registry_writer")
+	writer.Body.Attr("bucket", expr(`google_storage_bucket.podplane_cluster["registry"].name`))
+	writer.Body.Attr("role", str("roles/storage.objectAdmin"))
+	writer.Body.Attr("member", str("serviceAccount:${google_service_account.podplane_registry.email}"))
+	doc.AddBlock(writer)
 }
 
 // googleGenerationError checks contracts the main renderer must check before

@@ -620,13 +620,22 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		if cfg.Cluster.Seed.Name == seeds.Recommended {
 			addNstanceBootstrap(&mainDoc, &seed, provider, secretPrefix)
 		}
+		dependencies := []hclValue{}
+		if provider.Kind == "google" {
+			dependencies = append(dependencies,
+				expr("google_storage_bucket_iam_member.podplane_registry_writer"),
+				expr("google_secret_manager_secret_iam_member.podplane_registry_key"),
+			)
+		}
 		if managedWorkloadCAKey {
-			dependencies := []hclValue{expr("podplane_workload_ca_key.cluster")}
+			dependencies = append(dependencies, expr("podplane_workload_ca_key.cluster"))
 			if defaultProvider := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]; defaultProvider.Kind == "aws" && provider.Kind == "aws" {
 				dependencies = append(dependencies, expr("aws_iam_role_policy.podplane_workload_ca_key"))
 			} else if defaultProvider.Kind == "gcp" && provider.Kind == "google" {
 				dependencies = append(dependencies, expr("google_secret_manager_secret_iam_member.podplane_workload_ca_key"))
 			}
+		}
+		if len(dependencies) > 0 {
 			seed.Body.Attr("depends_on", list(dependencies...))
 		}
 		mainDoc.AddBlock(seed)

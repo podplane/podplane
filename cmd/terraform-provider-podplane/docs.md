@@ -75,6 +75,26 @@ Create uses backend create-only operations and adopts the winner if Nstance, ano
 
 The CLI generates the signer and seed bootstrap references when the AWS/Google `recommended` overlay enables the Nstance operator. Infrastructure must be ready before signer creation, and Nstance-server VM creation must not depend on seed completion: the provider waits for the server to publish its CA.
 
+### Google service-account key
+
+Generated Google Cloud clusters use this resource for Zot's dedicated registry
+writer account, which has object-admin access to the registry bucket. Node and
+Nstance-server identities have read-only access to that bucket.
+
+`podplane_google_service_account_key` creates a Google service-account JSON key
+and writes it directly to Secret Manager. Required inputs are `project`,
+`service_account` (email), and `secret_id` (simple name). Outputs are the secret
+`id`, IAM `key_name`, and pinned `secret_version`; private credentials never enter
+Terraform state. The caller needs IAM key-management and Secret Manager permissions,
+and the organization must allow service-account key creation.
+
+Creation reserves the secret first, or adopts an existing key for the same account.
+An interrupted creation can leave an empty secret or an orphan IAM key: inspect
+both before manually recovering; retries never issue another key into an existing
+secret. Refresh checks metadata only. This resource does not rotate credentials
+or delete the key/secret on destroy; deleting the Google service account still
+revokes its keys.
+
 ### Netsy seed
 
 `podplane_netsy_seed_s3`:

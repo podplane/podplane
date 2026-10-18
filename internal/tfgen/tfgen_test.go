@@ -12,7 +12,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/hashicorp/hcl/v2/hclwrite"
+	"github.com/zclconf/go-cty/cty"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/deps"
@@ -187,6 +190,40 @@ func TestGenerateClusterScenarios(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGoogleRegistryReaderPermissions checks node registry reads without reducing Netsy access.
+func TestGoogleRegistryReaderPermissions(t *testing.T) {
+	cfg, err := clusterconfig.NewDraftConfig("google")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Cluster.Providers[0].Project = "example-project"
+	secrets := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]
+	secrets.ProjectID = "example-project"
+	cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider] = secrets
+	files, err := GenerateCluster(filepath.Join(t.TempDir(), "cluster.jsonc"), cfg, testClusterOptions(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, diags := hclsyntax.ParseConfig([]byte(fileContents(files)["podplane.cluster.roles.tf"]), "roles.tf", hcl.InitialPos)
+	if diags.HasErrors() {
+		t.Fatal(diags)
+	}
+	for _, b := range parsed.Body.(*hclsyntax.Body).Blocks {
+		if b.Type != "resource" || b.Labels[0] != "google_storage_bucket_iam_member" || b.Labels[1] != "podplane_agent" {
+			continue
+		}
+		for bucket, want := range map[string]string{"registry": "roles/storage.objectViewer", "netsy": "roles/storage.objectAdmin"} {
+			ctx := &hcl.EvalContext{Variables: map[string]cty.Value{"each": cty.ObjectVal(map[string]cty.Value{"key": cty.StringVal(bucket)})}}
+			role, diags := b.Body.Attributes["role"].Expr.Value(ctx)
+			if diags.HasErrors() || !role.RawEquals(cty.StringVal(want)) {
+				t.Fatalf("node access to %s = %v (%v), want %s", bucket, role, diags, want)
+			}
+		}
+		return
+	}
+	t.Fatal("node bucket permissions missing")
 }
 
 // TestGenerateNLBIngressCertificates checks NLB clusters do not provision node

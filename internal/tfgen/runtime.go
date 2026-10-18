@@ -371,14 +371,44 @@ func seedValues(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provide
 	}
 	if provider.Kind == "google" {
 		values = append(values, field("zot-registry", expr(`{
-  platform = { zotRegistry = { storage = { driver = "gcs", bucket = google_storage_bucket.podplane_cluster["registry"].name } } }
+  platform = { zotRegistry = { storage = {
+    driver = "gcs"
+    bucket = google_storage_bucket.podplane_cluster["registry"].name
+    keyfile = "/var/run/google/identity/credentials.json"
+    googleSecretVersion = podplane_google_service_account_key.registry.secret_version
+  } } }
+  zot = {
+    serviceAccount = { create = true, name = "zot-registry" }
+    extraVolumes = [
+      { name = "podplane-zot-config", configMap = { name = "zot-registry-config" } },
+      { name = "google-identity", csi = {
+        driver = "secrets-store.csi.k8s.io"
+        readOnly = true
+        volumeAttributes = { secretProviderClass = "zot-registry" }
+      } }
+    ]
+    extraVolumeMounts = [
+      { name = "podplane-zot-config", mountPath = "/etc/zot/config.json", subPath = "config.json", readOnly = true },
+      { name = "google-identity", mountPath = "/var/run/google/identity", readOnly = true }
+    ]
+  }
 }`)))
 	}
 	components := object(identField("values", object(values...)))
-	if provider.Kind == "aws" {
+	switch provider.Kind {
+	case "aws":
 		components = append(components, identField("apps", expr(`{
   "zot-registry" = { namespaceAnnotations = { "iam.amazonaws.com/allowed-roles" = jsonencode([aws_iam_role.podplane_cluster["registry-read-write"].arn]) } }
 }`)))
+	case "google":
+		components = append(components,
+			identField("crds", expr(`{ "secrets-store-csi-driver-crds" = { enabled = true } }`)),
+			identField("apps", expr(`{
+  "secrets-store-csi-driver" = { enabled = true }
+  "secrets-store-csi-provider-gcp" = { enabled = true }
+  "zot-registry" = { dependsOn = ["secrets-store-csi-provider-gcp"] }
+}`)),
+		)
 	}
 	return expr("yamlencode(" + object(identField("platform", object(identField("components", components)))).renderHCL(0) + ")")
 }
