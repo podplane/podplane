@@ -32,29 +32,30 @@ type KubernetesTokenValidator struct {
 	Issuer           string
 }
 
-// ValidateToken validates a Vault/OpenBao Kubernetes auth login JWT.
-func (v *KubernetesTokenValidator) ValidateToken(ctx context.Context, clusterID, role, rawToken string) error {
+// ValidateIdentity verifies a Vault/OpenBao Kubernetes auth login JWT and requested
+// role, then returns the authenticated service-account identity and JWT expiry.
+func (v *KubernetesTokenValidator) ValidateIdentity(ctx context.Context, clusterID, role, rawToken string) (Identity, error) {
 	if v.KubernetesAPIURL == nil {
-		return fmt.Errorf("kubernetes api url resolver is required")
+		return Identity{}, fmt.Errorf("kubernetes api url resolver is required")
 	}
 	apiURL, err := v.KubernetesAPIURL(clusterID)
 	if err != nil {
-		return err
+		return Identity{}, err
 	}
 	issuer := v.Issuer
 	if v.KubernetesIssuer != nil {
 		issuer, err = v.KubernetesIssuer(clusterID)
 		if err != nil {
-			return fmt.Errorf("resolve kubernetes service-account issuer: %w", err)
+			return Identity{}, fmt.Errorf("resolve kubernetes service-account issuer: %w", err)
 		}
 	}
 	if issuer == "" {
-		return fmt.Errorf("kubernetes service-account issuer is required")
+		return Identity{}, fmt.Errorf("kubernetes service-account issuer is required")
 	}
 	jwksURL := strings.TrimRight(apiURL, "/") + "/openid/v1/jwks"
 	keySet, err := v.fetchJWKSet(ctx, jwksURL, rawToken)
 	if err != nil {
-		return fmt.Errorf("fetch kubernetes jwks: %w", err)
+		return Identity{}, fmt.Errorf("fetch kubernetes jwks: %w", err)
 	}
 	tok, err := jwt.Parse(
 		[]byte(rawToken),
@@ -64,22 +65,23 @@ func (v *KubernetesTokenValidator) ValidateToken(ctx context.Context, clusterID,
 		jwt.WithAcceptableSkew(30*time.Second),
 	)
 	if err != nil {
-		return fmt.Errorf("verify kubernetes service-account jwt: %w", err)
+		return Identity{}, fmt.Errorf("verify kubernetes service-account jwt: %w", err)
 	}
 	serviceAccountNamespace, serviceAccountName, ok := serviceAccountSubject(tok.Subject())
 	if !ok {
-		return fmt.Errorf("jwt subject is not a kubernetes service account")
+		return Identity{}, fmt.Errorf("jwt subject is not a kubernetes service account")
+	}
+	if !tok.Expiration().After(time.Now()) {
+		return Identity{}, fmt.Errorf("jwt expiration is required and must be in the future")
 	}
 	if role == operatorRole {
 		if serviceAccountNamespace != operatorServiceAccountNamespace || serviceAccountName != operatorServiceAccountName {
-			return fmt.Errorf("operator role %q is only valid for service account %s/%s", role, operatorServiceAccountNamespace, operatorServiceAccountName)
+			return Identity{}, fmt.Errorf("operator role %q is only valid for service account %s/%s", role, operatorServiceAccountNamespace, operatorServiceAccountName)
 		}
-		return nil
+	} else if role != serviceAccountName {
+		return Identity{}, fmt.Errorf("role %q does not match service account %q", role, serviceAccountName)
 	}
-	if role != serviceAccountName {
-		return fmt.Errorf("role %q does not match service account %q", role, serviceAccountName)
-	}
-	return nil
+	return Identity{Namespace: serviceAccountNamespace, ServiceAccount: serviceAccountName, ExpiresAt: tok.Expiration()}, nil
 }
 
 // serviceAccountSubject parses a Kubernetes service-account JWT subject.

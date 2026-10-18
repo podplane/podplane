@@ -412,7 +412,7 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		natMode = "nstance"
 		fixedAddresses = nat.FixedPublicIPv4Count
 	}
-	addInputVariable(&infraInputsDoc, "nat_mode", "string", str(natMode), "Choose provider-managed NAT or Nstance-managed NAT. Switching modes requires updating network routes.")
+	addInputVariable(&infraInputsDoc, "nat_mode", "string", str(natMode), "Choose provider-managed NAT or Nstance-managed NAT. Changing modes requires destroying and recreating the cluster.")
 	addInputVariable(&infraInputsDoc, "fixed_public_ipv4_count", "number", num(fixedAddresses), "Number of static public IPv4 addresses to reserve for each NAT subnet when using Nstance-managed NAT.")
 	topology := block("locals")
 	topology.Body.Attr("subnets", subnetsValue(provider))
@@ -436,6 +436,31 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 	identity.Body.Attr("provider_region", str(provider.Region))
 	infraInputsDoc.AddBlock(identity)
 
+	// Persist the first applied modes in Terraform state, including when users
+	// apply the generated files directly or override nat_mode on the command line.
+	exposureMode := "nlb"
+	if cfg.Cluster.Tunnel != nil {
+		exposureMode = "tunnel"
+	}
+	guard := block("resource", "terraform_data", "deployment_modes")
+	guard.Body.Attr("input", object(
+		identField("nat", expr("var.nat_mode")),
+		identField("exposure", str(exposureMode)),
+	))
+	lifecycle := block("lifecycle")
+	lifecycle.Body.Attr("ignore_changes", list(expr("input")))
+	for _, mode := range []struct{ name, requested, message string }{
+		{"nat", "var.nat_mode", "Changing NAT mode (provider <-> nstance) in place is not supported. Destroy the cluster, then recreate it with the desired mode."},
+		{"exposure", quote(exposureMode), "Changing exposure mode (NLB <-> tunnel) in place is not supported. Destroy the cluster, then recreate it with the desired mode."},
+	} {
+		condition := block("postcondition")
+		condition.Body.Attr("condition", expr("self.input."+mode.name+" == "+mode.requested))
+		condition.Body.Attr("error_message", str(mode.message))
+		lifecycle.Body.Block(condition)
+	}
+	guard.Body.Block(lifecycle)
+	mainDoc.AddBlock(guard)
+
 	locals := block("locals")
 	if provider.Kind == "aws" {
 		locals.Body.Attr("aws_account_id", expr("data.aws_caller_identity.current.account_id"))
@@ -458,6 +483,7 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 
 	cluster := block("module", "cluster")
 	addNstanceModuleSource(&cluster, opts, "cluster")
+	cluster.Body.Attr("depends_on", list(expr("terraform_data.deployment_modes")))
 	cluster.Body.Attr("cluster_id", expr("local.cluster_id"))
 	cluster.Body.Attr("name_prefix", expr("local.name_prefix"))
 	cluster.Body.Attr("shards", stringValueList(sortedKeys(provider.Zones)))
@@ -504,6 +530,7 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 
 	network := block("module", networkName)
 	addNstanceModuleSource(&network, opts, "network")
+	network.Body.Attr("depends_on", list(expr("terraform_data.deployment_modes")))
 	network.Body.Attr("cluster", expr("module.cluster"))
 	if provider.Kind == "aws" {
 		network.Body.Attr("enable_ssm", expr("var.enable_ssm"))

@@ -419,7 +419,7 @@ func NewServer(pidFile pid.PIDFile, c ConfigSource, addr string, port int, vault
 			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 		},
 	}
-	fakeVault := fakevault.NewHandler(vaultStore, validator.ValidateToken)
+	fakeVault := fakevault.NewHandler(vaultStore, validator.ValidateIdentity)
 	httpsMux.Handle("/vault/", fakeVault)
 	vaultSocketPath := filepath.Join(c.RuntimeDirectory(), localVaultSocketName)
 	vaultListener, err := localVaultListener(vaultSocketPath)

@@ -71,6 +71,27 @@ data "podplane_userdata" "nst_arm64_us_east_1a" {
   })
 }
 
+resource "terraform_data" "deployment_modes" {
+  input = {
+    nat = var.nat_mode
+    exposure = "nlb"
+  }
+
+  lifecycle {
+    ignore_changes = [input]
+
+    postcondition {
+      condition = self.input.nat == var.nat_mode
+      error_message = "Changing NAT mode (provider <-> nstance) in place is not supported. Destroy the cluster, then recreate it with the desired mode."
+    }
+
+    postcondition {
+      condition = self.input.exposure == "nlb"
+      error_message = "Changing exposure mode (NLB <-> tunnel) in place is not supported. Destroy the cluster, then recreate it with the desired mode."
+    }
+  }
+}
+
 locals {
   aws_account_id = data.aws_caller_identity.current.account_id
   aws_region = data.aws_region.current.region
@@ -157,6 +178,7 @@ locals {
 
 module "cluster" {
   source = "../../cache/deps/tf/modules/nstance/2.0.1/modules/cluster"
+  depends_on = [terraform_data.deployment_modes]
   cluster_id = local.cluster_id
   name_prefix = local.name_prefix
   shards = ["us-east-1a"]
@@ -171,6 +193,7 @@ module "account_123456789012_us_east_1" {
 
 module "network_123456789012_us_east_1" {
   source = "../../cache/deps/tf/modules/nstance/2.0.1/modules/network"
+  depends_on = [terraform_data.deployment_modes]
   cluster = module.cluster
   enable_ssm = var.enable_ssm
   vpc_id = var.vpc_id

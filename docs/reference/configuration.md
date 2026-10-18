@@ -305,7 +305,13 @@ NAT is independent of tunnels/NLBs. Nstance-managed NAT requires public NAT
 and Nstance subnets in each zone. The Nstance Server VM needs outbound cloud API, storage
 and tunnel-provider access even when its managed NAT VMs are removed during sleep;
 public placement avoids that dependency without exposing its management APIs.
-Changing NAT mode preserves node subnets; changing their CIDRs is a separate migration.
+Changing NAT mode (`provider` ↔ `nstance`) in place is not supported. Destroy the
+cluster, then recreate it with the desired mode. Generated OpenTofu/Terraform
+state records the initial NAT and exposure (NLB or tunnel) modes and rejects
+changes, including direct applies and `nat_mode` variable overrides. Delete the
+cluster before editing these modes; if already edited, the mode guard still allows
+destroy with the edited configuration. Normal updates and manual sleep do not change
+these modes.
 
 AWS/Google `recommended` clusters support [`cluster sleep`](cli/commands/cluster-sleep.md)
 and wake on API or ingress traffic.

@@ -22,7 +22,7 @@ const methodList = "LIST"
 // handler serves the local Vault-compatible API with secret storage and scoped login tokens.
 type handler struct {
 	store     Store
-	validator func(context.Context, string, string, string) error
+	validator func(context.Context, string, string, string) (Identity, error)
 	trusted   bool
 	mu        sync.Mutex
 	tokens    map[string]token
@@ -38,6 +38,16 @@ func NewTrustedHandler(store Store) http.Handler {
 type token struct {
 	ClusterID string
 	ExpiresAt time.Time
+	Namespace string
+	Role      string
+	Operator  bool
+}
+
+// Identity is the verified Kubernetes service-account identity and JWT expiry.
+type Identity struct {
+	Namespace      string
+	ServiceAccount string
+	ExpiresAt      time.Time
 }
 
 // loginRequest carries the Kubernetes JWT and requested Vault auth role.
@@ -46,9 +56,9 @@ type loginRequest struct {
 	Role string `json:"role"`
 }
 
-// NewHandler returns a minimal Vault/OpenBao-compatible HTTP handler. When
-// validator is set, Kubernetes auth login JWTs must pass validation.
-func NewHandler(store Store, validator func(context.Context, string, string, string) error) http.Handler {
+// NewHandler returns a minimal Vault/OpenBao-compatible HTTP handler for local VMs.
+// Login requires a validator; authenticated workload tokens have scoped, read-only access.
+func NewHandler(store Store, validator func(context.Context, string, string, string) (Identity, error)) http.Handler {
 	return &handler{
 		store:     store,
 		validator: validator,
@@ -74,6 +84,22 @@ func (h *handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	if apiPath == "/sys/podplane/cluster" {
 		h.serveClusterDelete(rw, r, clusterID)
 		return
+	}
+	// Validate exactly the same normalized path the store will use, before
+	// dispatching any read, list, or lifecycle mutation.
+	_, cleanPath, err := cleanClusterPath(clusterID, apiPath)
+	if err != nil {
+		errorResponse(rw, http.StatusForbidden, "permission denied")
+		return
+	}
+	apiPath = "/" + cleanPath
+	if !h.trusted {
+		entry, ok := h.authenticate(r.Header.Get("X-Vault-Token"), clusterID)
+		prefix := "secret/data/" + clusterID + "/" + entry.Namespace + "/" + entry.Role + "/"
+		if !ok || (!entry.Operator && (r.Method != http.MethodGet || r.URL.Query().Get("list") != "" || !strings.HasPrefix(cleanPath, prefix))) {
+			errorResponse(rw, http.StatusForbidden, "permission denied")
+			return
+		}
 	}
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		if path, ok := undeleteDataPath(apiPath); ok {
@@ -108,11 +134,15 @@ func (h *handler) serveLogin(rw http.ResponseWriter, r *http.Request, clusterID 
 		errorResponse(rw, http.StatusBadRequest, "jwt is required")
 		return
 	}
-	if h.validator != nil {
-		if err := h.validator(r.Context(), clusterID, req.Role, req.JWT); err != nil {
-			errorResponse(rw, http.StatusForbidden, "invalid jwt")
-			return
-		}
+	if h.validator == nil {
+		errorResponse(rw, http.StatusForbidden, "login unavailable")
+		return
+	}
+	identity, err := h.validator(r.Context(), clusterID, req.Role, req.JWT)
+	operator := req.Role == operatorRole && identity.Namespace == operatorServiceAccountNamespace && identity.ServiceAccount == operatorServiceAccountName
+	if err != nil || !validIdentitySegment(identity.Namespace) || !validIdentitySegment(identity.ServiceAccount) || !identity.ExpiresAt.After(time.Now()) || (req.Role == operatorRole && !operator) || (!operator && req.Role != identity.ServiceAccount) {
+		errorResponse(rw, http.StatusForbidden, "invalid jwt")
+		return
 	}
 
 	clientToken, err := randomToken()
@@ -121,17 +151,24 @@ func (h *handler) serveLogin(rw http.ResponseWriter, r *http.Request, clusterID 
 		return
 	}
 	expiresAt := time.Now().Add(time.Hour)
+	if identity.ExpiresAt.Before(expiresAt) {
+		expiresAt = identity.ExpiresAt
+	}
 	h.mu.Lock()
-	h.tokens[clientToken] = token{ClusterID: clusterID, ExpiresAt: expiresAt}
+	h.tokens[clientToken] = token{ClusterID: clusterID, ExpiresAt: expiresAt, Namespace: identity.Namespace, Role: req.Role, Operator: operator}
 	h.mu.Unlock()
 
 	jsonResponse(rw, http.StatusOK, map[string]any{
 		"auth": map[string]any{
 			"client_token":   clientToken,
-			"lease_duration": int(time.Hour.Seconds()),
+			"lease_duration": int(time.Until(expiresAt).Seconds()),
 			"renewable":      false,
 		},
 	})
+}
+
+func validIdentitySegment(value string) bool {
+	return value != "" && value != "." && value != ".." && !strings.ContainsAny(value, "/\\ \t\r\n")
 }
 
 // serveMount returns enough mount metadata for the bao CLI to detect KV-v2.

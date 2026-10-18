@@ -7,6 +7,8 @@ package fakevault
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +16,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 )
 
 // memoryStore tracks secret values, archive state, and versions for handler tests.
@@ -24,8 +28,12 @@ type memoryStore struct {
 }
 
 // rejectToken always rejects login JWTs for handler tests.
-func rejectToken(context.Context, string, string, string) error {
-	return fmt.Errorf("rejected")
+func rejectToken(context.Context, string, string, string) (Identity, error) {
+	return Identity{}, fmt.Errorf("rejected")
+}
+
+func managementToken(context.Context, string, string, string) (Identity, error) {
+	return Identity{Namespace: operatorServiceAccountNamespace, ServiceAccount: operatorServiceAccountName, ExpiresAt: time.Now().Add(time.Hour)}, nil
 }
 
 // SetSecret stores a fakevault secret in memory for handler tests.
@@ -147,34 +155,25 @@ func (s *memoryStore) ListSecrets(clusterID string) ([]Secret, error) {
 	return secrets, nil
 }
 
-// TestHandlerLoginAndReadSecret verifies login and authenticated KV reads.
+// TestHandlerLoginAndReadSecret verifies a signed operator JWT grants cluster-wide reads.
 func TestHandlerLoginAndReadSecret(t *testing.T) {
 	store := &memoryStore{secrets: map[string]map[string]string{
 		"dev:secret/data/apps/app/db": {"password": "secret"},
 	}}
-	handler := NewHandler(store, nil)
-
-	loginBody := bytes.NewBufferString(`{"jwt":"token","role":"app"}`)
-	loginReq := httptest.NewRequest(http.MethodPost, "/vault/dev/v1/auth/kubernetes/login", loginBody)
-	loginRec := httptest.NewRecorder()
-	handler.ServeHTTP(loginRec, loginReq)
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("login status = %d, body = %s", loginRec.Code, loginRec.Body.String())
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var loginResp struct {
-		Auth struct {
-			ClientToken string `json:"client_token"`
-		} `json:"auth"`
+	validator := testKubernetesTokenValidator(t, key)
+	handler := NewHandler(store, validator.ValidateIdentity)
+	rawToken, err := testServiceAccountJWTForSubject(key, "system:serviceaccount:platform-podplane-operator:platform-podplane-operator")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := json.Unmarshal(loginRec.Body.Bytes(), &loginResp); err != nil {
-		t.Fatalf("decode login response: %v", err)
-	}
-	if loginResp.Auth.ClientToken == "" {
-		t.Fatalf("login response missing client token")
-	}
+	token, _ := loginWithJWT(t, handler, "dev", "podplane-operator", rawToken)
 
 	readReq := httptest.NewRequest(http.MethodGet, "/vault/dev/v1/secret/data/apps/app/db", nil)
-	readReq.Header.Set("X-Vault-Token", loginResp.Auth.ClientToken)
+	readReq.Header.Set("X-Vault-Token", token)
 	readRec := httptest.NewRecorder()
 	handler.ServeHTTP(readRec, readReq)
 	if readRec.Code != http.StatusOK {
@@ -198,9 +197,9 @@ func TestHandlerRejectsCrossClusterToken(t *testing.T) {
 	store := &memoryStore{secrets: map[string]map[string]string{
 		"other:secret/data/apps/app/db": {"password": "secret"},
 	}}
-	handler := NewHandler(store, nil)
+	handler := NewHandler(store, managementToken)
 
-	loginReq := httptest.NewRequest(http.MethodPost, "/vault/dev/v1/auth/kubernetes/login", bytes.NewBufferString(`{"jwt":"token","role":"app"}`))
+	loginReq := httptest.NewRequest(http.MethodPost, "/vault/dev/v1/auth/kubernetes/login", bytes.NewBufferString(`{"jwt":"token","role":"podplane-operator"}`))
 	loginRec := httptest.NewRecorder()
 	handler.ServeHTTP(loginRec, loginReq)
 	var loginResp struct {
@@ -226,7 +225,7 @@ func TestHandlerRejectsUnscopedVaultPath(t *testing.T) {
 	store := &memoryStore{secrets: map[string]map[string]string{
 		"dev:secret/data/apps/app/db": {"password": "secret"},
 	}}
-	handler := NewHandler(store, nil)
+	handler := NewHandler(store, managementToken)
 
 	loginReq := httptest.NewRequest(http.MethodPost, "/vault/v1/auth/kubernetes/login", bytes.NewBufferString(`{"jwt":"token","role":"app"}`))
 	loginRec := httptest.NewRecorder()
@@ -236,21 +235,146 @@ func TestHandlerRejectsUnscopedVaultPath(t *testing.T) {
 	}
 }
 
-// TestHandlerRejectsInvalidLoginJWT verifies validator failures reject login.
+// TestHandlerRejectsInvalidLoginJWT verifies missing or failing validators reject login.
 func TestHandlerRejectsInvalidLoginJWT(t *testing.T) {
-	handler := NewHandler(&memoryStore{}, rejectToken)
-	loginReq := httptest.NewRequest(http.MethodPost, "/vault/dev/v1/auth/kubernetes/login", bytes.NewBufferString(`{"jwt":"token","role":"app"}`))
-	loginRec := httptest.NewRecorder()
-	handler.ServeHTTP(loginRec, loginReq)
-	if loginRec.Code != http.StatusForbidden {
-		t.Fatalf("login status = %d, want %d", loginRec.Code, http.StatusForbidden)
+	for _, tt := range []struct {
+		name      string
+		validator func(context.Context, string, string, string) (Identity, error)
+	}{
+		{name: "missing validator"},
+		{name: "rejected JWT", validator: rejectToken},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewHandler(&memoryStore{}, tt.validator)
+			loginReq := httptest.NewRequest(http.MethodPost, "/vault/dev/v1/auth/kubernetes/login", bytes.NewBufferString(`{"jwt":"token","role":"app"}`))
+			loginRec := httptest.NewRecorder()
+			handler.ServeHTTP(loginRec, loginReq)
+			if loginRec.Code != http.StatusForbidden {
+				t.Fatalf("login status = %d, want %d", loginRec.Code, http.StatusForbidden)
+			}
+		})
+	}
+}
+
+// TestHandlerWorkloadAuthorization exercises signed JWT login through scoped KV access.
+func TestHandlerWorkloadAuthorization(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validator := testKubernetesTokenValidator(t, key)
+	rawToken, err := testServiceAccountJWTForSubject(key, "system:serviceaccount:team-a:api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const ownPath = "secret/data/dev/team-a/api/key"
+	for _, tt := range []struct {
+		name   string
+		method string
+		path   string
+		status int
+	}{
+		{"own secret", http.MethodGet, "/vault/dev/v1/" + ownPath, http.StatusOK},
+		{"other namespace", http.MethodGet, "/vault/dev/v1/secret/data/dev/team-b/api/key", http.StatusForbidden},
+		{"other binding", http.MethodGet, "/vault/dev/v1/secret/data/dev/team-a/worker/key", http.StatusForbidden},
+		{"binding prefix", http.MethodGet, "/vault/dev/v1/secret/data/dev/team-a/api-other/key", http.StatusForbidden},
+		{"other cluster", http.MethodGet, "/vault/other/v1/" + ownPath, http.StatusForbidden},
+		{"other key prefix", http.MethodGet, "/vault/dev/v1/secret/data/other/team-a/api/key", http.StatusForbidden},
+		{"CA key", http.MethodGet, "/vault/dev/v1/secret/data/dev/workload-ca-key", http.StatusForbidden},
+		{"parent traversal", http.MethodGet, "/vault/dev/v1/secret/data/dev/team-a/api/../../worker/key", http.StatusForbidden},
+		{"encoded traversal", http.MethodGet, "/vault/dev/v1/secret/data/dev/team-a/api/%2e%2e/worker/key", http.StatusForbidden},
+		{"empty segment", http.MethodGet, "/vault/dev/v1/secret/data/dev/team-a/api//key", http.StatusForbidden},
+		{"metadata", http.MethodGet, "/vault/dev/v1/secret/metadata/dev/team-a/api/key", http.StatusForbidden},
+		{"list query", http.MethodGet, "/vault/dev/v1/" + ownPath + "?list=true", http.StatusForbidden},
+		{"list method", methodList, "/vault/dev/v1/secret/metadata/dev/team-a/api", http.StatusForbidden},
+		{"post", http.MethodPost, "/vault/dev/v1/" + ownPath, http.StatusForbidden},
+		{"put", http.MethodPut, "/vault/dev/v1/" + ownPath, http.StatusForbidden},
+		{"patch", http.MethodPatch, "/vault/dev/v1/" + ownPath, http.StatusForbidden},
+		{"archive", http.MethodDelete, "/vault/dev/v1/" + ownPath, http.StatusForbidden},
+		{"delete metadata", http.MethodDelete, "/vault/dev/v1/secret/metadata/dev/team-a/api/key", http.StatusForbidden},
+		{"restore", http.MethodPost, "/vault/dev/v1/secret/undelete/dev/team-a/api/key", http.StatusForbidden},
+		{"destroy", http.MethodPost, "/vault/dev/v1/secret/destroy/dev/team-a/api/key", http.StatusForbidden},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store := NewFileStore(&testKeyring{}, t.TempDir())
+			for _, path := range []string{ownPath, "secret/data/dev/team-b/api/key", "secret/data/dev/team-a/worker/key", "secret/data/dev/workload-ca-key"} {
+				if err := store.SetSecret("dev", path, map[string]string{"value": "original"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			handler := NewHandler(store, validator.ValidateIdentity)
+			token, _ := loginWithJWT(t, handler, "dev", "api", rawToken)
+			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(`{"data":{"value":"changed"},"versions":[1]}`))
+			req.Header.Set("X-Vault-Token", token)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tt.status {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.status, rec.Body.String())
+			}
+			if tt.status == http.StatusOK {
+				var response struct {
+					Data struct {
+						Data map[string]string `json:"data"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				if response.Data.Data["value"] != "original" {
+					t.Fatalf("read value = %q, want original", response.Data.Data["value"])
+				}
+			}
+			values, ok, err := store.GetSecret("dev", ownPath)
+			if err != nil || !ok || values["value"] != "original" {
+				t.Fatalf("stored value changed: %v, exists=%v, error=%v", values, ok, err)
+			}
+		})
+	}
+}
+
+// TestHandlerTokenExpiration checks both lifetime limits without waiting on wall time.
+func TestHandlerTokenExpiration(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		jwtTTL   time.Duration
+		tokenTTL time.Duration
+	}{
+		{"JWT limit", 10 * time.Minute, 10 * time.Minute},
+		{"one hour limit", 4 * time.Hour, time.Hour},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				identity := Identity{Namespace: "team-a", ServiceAccount: "api", ExpiresAt: time.Now().Add(tt.jwtTTL)}
+				store := &memoryStore{secrets: map[string]map[string]string{
+					"dev:secret/data/dev/team-a/api/key": {"value": "original"},
+				}}
+				handler := NewHandler(store, func(context.Context, string, string, string) (Identity, error) {
+					return identity, nil
+				})
+				token, lease := loginWithJWT(t, handler, "dev", "api", "verified-by-test-validator")
+				if lease != tt.tokenTTL {
+					t.Fatalf("lease = %s, want %s", lease, tt.tokenTTL)
+				}
+				time.Sleep(tt.tokenTTL - time.Nanosecond)
+				for _, want := range []int{http.StatusOK, http.StatusForbidden} {
+					req := httptest.NewRequest(http.MethodGet, "/vault/dev/v1/secret/data/dev/team-a/api/key", nil)
+					req.Header.Set("X-Vault-Token", token)
+					rec := httptest.NewRecorder()
+					handler.ServeHTTP(rec, req)
+					if rec.Code != want {
+						t.Fatalf("status at %s = %d, want %d", time.Now(), rec.Code, want)
+					}
+					time.Sleep(time.Nanosecond)
+				}
+			})
+		})
 	}
 }
 
 // TestHandlerWriteListAndDeleteSecret verifies the writable KV-v2 surface.
 func TestHandlerWriteListAndDeleteSecret(t *testing.T) {
 	store := &memoryStore{}
-	handler := NewHandler(store, nil)
+	handler := NewHandler(store, managementToken)
 	token := loginToken(t, handler, "dev")
 
 	writeReq := httptest.NewRequest(http.MethodPut, "/vault/dev/v1/secret/data/apps/app/db", bytes.NewBufferString(`{"data":{"password":"secret"}}`))
@@ -301,7 +425,7 @@ func TestHandlerWriteListAndDeleteSecret(t *testing.T) {
 // the encrypted file-backed fakevault store used by the local server.
 func TestHandlerWithFileStoreWriteReadAndList(t *testing.T) {
 	store := NewFileStore(&testKeyring{}, t.TempDir())
-	handler := NewHandler(store, nil)
+	handler := NewHandler(store, managementToken)
 	token := loginToken(t, handler, "dev")
 
 	writeReq := httptest.NewRequest(http.MethodPut, "/vault/dev/v1/secret/data/apps/app/api", bytes.NewBufferString(`{"data":{"token":"secret"}}`))
@@ -354,7 +478,7 @@ func TestHandlerWithFileStoreWriteReadAndList(t *testing.T) {
 // TestHandlerAcceptsBaoWriteBody verifies flat bao write payloads are accepted.
 func TestHandlerAcceptsBaoWriteBody(t *testing.T) {
 	store := &memoryStore{}
-	handler := NewHandler(store, nil)
+	handler := NewHandler(store, managementToken)
 	token := loginToken(t, handler, "dev")
 
 	writeReq := httptest.NewRequest(http.MethodPut, "/vault/dev/v1/secret/data/apps/app/db", bytes.NewBufferString(`{"password":"secret"}`))
@@ -520,7 +644,18 @@ func TestHandlerReturnsKVV2MountMetadata(t *testing.T) {
 // loginToken logs into the handler and returns the issued fakevault token.
 func loginToken(t *testing.T, handler http.Handler, clusterID string) string {
 	t.Helper()
-	loginReq := httptest.NewRequest(http.MethodPut, "/vault/"+clusterID+"/v1/auth/kubernetes/login", bytes.NewBufferString(`{"jwt":"token","role":"app"}`))
+	token, _ := loginWithJWT(t, handler, clusterID, "podplane-operator", "token")
+	return token
+}
+
+// loginWithJWT requires successful login and returns the token and advertised lifetime.
+func loginWithJWT(t *testing.T, handler http.Handler, clusterID, role, rawToken string) (string, time.Duration) {
+	t.Helper()
+	body, err := json.Marshal(map[string]string{"jwt": rawToken, "role": role})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginReq := httptest.NewRequest(http.MethodPut, "/vault/"+clusterID+"/v1/auth/kubernetes/login", bytes.NewReader(body))
 	loginRec := httptest.NewRecorder()
 	handler.ServeHTTP(loginRec, loginReq)
 	if loginRec.Code != http.StatusOK {
@@ -528,11 +663,15 @@ func loginToken(t *testing.T, handler http.Handler, clusterID string) string {
 	}
 	var loginResp struct {
 		Auth struct {
-			ClientToken string `json:"client_token"`
+			ClientToken   string `json:"client_token"`
+			LeaseDuration int    `json:"lease_duration"`
 		} `json:"auth"`
 	}
 	if err := json.Unmarshal(loginRec.Body.Bytes(), &loginResp); err != nil {
 		t.Fatalf("decode login response: %v", err)
 	}
-	return loginResp.Auth.ClientToken
+	if loginResp.Auth.ClientToken == "" {
+		t.Fatal("login response missing client token")
+	}
+	return loginResp.Auth.ClientToken, time.Duration(loginResp.Auth.LeaseDuration) * time.Second
 }

@@ -57,7 +57,7 @@ func TestKubernetesTokenValidatorAcceptsServiceAccountJWT(t *testing.T) {
 		KubernetesIssuer: func(string) (string, error) { return testKubernetesServiceAccountIssuer, nil },
 		Client:           server.Client(),
 	}
-	if err := validator.ValidateToken(context.Background(), "dev", "default", rawToken); err != nil {
+	if _, err := validator.ValidateIdentity(context.Background(), "dev", "default", rawToken); err != nil {
 		t.Fatalf("validate token: %v", err)
 	}
 }
@@ -74,7 +74,7 @@ func TestKubernetesTokenValidatorAcceptsOperatorRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign jwt: %v", err)
 	}
-	if err := validator.ValidateToken(context.Background(), "dev", "podplane-operator", rawToken); err != nil {
+	if _, err := validator.ValidateIdentity(context.Background(), "dev", "podplane-operator", rawToken); err != nil {
 		t.Fatalf("validate token: %v", err)
 	}
 }
@@ -87,18 +87,72 @@ func TestKubernetesTokenValidatorRejectsMismatchedRole(t *testing.T) {
 		t.Fatalf("generate key: %v", err)
 	}
 	validator := testKubernetesTokenValidator(t, key)
-	rawToken, err := testServiceAccountJWTForSubject(key, "system:serviceaccount:default:hello")
+	for _, tt := range []struct {
+		name    string
+		subject string
+		role    string
+	}{
+		{"other workload role", "system:serviceaccount:default:hello", "other"},
+		{"operator role", "system:serviceaccount:default:hello", "podplane-operator"},
+		{"operator name in wrong namespace", "system:serviceaccount:default:platform-podplane-operator", "podplane-operator"},
+		{"wrong name in operator namespace", "system:serviceaccount:platform-podplane-operator:hello", "podplane-operator"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rawToken, err := testServiceAccountJWTForSubject(key, tt.subject)
+			if err != nil {
+				t.Fatalf("sign jwt: %v", err)
+			}
+			if _, err := validator.ValidateIdentity(context.Background(), "dev", tt.role, rawToken); err == nil {
+				t.Fatal("accepted mismatched role")
+			}
+		})
+	}
+}
+
+// TestKubernetesTokenValidatorRejectsInvalidJWT checks signature, issuer, and expiry validation.
+func TestKubernetesTokenValidatorRejectsInvalidJWT(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		t.Fatalf("sign jwt: %v", err)
+		t.Fatal(err)
 	}
-	if err := validator.ValidateToken(context.Background(), "dev", "hello", rawToken); err != nil {
-		t.Fatalf("validate matching workload role: %v", err)
-	}
-	if err := validator.ValidateToken(context.Background(), "dev", "other", rawToken); err == nil {
-		t.Fatalf("expected mismatched workload role error")
-	}
-	if err := validator.ValidateToken(context.Background(), "dev", "podplane-operator", rawToken); err == nil {
-		t.Fatalf("expected operator role error for non-operator service account")
+	validator := testKubernetesTokenValidator(t, key)
+	for _, tt := range []struct {
+		name             string
+		issuer           string
+		ttl              time.Duration
+		invalidSignature bool
+	}{
+		{"signature", testKubernetesServiceAccountIssuer, time.Hour, true},
+		{"issuer", "https://wrong.example", time.Hour, false},
+		{"expired", testKubernetesServiceAccountIssuer, -time.Second, false},
+		{"missing expiry", testKubernetesServiceAccountIssuer, 0, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := jwt.NewBuilder().Issuer(tt.issuer).Subject("system:serviceaccount:team-a:api")
+			if tt.ttl != 0 {
+				builder = builder.Expiration(time.Now().Add(tt.ttl))
+			}
+			token, err := builder.Build()
+			if err != nil {
+				t.Fatal(err)
+			}
+			headers := jws.NewHeaders()
+			if err := headers.Set(jws.KeyIDKey, "test"); err != nil {
+				t.Fatal(err)
+			}
+			signed, err := jwt.Sign(token, jwt.WithKey(jwa.RS256, key, jws.WithProtectedHeaders(headers)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			rawToken := string(signed)
+			if tt.invalidSignature {
+				parts := strings.Split(rawToken, ".")
+				rawToken = parts[0] + "." + parts[1] + ".AAAA"
+			}
+			if _, err := validator.ValidateIdentity(context.Background(), "dev", "api", rawToken); err == nil {
+				t.Fatal("accepted invalid JWT")
+			}
+		})
 	}
 }
 

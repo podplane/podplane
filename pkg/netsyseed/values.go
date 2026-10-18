@@ -244,7 +244,6 @@ func applyRecommendedProviderComponents(components map[string]any, cfg *clusterc
 		"config": map[string]any{
 			"clusterID": cfg.Cluster.ID,
 			"tenant":    "default",
-			"sleep":     map[string]any{"enabled": false},
 		},
 		"clusterCA": map[string]any{
 			"enabled": false,

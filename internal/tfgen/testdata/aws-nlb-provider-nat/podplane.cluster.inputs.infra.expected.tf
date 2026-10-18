@@ -25,7 +25,7 @@ variable "enable_ssm" {
 }
 
 variable "nat_mode" {
-  description = "Choose provider-managed NAT or Nstance-managed NAT. Switching modes requires updating network routes."
+  description = "Choose provider-managed NAT or Nstance-managed NAT. Changing modes requires destroying and recreating the cluster."
   type = string
   default = "provider"
 }

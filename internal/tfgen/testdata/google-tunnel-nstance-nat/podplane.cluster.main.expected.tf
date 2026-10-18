@@ -67,6 +67,27 @@ data "podplane_userdata" "nst_amd64_us_central1_a" {
   })
 }
 
+resource "terraform_data" "deployment_modes" {
+  input = {
+    nat = var.nat_mode
+    exposure = "tunnel"
+  }
+
+  lifecycle {
+    ignore_changes = [input]
+
+    postcondition {
+      condition = self.input.nat == var.nat_mode
+      error_message = "Changing NAT mode (provider <-> nstance) in place is not supported. Destroy the cluster, then recreate it with the desired mode."
+    }
+
+    postcondition {
+      condition = self.input.exposure == "tunnel"
+      error_message = "Changing exposure mode (NLB <-> tunnel) in place is not supported. Destroy the cluster, then recreate it with the desired mode."
+    }
+  }
+}
+
 locals {
   netsy_bucket_name = "${local.cluster_id}-${local.provider_project}-netsy"
   registry_bucket_name = "${local.cluster_id}-${local.provider_project}-registry"
@@ -206,6 +227,7 @@ locals {
 
 module "cluster" {
   source = "../../cache/deps/tf/modules/nstance/2.0.1/modules/cluster"
+  depends_on = [terraform_data.deployment_modes]
   cluster_id = local.cluster_id
   name_prefix = local.name_prefix
   shards = ["us-central1-a"]
@@ -219,6 +241,7 @@ module "account__us_central1" {
 
 module "network__us_central1" {
   source = "../../cache/deps/tf/modules/nstance/2.0.1/modules/network"
+  depends_on = [terraform_data.deployment_modes]
   cluster = module.cluster
   vpc_id = var.vpc_id
   vpc_cidr_ipv4 = var.vpc_cidr_ipv4
