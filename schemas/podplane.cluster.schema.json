@@ -500,7 +500,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": { "type": "boolean", "description": "Enable optional Docker-compatible registry ingress and token-service routing. Disabled by default." }
+        "enabled": { "type": "boolean", "description": "Expose Zot's registry and token endpoints over HTTPS for Docker clients. The registry hostname must match a cluster.domains zone or an immediate subdomain. Disabled by default." }
       }
     },
     "componentsSource": {

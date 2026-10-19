@@ -396,8 +396,58 @@ func TestBuildPlatformComponentsValuesZotRegistryLocalBucket(t *testing.T) {
 	if got := oidc["certificateAuthority"]; got == "" {
 		t.Fatal("oidc.certificateAuthority is empty, want local CA contents")
 	}
-	if _, ok := componentValues(values, "zot-registry")["zot"]; ok {
+	zot := componentValues(values, "zot-registry")["zot"].(map[string]any)
+	if _, ok := zot["hostAliases"]; ok {
 		t.Fatal("zot.hostAliases must be supplied by a runtime values overlay")
+	}
+}
+
+// TestZotRegistryIngress checks opt-in HTTPS routing and certificate hostname coverage.
+func TestZotRegistryIngress(t *testing.T) {
+	for _, tc := range []struct {
+		name, hostname, listener string
+		enabled, wantErr         bool
+	}{
+		{name: "disabled", hostname: "private.local"},
+		{name: "wildcard", hostname: "registry.example.com", enabled: true, listener: "https-wildcard-example-com-a379a6f6"},
+		{name: "apex", hostname: "example.com", enabled: true, listener: "https-example-com-a379a6f6"},
+		{name: "nested subdomain", hostname: "registry.team.example.com", enabled: true, wantErr: true},
+		{name: "unrelated domain", hostname: "registry.other.com", enabled: true, wantErr: true},
+		{name: "missing hostname", enabled: true, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+				ID: "test-cluster", Domains: []clusterconfig.Domain{{Zone: "example.com"}},
+				Registry: clusterconfig.Registry{Hostname: tc.hostname, Ingress: clusterconfig.RegistryIngress{Enabled: tc.enabled}},
+			}}
+			values, err := buildPlatformComponentsValues(cfg, true)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected an error for a hostname without an HTTPS listener")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			route := componentValues(values, "zot-registry")["zot"].(map[string]any)["httproute"].(map[string]any)
+			if route["enabled"] != tc.enabled {
+				t.Fatalf("httproute.enabled = %v, want %v", route["enabled"], tc.enabled)
+			}
+			if !tc.enabled {
+				if route["parentRefs"] != nil {
+					t.Fatal("disabled ingress must not attach to a Gateway")
+				}
+				return
+			}
+			if got := route["hostnames"].([]any); len(got) != 1 || got[0] != tc.hostname {
+				t.Fatalf("hostnames = %v, want [%s]", got, tc.hostname)
+			}
+			parent := route["parentRefs"].([]any)[0].(map[string]any)
+			if parent["name"] != "platform-envoy-gateway" || parent["namespace"] != "platform-envoy-gateway" || parent["sectionName"] != tc.listener {
+				t.Fatalf("unexpected HTTPS parent: %v", parent)
+			}
+		})
 	}
 }
 

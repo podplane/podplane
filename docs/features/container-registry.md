@@ -5,7 +5,7 @@ weight: 10
 description: "Store application and mirrored container images in OCI-compatible object storage via the built-in container registry"
 ---
 
-Podplane gives each cluster its own OCI container registry. You can still connect and bring your own additional containe registries.
+Podplane gives each cluster its own OCI container registry. You can still connect and bring your own additional container registries.
 
 ## Using the built-in container registry
 
@@ -27,6 +27,9 @@ The "writable" registry runs on your cluster as a Deployment and is powered by [
 It uses OIDC authentication and role-based repository policies.
 
 `podplane push` connects through a temporary Kubernetes port-forward, so the registry does not need to be exposed publicly. An optional Docker-compatible ingress is available when external registry access is required.
+
+- To enable Docker access, set `cluster.registry.ingress.enabled` to `true` and choose a `cluster.registry.hostname` covered by one of your `cluster.domains` entries: either the zone itself or an immediate subdomain such as `registry.example.com`. Point that hostname at the cluster's ingress endpoint and ensure Docker trusts its HTTPS certificate.
+- Run `podplane login` to register Podplane's Docker credential helper, then push to `<registry-hostname>/apps/<image>:<tag>`. The helper supplies your current OIDC token; Zot handles token exchange at `/zot/auth/token` and registry requests under `/v2/`. Both paths use the same HTTPS hostname and repository permissions. Ingress is disabled by default and is not needed for `podplane push`.
 
 On each Kubernetes node, Podplane also runs a read-only registry service backed by the same object store - this mitigates bootstrap issues where Zot Registry would be unable to start due to its own container image being stored in the registry.
 

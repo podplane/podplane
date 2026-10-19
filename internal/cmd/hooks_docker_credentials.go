@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/podplane/podplane/internal/clusterauth"
@@ -25,11 +24,11 @@ func newHooksDockerCredentialsCmd(c *config.Config) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch args[0] {
 			case "get":
-				var serverURL string
-				if err := json.NewDecoder(os.Stdin).Decode(&serverURL); err != nil {
+				input, err := io.ReadAll(cmd.InOrStdin())
+				if err != nil {
 					return err
 				}
-				serverURL = strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(serverURL), "https://"), "http://")
+				serverURL := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(string(input)), "https://"), "http://")
 				serverURL = strings.TrimSuffix(serverURL, "/")
 				for _, local := range []bool{false, true} {
 					entries, err := c.AuthListByCluster("", local)
@@ -46,7 +45,7 @@ func newHooksDockerCredentialsCmd(c *config.Config) *cobra.Command {
 						if err != nil {
 							return err
 						}
-						return json.NewEncoder(os.Stdout).Encode(map[string]string{
+						return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{
 							"ServerURL": serverURL,
 							"Username":  "<token>",
 							"Secret":    token,
@@ -55,10 +54,10 @@ func newHooksDockerCredentialsCmd(c *config.Config) *cobra.Command {
 				}
 				return fmt.Errorf("no Podplane registry credentials found for %s", serverURL)
 			case "store", "erase":
-				_, _ = io.Copy(io.Discard, os.Stdin)
+				_, _ = io.Copy(io.Discard, cmd.InOrStdin())
 				return nil
 			case "list":
-				_, _ = io.WriteString(os.Stdout, "{}\n")
+				_, _ = io.WriteString(cmd.OutOrStdout(), "{}\n")
 				return nil
 			default:
 				return fmt.Errorf("unsupported docker credential helper action %q", args[0])

@@ -34,6 +34,9 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, nodeCertifi
 	if registryHostname == "" && len(cfg.Cluster.Providers) > 0 {
 		registryHostname = cfg.ResolvedRegistryHostname()
 	}
+	if cfg.Cluster.Registry.Ingress.Enabled && registryHostname == "" {
+		return nil, fmt.Errorf("cluster.registry.hostname is required for registry ingress")
+	}
 	if registryHostname != "" {
 		componentValues = ensureChildMap(components, "values")
 		zotStorage := map[string]any{
@@ -63,6 +66,18 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, nodeCertifi
 				},
 			},
 		}
+		route := map[string]any{"enabled": cfg.Cluster.Registry.Ingress.Enabled}
+		if cfg.Cluster.Registry.Ingress.Enabled {
+			listener, err := registryIngressListener(registryHostname, cfg.Cluster.Domains)
+			if err != nil {
+				return nil, err
+			}
+			route["hostnames"] = []any{registryHostname}
+			route["parentRefs"] = []any{map[string]any{
+				"name": "platform-envoy-gateway", "namespace": "platform-envoy-gateway", "sectionName": listener,
+			}}
+		}
+		entry["zot"] = map[string]any{"httproute": route}
 		componentValues["zot-registry"] = entry
 	}
 	applyProviderComponents(components, cfg.Cluster.Providers)
@@ -103,6 +118,20 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, nodeCertifi
 		},
 	}
 	return values, nil
+}
+
+// registryIngressListener selects a Gateway HTTPS listener whose certificate
+// covers the registry hostname. Wildcards cover exactly one DNS label.
+func registryIngressListener(hostname string, domains []clusterconfig.Domain) (string, error) {
+	for _, domain := range domains {
+		if hostname == domain.Zone {
+			return "https-" + envoyListenerSuffix(domain.Zone), nil
+		}
+		if prefix, ok := strings.CutSuffix(hostname, "."+domain.Zone); ok && prefix != "" && !strings.Contains(prefix, ".") {
+			return "https-wildcard-" + envoyListenerSuffix(domain.Zone), nil
+		}
+	}
+	return "", fmt.Errorf("registry hostname %q must match a cluster.domains zone or an immediate subdomain for HTTPS ingress", hostname)
 }
 
 // ingressCertificateDeliveryValues derives the node-local or external certificate mount

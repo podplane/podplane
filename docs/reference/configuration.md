@@ -263,7 +263,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.kubernetes.cluster_cidr` | CIDR ranges for Pod IPs, joined with commas for kube-controller-manager `--cluster-cidr` |
 | `cluster.kubernetes.service_cidr` | CIDR ranges for Service ClusterIPs, joined with commas for kube-apiserver `--service-cluster-ip-range` |
 | `cluster.registry.hostname` | Cluster registry hostname used by the node-local registry, `podplane push`, and optional Docker-push-compatible ingress. |
-| `cluster.registry.ingress.enabled` | Enables optional Docker-push-compatible registry ingress/token-service routing. Disabled by default; `podplane push` does not require ingress. |
+| `cluster.registry.ingress.enabled` | Exposes Zot's registry and token endpoints over HTTPS for Docker clients. The registry hostname must match a `cluster.domains` zone or an immediate subdomain. Disabled by default; `podplane push` does not require ingress. |
 | `cluster.seed.name` | Podplane seed file to use when creating the Netsy bootstrap file: `minimal`, `platform`, or `agentic` (CLI default); `none` skips seeding. Leave `cluster.seed` as an empty object to seed no platform-components state, leaving a bare cluster that must be bootstrapped manually. |
 | `cluster.seed.version` | Podplane seeds release version used for the selected seed file, e.g. `v1.2.3-1`. Generated configs pin this to the known available seed version. Omit inside an empty `cluster.seed` object. |
 | `cluster.seed.digest` | Expected SHA-512 digest of the selected seed snapshot. Generated configs pin this from the seeds manifest; seed resolution verifies the downloaded file before interpolation. |
