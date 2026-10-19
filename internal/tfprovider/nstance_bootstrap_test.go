@@ -149,7 +149,7 @@ func registrationStore(t *testing.T, provider string) (cloudSecretStore, cloudSe
 	if provider == cloudSecretProviderGCPSecretManager {
 		prefix, project = "test_", "test-project"
 	}
-	opts, err := nstanceSigningSecret(provider, prefix, "", "", project)
+	opts, err := nstanceSecret(provider, prefix, "registration-nonce.key", "", "", project)
 	if err != nil {
 		t.Fatal(err)
 	}

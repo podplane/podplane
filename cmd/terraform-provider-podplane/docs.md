@@ -75,25 +75,35 @@ Create uses backend create-only operations and adopts the winner if Nstance, ano
 
 The CLI generates the signer and seed bootstrap references when the AWS/Google `platform` or `agentic` overlay enables the Nstance operator. Infrastructure must be ready before signer creation, and Nstance-server VM creation must not depend on seed completion: the provider waits for the server to publish its CA.
 
-### Google service-account key
+### Kubernetes ServiceAccount signing key
 
-Generated Google Cloud clusters use this resource for Zot's dedicated registry
-writer account, which has object-admin access to the registry bucket. Node and
-Nstance-server identities have read-only access to that bucket.
+`podplane_service_account_key` creates a PKCS#8 ECDSA P-256 signer (ES256) in
+Nstance's cloud secret backend, independently of the workload CA and registration
+signer. Existing P-256 and RSA signers are adopted without rotation. P-256 is the
+strongest ECDSA curve supported by both Kubernetes and Google STS. Local clusters
+also generate P-256 signers and retain existing keys.
 
-`podplane_google_service_account_key` creates a Google service-account JSON key
-and writes it directly to Secret Manager. Required inputs are `project`,
-`service_account` (email), and `secret_id` (simple name). Outputs are the secret
-`id`, IAM `key_name`, and pinned `secret_version`; private credentials never enter
-Terraform state. The caller needs IAM key-management and Secret Manager permissions,
-and the organization must allow service-account key creation.
+Inputs are `secrets_provider`, `secret_prefix`, and the same provider-specific
+`region`, `profile`, or `project` settings as the registration key. The source name
+is `service-accounts.key` (Google stores it as `<secret_prefix>service-accounts-key`).
 
-Creation reserves the secret first, or adopts an existing key for the same account.
-An interrupted creation can leave an empty secret or an orphan IAM key: inspect
-both before manually recovering; retries never issue another key into an existing
-secret. Refresh checks metadata only. This resource does not rotate credentials
-or delete the key/secret on destroy; deleting the Google service account still
-revokes its keys.
+Only `id`, `backend_version`, `public_key_pem`, and `jwks_json` enter state alongside
+the configuration. The private key never enters OpenTofu/Terraform state, Helm values, 
+user-data, or the Netsy seed. Refresh checks metadata; destroy retains the key. An
+existing empty Google secret requires manual recovery, as above.
+
+All cloud clusters provision this signer, including bare clusters. Nstance delivers
+the private key and a separate PEM verification-key file only to control-plane (`knc`)
+nodes. Google federation receives the public JWKS before Kubernetes starts; its
+key IDs match kube-apiserver's SPKI SHA-256 convention. Google IAM JSON keys are
+not needed for Zot, the operator, or the GCP CSI provider.
+
+Automatic rotation is not implemented. Future rollover must first publish both old
+and new verification keys to kube-apiserver and Google, then switch the active
+private key, and retain the old public key until issued tokens expire. Keeping
+signing and verification material separate permits that overlap without changing
+the file or federation contracts; reconfiguration currently requires kube-apiserver
+restarts.
 
 ### Netsy seed
 

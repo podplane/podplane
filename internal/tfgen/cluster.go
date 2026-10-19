@@ -597,6 +597,7 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		addPodplaneGoogleBuckets(&bucketsDoc)
 		addPodplaneGooglePermissions(&rolesDoc, cfg, accountName)
 	}
+	mainDoc.AddBlock(cloudSigningKey("podplane_service_account_key", provider, secretPrefix))
 	managedWorkloadCAKey := addWorkloadCAKey(&mainDoc, cfg, provider)
 
 	if cfg.Cluster.Seed.Name != "" && cfg.Cluster.Seed.Name != seeds.None {
@@ -624,15 +625,17 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		if provider.Kind == "google" {
 			dependencies = append(dependencies,
 				expr("google_storage_bucket_iam_member.podplane_registry_writer"),
-				expr("google_secret_manager_secret_iam_member.podplane_registry_key"),
+				expr("google_iam_workload_identity_pool_provider.cluster"),
+				expr("google_project_iam_member.podplane_secrets_catalog"),
+				expr("google_project_iam_member.podplane_secrets_lifecycle"),
+				expr("google_project_iam_member.podplane_secrets_reader"),
+				expr("google_project_iam_member.podplane_ingress_state"),
 			)
 		}
 		if managedWorkloadCAKey {
 			dependencies = append(dependencies, expr("podplane_workload_ca_key.cluster"))
 			if defaultProvider := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]; defaultProvider.Kind == "aws" && provider.Kind == "aws" {
 				dependencies = append(dependencies, expr("aws_iam_role_policy.podplane_workload_ca_key"))
-			} else if defaultProvider.Kind == "gcp" && provider.Kind == "google" {
-				dependencies = append(dependencies, expr("google_secret_manager_secret_iam_member.podplane_workload_ca_key"))
 			}
 		}
 		if len(dependencies) > 0 {
@@ -1127,6 +1130,12 @@ func nstanceTemplateFilesValue(kind string, cfg *clusterconfig.ClusterConfig, tu
 				identField("name", str(name)),
 			)),
 		)))
+	}
+	if kind == "knc" {
+		fields = append(fields,
+			field("service-accounts.key", inlineObject(identField("kind", str("secret")), identField("source", str("service-accounts.key")))),
+			field("service-accounts.pub", inlineObject(identField("kind", str("string")), identField("template", expr("podplane_service_account_key.cluster.public_key_pem")))),
+		)
 	}
 	if cfg.Cluster.Tunnel != nil && kind == "knc" {
 		fields = append(fields, nodeTunnelFiles(cfg, tunnelImage)...)

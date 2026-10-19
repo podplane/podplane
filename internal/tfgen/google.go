@@ -25,8 +25,7 @@ func addPodplaneGoogleBuckets(doc *hclDocument) {
 	doc.AddBlock(bucket)
 }
 
-// addPodplaneGooglePermissions grants bucket access and scoped default-backend
-// secret access without reading or writing secret values through Terraform.
+// addPodplaneGooglePermissions separates host bucket access from federated Pod access.
 func addPodplaneGooglePermissions(doc *hclDocument, cfg *clusterconfig.ClusterConfig, accountName string) {
 	agent := "serviceAccount:${module." + accountName + ".agent_iam_role_arn}"
 	buckets := block("resource", "google_storage_bucket_iam_member", "podplane_agent")
@@ -42,99 +41,116 @@ func addPodplaneGooglePermissions(doc *hclDocument, cfg *clusterconfig.ClusterCo
 	server.Body.Attr("member", str("serviceAccount:${module."+accountName+".server_iam_role_arn}"))
 	doc.AddBlock(server)
 
-	addGoogleRegistryIdentity(doc, agent)
-
-	provider := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]
-	if provider.Kind != "gcp" {
-		return
-	}
-	prefix := provider.KeyPrefix
-	if prefix == "" {
-		prefix = cfg.Cluster.ID
-	}
-	key := block("resource", "google_secret_manager_secret_iam_member", "podplane_workload_ca_key")
-	key.Body.Attr("project", str(provider.ProjectID))
-	key.Body.Attr("secret_id", str(prefix+"_workload-ca-key"))
-	key.Body.Attr("role", str("roles/secretmanager.secretAccessor"))
-	key.Body.Attr("member", str(agent))
-	key.Body.Attr("depends_on", list(expr("podplane_workload_ca_key.cluster")))
-	doc.AddBlock(key)
-
-	// Tunnel ingress uses node certificates, not operator-owned secret bundles.
-	if cfg.Cluster.Tunnel != nil || len(cfg.Cluster.Domains) == 0 {
-		return
-	}
-	role := block("resource", "google_project_iam_custom_role", "podplane_ingress_certificates")
-	role.Body.Attr("project", str(provider.ProjectID))
-	role.Body.Attr("role_id", str("podplane_"+safeName(cfg.Cluster.ID)+"_ingress_certificates"))
-	role.Body.Attr("title", str("Podplane ingress certificate versions"))
-	role.Body.Attr("permissions", stringValueList([]string{
-		"secretmanager.secrets.get",
-		"secretmanager.versions.get",
-		"secretmanager.versions.access",
-		"secretmanager.versions.add",
-	}))
-	doc.AddBlock(role)
-
-	member := block("resource", "google_project_iam_member", "podplane_ingress_certificates")
-	member.Body.Attr("project", str(provider.ProjectID))
-	member.Body.Attr("role", expr("google_project_iam_custom_role.podplane_ingress_certificates.id"))
-	member.Body.Attr("member", str(agent))
-	condition := block("condition")
-	condition.Body.Attr("title", str("PodplaneIngressCertificateSecrets"))
-	condition.Body.Attr("expression", str("resource.name.startsWith("+quote("projects/"+provider.ProjectID+"/secrets/"+prefix+"_platform-cluster_ingress-certificates_")+")"))
-	member.Body.Block(condition)
-	doc.AddBlock(member)
-
-	// Google authorizes creation on the project; keep it separate from secret access.
-	createRole := block("resource", "google_project_iam_custom_role", "podplane_ingress_create")
-	createRole.Body.Attr("project", str(provider.ProjectID))
-	createRole.Body.Attr("role_id", str("podplane_"+safeName(cfg.Cluster.ID)+"_ingress_create"))
-	createRole.Body.Attr("title", str("Podplane ingress secret creation"))
-	createRole.Body.Attr("permissions", stringValueList([]string{"secretmanager.secrets.create"}))
-	doc.AddBlock(createRole)
-	createMember := block("resource", "google_project_iam_member", "podplane_ingress_create")
-	createMember.Body.Attr("project", str(provider.ProjectID))
-	createMember.Body.Attr("role", expr("google_project_iam_custom_role.podplane_ingress_create.id"))
-	createMember.Body.Attr("member", str(agent))
-	doc.AddBlock(createMember)
+	addGoogleWorkloadIdentity(doc)
+	addGoogleSecretsPermissions(doc, cfg)
 }
 
-// addGoogleRegistryIdentity gives Zot its own bucket writer and stores its key
-// outside Terraform state. CSI reads that key using the node identity.
-func addGoogleRegistryIdentity(doc *hclDocument, agent string) {
-	account := block("resource", "google_service_account", "podplane_registry")
-	account.Body.Attr("project", expr("local.provider_project"))
-	account.Body.Attr("account_id", str("pp-zot-${substr(sha256(module.cluster.bucket), 0, 20)}"))
-	account.Body.Attr("display_name", str("Podplane registry writer"))
-	doc.AddBlock(account)
+// googleWorkloadPrincipal identifies one Kubernetes ServiceAccount, not an entire namespace.
+func googleWorkloadPrincipal(namespace, name string) hclValue {
+	return str("principal://iam.googleapis.com/${google_iam_workload_identity_pool.cluster.name}/subject/system:serviceaccount:" + namespace + ":" + name)
+}
 
-	key := block("resource", "podplane_google_service_account_key", "registry")
-	key.Body.Attr("project", expr("local.provider_project"))
-	key.Body.Attr("service_account", expr("google_service_account.podplane_registry.email"))
-	key.Body.Attr("secret_id", str("${google_service_account.podplane_registry.account_id}-key"))
-	doc.AddBlock(key)
+// addGoogleWorkloadIdentity trusts static public keys without public API discovery.
+func addGoogleWorkloadIdentity(doc *hclDocument) {
+	sts := block("resource", "google_project_service", "workload_identity")
+	sts.Body.Attr("project", expr("local.provider_project"))
+	sts.Body.Attr("service", str("sts.googleapis.com"))
+	sts.Body.Attr("disable_on_destroy", boolean(false))
+	doc.AddBlock(sts)
 
-	reader := block("resource", "google_secret_manager_secret_iam_member", "podplane_registry_key")
-	reader.Body.Attr("secret_id", expr("podplane_google_service_account_key.registry.id"))
-	reader.Body.Attr("role", str("roles/secretmanager.secretAccessor"))
-	reader.Body.Attr("member", str(agent))
-	doc.AddBlock(reader)
+	pool := block("resource", "google_iam_workload_identity_pool", "cluster")
+	pool.Body.Attr("project", expr("local.provider_project"))
+	pool.Body.Attr("workload_identity_pool_id", str("pp-${substr(sha256(module.cluster.bucket), 0, 24)}"))
+	pool.Body.Attr("display_name", expr(`substr("Podplane ${local.cluster_id}", 0, 32)`))
+	pool.Body.Attr("depends_on", list(expr("google_project_service.workload_identity")))
+	doc.AddBlock(pool)
+
+	provider := block("resource", "google_iam_workload_identity_pool_provider", "cluster")
+	provider.Body.Attr("project", expr("local.provider_project"))
+	provider.Body.Attr("workload_identity_pool_id", expr("google_iam_workload_identity_pool.cluster.workload_identity_pool_id"))
+	provider.Body.Attr("workload_identity_pool_provider_id", str("kubernetes"))
+	provider.Body.Attr("attribute_mapping", object(field("google.subject", str("assertion.sub"))))
+	provider.Body.Attr("attribute_condition", str("assertion.sub.startsWith('system:serviceaccount:')"))
+	oidc := block("oidc")
+	oidc.Body.Attr("issuer_uri", str("https://${var.kubernetes_api_hostname}:${var.kubernetes_api_port}"))
+	oidc.Body.Attr("allowed_audiences", list(str("https://iam.googleapis.com/${google_iam_workload_identity_pool.cluster.name}/providers/kubernetes")))
+	oidc.Body.Attr("jwks_json", expr("podplane_service_account_key.cluster.jwks_json"))
+	provider.Body.Block(oidc)
+	doc.AddBlock(provider)
 
 	writer := block("resource", "google_storage_bucket_iam_member", "podplane_registry_writer")
 	writer.Body.Attr("bucket", expr(`google_storage_bucket.podplane_cluster["registry"].name`))
 	writer.Body.Attr("role", str("roles/storage.objectAdmin"))
-	writer.Body.Attr("member", str("serviceAccount:${google_service_account.podplane_registry.email}"))
+	writer.Body.Attr("member", googleWorkloadPrincipal("platform-zot-registry", "zot-registry"))
 	doc.AddBlock(writer)
+}
+
+// addGoogleSecretsPermissions separates lifecycle management from shared CSI value reads.
+func addGoogleSecretsPermissions(doc *hclDocument, cfg *clusterconfig.ClusterConfig) {
+	providers := []hclObjectField{}
+	for _, name := range sortedKeys(cfg.Cluster.Secrets.Providers) {
+		p := cfg.Cluster.Secrets.Providers[name]
+		if p.Kind != "gcp" {
+			continue
+		}
+		prefix := p.KeyPrefix
+		if prefix == "" {
+			prefix = cfg.Cluster.ID
+		}
+		providers = append(providers, field(name, object(identField("project", str(p.ProjectID)), identField("prefix", str(prefix)))))
+	}
+	locals := block("locals")
+	locals.Body.Attr("google_secrets_providers", object(providers...))
+	doc.AddBlock(locals)
+	project := block("data", "google_project", "secrets")
+	project.Body.Attr("for_each", expr("local.google_secrets_providers"))
+	project.Body.Attr("project_id", expr("each.value.project"))
+	doc.AddBlock(project)
+
+	// Creation and listing are authorized on the project; resource-name conditions
+	// cannot scope them. Value access and lifecycle writes are scoped separately.
+	prefix := "projects/${data.google_project.secrets[each.key].number}/secrets/${each.value.prefix}_"
+	clusterSecrets := "resource.name.startsWith(" + quote(prefix) + ")"
+	for _, grant := range []struct {
+		name, namespace, account, condition string
+		permissions                         []string
+	}{
+		{"secrets_catalog", "platform-podplane-operator", "platform-podplane-operator", "", []string{"secretmanager.secrets.create", "secretmanager.secrets.list"}},
+		{"secrets_lifecycle", "platform-podplane-operator", "platform-podplane-operator", clusterSecrets + " && resource.name != " + quote(prefix+"workload-ca-key") + " && !resource.name.startsWith(" + quote(prefix+"workload-ca-key/") + ")", []string{"secretmanager.secrets.get", "secretmanager.versions.get", "secretmanager.versions.list", "secretmanager.versions.add", "secretmanager.versions.disable", "secretmanager.versions.enable", "secretmanager.versions.destroy"}},
+		{"secrets_reader", "platform-secrets-store-csi-provider-gcp", "platform-secrets-store-csi-provider-gcp", clusterSecrets, []string{"secretmanager.versions.access"}},
+		{"ingress_state", "platform-podplane-operator", "platform-podplane-operator", "resource.name.startsWith(" + quote(prefix+"platform-cluster_ingress-certificates_") + ")", []string{"secretmanager.versions.access"}},
+	} {
+		name := "podplane_" + grant.name
+		role := block("resource", "google_project_iam_custom_role", name)
+		role.Body.Attr("for_each", expr("local.google_secrets_providers"))
+		role.Body.Attr("project", expr("each.value.project"))
+		role.Body.Attr("role_id", expr(`"pp_${substr(sha256(join("/", [module.cluster.bucket, each.key])), 0, 20)}_`+grant.name+`"`))
+		role.Body.Attr("title", str("Podplane "+grant.name))
+		role.Body.Attr("permissions", stringValueList(grant.permissions))
+		doc.AddBlock(role)
+		member := block("resource", "google_project_iam_member", name)
+		member.Body.Attr("for_each", expr("local.google_secrets_providers"))
+		member.Body.Attr("project", expr("each.value.project"))
+		member.Body.Attr("role", expr("google_project_iam_custom_role."+name+"[each.key].id"))
+		member.Body.Attr("member", googleWorkloadPrincipal(grant.namespace, grant.account))
+		if grant.condition != "" {
+			condition := block("condition")
+			condition.Body.Attr("title", str("PodplaneSecretScope"))
+			condition.Body.Attr("expression", str(grant.condition))
+			member.Body.Block(condition)
+		}
+		doc.AddBlock(member)
+	}
 }
 
 // googleGenerationError checks contracts the main renderer must check before
 // generating Google resources. A DNS zone's DNS suffix or numeric ID cannot be
 // substituted for the managed-zone resource name required by the lookup.
 func googleGenerationError(cfg *clusterconfig.ClusterConfig) error {
-	provider := cfg.Cluster.Secrets.Providers[cfg.Cluster.Secrets.DefaultProvider]
-	if provider.Kind == "gcp" && provider.Location != "" {
-		return fmt.Errorf("regional Secret Manager location %q is not supported by Google Terraform generation; use a global gcp secrets backend", provider.Location)
+	for _, provider := range cfg.Cluster.Secrets.Providers {
+		if provider.Kind == "gcp" && provider.Location != "" {
+			return fmt.Errorf("regional Secret Manager location %q is not supported by Google Terraform generation; use a global gcp secrets backend", provider.Location)
+		}
 	}
 	if cfg.Cluster.Tunnel != nil {
 		return nil

@@ -158,7 +158,7 @@ locals {
       arch = "arm64"
       vars = local.mutable_env
       userdata = { source = "inline", encoding = "base64", content = base64encode(data.podplane_userdata.knc_arm64.content) }
-      files = { "mutable.env" = { kind = "env", template = merge(local.mutable_env, { NSTANCE_EBPF_PORTS = "{{ .Vars.NSTANCE_EBPF_PORTS }}" }) }, "kube2iam.client.crt" = { kind = "certificate", template = "kube2iam.client", key = { source = "agent", name = "kube2iam.client" } }, "kubelet.client.crt" = { kind = "certificate", template = "kubelet.client", key = { source = "agent", name = "kubelet.client" } }, "kubelet.server.crt" = { kind = "certificate", template = "kubelet.server", key = { source = "agent", name = "kubelet.server" } }, "front-proxy.client.crt" = { kind = "certificate", template = "front-proxy.client", key = { source = "agent", name = "front-proxy.client" } }, "kube-apiserver.client.crt" = { kind = "certificate", template = "kube-apiserver.client", key = { source = "agent", name = "kube-apiserver.client" } }, "kube-apiserver.server.crt" = { kind = "certificate", template = "kube-apiserver.server", key = { source = "agent", name = "kube-apiserver.server" } }, "kube-controller-manager.client.crt" = { kind = "certificate", template = "kube-controller-manager.client", key = { source = "agent", name = "kube-controller-manager.client" } }, "kube-scheduler.client.crt" = { kind = "certificate", template = "kube-scheduler.client", key = { source = "agent", name = "kube-scheduler.client" } }, "netsy.client.crt" = { kind = "certificate", template = "netsy.client", key = { source = "agent", name = "netsy.client" } }, "netsy.server.crt" = { kind = "certificate", template = "netsy.server", key = { source = "agent", name = "netsy.server" } } }
+      files = { "mutable.env" = { kind = "env", template = merge(local.mutable_env, { NSTANCE_EBPF_PORTS = "{{ .Vars.NSTANCE_EBPF_PORTS }}" }) }, "kube2iam.client.crt" = { kind = "certificate", template = "kube2iam.client", key = { source = "agent", name = "kube2iam.client" } }, "kubelet.client.crt" = { kind = "certificate", template = "kubelet.client", key = { source = "agent", name = "kubelet.client" } }, "kubelet.server.crt" = { kind = "certificate", template = "kubelet.server", key = { source = "agent", name = "kubelet.server" } }, "front-proxy.client.crt" = { kind = "certificate", template = "front-proxy.client", key = { source = "agent", name = "front-proxy.client" } }, "kube-apiserver.client.crt" = { kind = "certificate", template = "kube-apiserver.client", key = { source = "agent", name = "kube-apiserver.client" } }, "kube-apiserver.server.crt" = { kind = "certificate", template = "kube-apiserver.server", key = { source = "agent", name = "kube-apiserver.server" } }, "kube-controller-manager.client.crt" = { kind = "certificate", template = "kube-controller-manager.client", key = { source = "agent", name = "kube-controller-manager.client" } }, "kube-scheduler.client.crt" = { kind = "certificate", template = "kube-scheduler.client", key = { source = "agent", name = "kube-scheduler.client" } }, "netsy.client.crt" = { kind = "certificate", template = "netsy.client", key = { source = "agent", name = "netsy.client" } }, "netsy.server.crt" = { kind = "certificate", template = "netsy.server", key = { source = "agent", name = "netsy.server" } }, "service-accounts.key" = { kind = "secret", source = "service-accounts.key" }, "service-accounts.pub" = { kind = "string", template = podplane_service_account_key.cluster.public_key_pem } }
       args = {
         ImageId = "{{ .Image.debian_13_arm64 }}"
       }
@@ -237,6 +237,13 @@ module "shard_us_east_1a" {
   }
   server_arch = "arm64"
   server_userdata = data.podplane_userdata.nst_arm64_us_east_1a.content
+}
+
+resource "podplane_service_account_key" "cluster" {
+  secrets_provider = "aws-parameter-store"
+  secret_prefix = "/test-cluster/"
+  region = local.provider_region
+  depends_on = [module.cluster]
 }
 
 resource "podplane_workload_ca_key" "cluster" {

@@ -59,8 +59,8 @@ func (*nstanceRegistrationKeyResource) Schema(_ context.Context, _ resource.Sche
 	}
 }
 
-// nstanceSigningSecret follows Nstance's backend naming, not workload CA naming.
-func nstanceSigningSecret(provider, prefix, region, profile, project string) (cloudSecretOptions, error) {
+// nstanceSecret resolves a file source using Nstance's backend naming rules.
+func nstanceSecret(provider, prefix, name, region, profile, project string) (cloudSecretOptions, error) {
 	if prefix == "" {
 		return cloudSecretOptions{}, fmt.Errorf("secret_prefix must be non-empty")
 	}
@@ -70,7 +70,7 @@ func nstanceSigningSecret(provider, prefix, region, profile, project string) (cl
 		if project != "" {
 			return opts, fmt.Errorf("project is only valid for google-secret-manager")
 		}
-		opts.Name = prefix + "registration-nonce.key"
+		opts.Name = prefix + name
 	case cloudSecretProviderGCPSecretManager:
 		if project == "" || strings.Contains(project, "/") || region != "" || profile != "" {
 			return opts, fmt.Errorf("google-secret-manager requires project and does not accept region or profile")
@@ -80,7 +80,7 @@ func nstanceSigningSecret(provider, prefix, region, profile, project string) (cl
 				return opts, fmt.Errorf("secret_prefix for Google must contain only letters, digits, hyphens, and underscores")
 			}
 		}
-		opts.Name = "projects/" + project + "/secrets/" + prefix + "registration-nonce-key"
+		opts.Name = "projects/" + project + "/secrets/" + prefix + strings.ReplaceAll(name, ".", "-")
 	default:
 		return opts, fmt.Errorf("provider must be aws-parameter-store, aws-secrets-manager, or google-secret-manager")
 	}
@@ -89,7 +89,7 @@ func nstanceSigningSecret(provider, prefix, region, profile, project string) (cl
 
 // nstanceKeyOptions resolves Terraform settings into a signing-key backend location.
 func nstanceKeyOptions(m nstanceRegistrationKeyModel) (cloudSecretOptions, error) {
-	return nstanceSigningSecret(stringOr(m.Provider, cloudSecretProviderAWSSSM), m.SecretPrefix.ValueString(), stringOr(m.Region, ""), stringOr(m.Profile, ""), stringOr(m.Project, ""))
+	return nstanceSecret(stringOr(m.Provider, cloudSecretProviderAWSSSM), m.SecretPrefix.ValueString(), "registration-nonce.key", stringOr(m.Region, ""), stringOr(m.Profile, ""), stringOr(m.Project, ""))
 }
 
 // ValidateConfig checks known signing-key settings against backend naming rules.

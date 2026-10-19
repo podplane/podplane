@@ -81,7 +81,7 @@ func nstanceBootstrapAttribute() resourceschema.SingleNestedAttribute {
 
 // secret resolves the signing-key backend and validates its recorded metadata references.
 func (b *nstanceBootstrapModel) secret(opts SeedOptions) (cloudSecretOptions, error) {
-	secret, err := nstanceSigningSecret(b.Provider.ValueString(), b.SecretPrefix.ValueString(), opts.Region, opts.Profile, opts.Project)
+	secret, err := nstanceSecret(b.Provider.ValueString(), b.SecretPrefix.ValueString(), "registration-nonce.key", opts.Region, opts.Profile, opts.Project)
 	if err != nil {
 		return secret, err
 	}

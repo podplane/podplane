@@ -54,6 +54,6 @@ func (p *podplaneProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewNetsySeedGCSResource,
 		NewWorkloadCAKeyResource,
 		NewNstanceRegistrationKeyResource,
-		NewGoogleServiceAccountKeyResource,
+		NewServiceAccountKeyResource,
 	}
 }

@@ -151,7 +151,7 @@ locals {
       arch = "amd64"
       vars = local.mutable_env
       userdata = { source = "inline", encoding = "base64", content = base64encode(data.podplane_userdata.knc_amd64.content) }
-      files = { "mutable.env" = { kind = "env", template = merge(local.mutable_env, { NSTANCE_EBPF_PORTS = "{{ .Vars.NSTANCE_EBPF_PORTS }}" }) }, "kube2iam.client.crt" = { kind = "certificate", template = "kube2iam.client", key = { source = "agent", name = "kube2iam.client" } }, "kubelet.client.crt" = { kind = "certificate", template = "kubelet.client", key = { source = "agent", name = "kubelet.client" } }, "kubelet.server.crt" = { kind = "certificate", template = "kubelet.server", key = { source = "agent", name = "kubelet.server" } }, "front-proxy.client.crt" = { kind = "certificate", template = "front-proxy.client", key = { source = "agent", name = "front-proxy.client" } }, "kube-apiserver.client.crt" = { kind = "certificate", template = "kube-apiserver.client", key = { source = "agent", name = "kube-apiserver.client" } }, "kube-apiserver.server.crt" = { kind = "certificate", template = "kube-apiserver.server", key = { source = "agent", name = "kube-apiserver.server" } }, "kube-controller-manager.client.crt" = { kind = "certificate", template = "kube-controller-manager.client", key = { source = "agent", name = "kube-controller-manager.client" } }, "kube-scheduler.client.crt" = { kind = "certificate", template = "kube-scheduler.client", key = { source = "agent", name = "kube-scheduler.client" } }, "netsy.client.crt" = { kind = "certificate", template = "netsy.client", key = { source = "agent", name = "netsy.client" } }, "netsy.server.crt" = { kind = "certificate", template = "netsy.server", key = { source = "agent", name = "netsy.server" } }, "ingress.server.crt" = { kind = "certificate", template = "ingress.server", key = { source = "agent", name = "ingress.server" } }, "tunnel.env" = {
+      files = { "mutable.env" = { kind = "env", template = merge(local.mutable_env, { NSTANCE_EBPF_PORTS = "{{ .Vars.NSTANCE_EBPF_PORTS }}" }) }, "kube2iam.client.crt" = { kind = "certificate", template = "kube2iam.client", key = { source = "agent", name = "kube2iam.client" } }, "kubelet.client.crt" = { kind = "certificate", template = "kubelet.client", key = { source = "agent", name = "kubelet.client" } }, "kubelet.server.crt" = { kind = "certificate", template = "kubelet.server", key = { source = "agent", name = "kubelet.server" } }, "front-proxy.client.crt" = { kind = "certificate", template = "front-proxy.client", key = { source = "agent", name = "front-proxy.client" } }, "kube-apiserver.client.crt" = { kind = "certificate", template = "kube-apiserver.client", key = { source = "agent", name = "kube-apiserver.client" } }, "kube-apiserver.server.crt" = { kind = "certificate", template = "kube-apiserver.server", key = { source = "agent", name = "kube-apiserver.server" } }, "kube-controller-manager.client.crt" = { kind = "certificate", template = "kube-controller-manager.client", key = { source = "agent", name = "kube-controller-manager.client" } }, "kube-scheduler.client.crt" = { kind = "certificate", template = "kube-scheduler.client", key = { source = "agent", name = "kube-scheduler.client" } }, "netsy.client.crt" = { kind = "certificate", template = "netsy.client", key = { source = "agent", name = "netsy.client" } }, "netsy.server.crt" = { kind = "certificate", template = "netsy.server", key = { source = "agent", name = "netsy.server" } }, "ingress.server.crt" = { kind = "certificate", template = "ingress.server", key = { source = "agent", name = "ingress.server" } }, "service-accounts.key" = { kind = "secret", source = "service-accounts.key" }, "service-accounts.pub" = { kind = "string", template = podplane_service_account_key.cluster.public_key_pem }, "tunnel.env" = {
         kind = "env"
         template = {
           TUNNEL_ENABLED = "true"
@@ -352,6 +352,13 @@ module "shard_us_central1_a" {
   }
 }
 
+resource "podplane_service_account_key" "cluster" {
+  secrets_provider = "google-secret-manager"
+  secret_prefix = "test-cluster-"
+  project = local.provider_project
+  depends_on = [module.cluster]
+}
+
 resource "podplane_workload_ca_key" "cluster" {
   key_prefix = "test-cluster"
   secrets_provider = "google-secret-manager"
@@ -385,21 +392,20 @@ resource "podplane_netsy_seed_gcs" "cluster" {
             }
           }
           "zot-registry" = {
+            googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name }
             platform = { zotRegistry = { storage = {
               driver = "gcs"
               bucket = google_storage_bucket.podplane_cluster["registry"].name
-              keyfile = "/var/run/google/identity/credentials.json"
-              googleSecretVersion = podplane_google_service_account_key.registry.secret_version
             } } }
             zot = {
               serviceAccount = { create = true, name = "zot-registry" }
+              env = [{ name = "GOOGLE_APPLICATION_CREDENTIALS", value = "/var/run/google/identity/credentials.json" }]
               extraVolumes = [
                 { name = "podplane-zot-config", configMap = { name = "zot-registry-config" } },
-                { name = "google-identity", csi = {
-                  driver = "secrets-store.csi.k8s.io"
-                  readOnly = true
-                  volumeAttributes = { secretProviderClass = "zot-registry" }
-                } }
+                { name = "google-identity", projected = { sources = [
+                  { serviceAccountToken = { audience = "https://iam.googleapis.com/${google_iam_workload_identity_pool_provider.cluster.name}", expirationSeconds = 3600, path = "token" } },
+                  { configMap = { name = "google-workload-identity" } }
+                ] } }
               ]
               extraVolumeMounts = [
                 { name = "podplane-zot-config", mountPath = "/etc/zot/config.json", subPath = "config.json", readOnly = true },
@@ -407,12 +413,14 @@ resource "podplane_netsy_seed_gcs" "cluster" {
               ]
             }
           }
+          "podplane-operator" = { googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name } }
+          "secrets-store-csi-provider-gcp" = { googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name } }
+          "cilium" = { platform = { blockGoogleMetadata = true } }
         }
         crds = { "secrets-store-csi-driver-crds" = { enabled = true } }
         apps = {
           "secrets-store-csi-driver" = { enabled = true }
           "secrets-store-csi-provider-gcp" = { enabled = true }
-          "zot-registry" = { dependsOn = ["secrets-store-csi-provider-gcp"] }
         }
       }
     }
@@ -428,7 +436,7 @@ resource "podplane_netsy_seed_gcs" "cluster" {
     namespace = "platform-nstance-operator"
     ca_bucket = module.cluster.bucket
   }
-  depends_on = [google_storage_bucket_iam_member.podplane_registry_writer, google_secret_manager_secret_iam_member.podplane_registry_key, podplane_workload_ca_key.cluster, google_secret_manager_secret_iam_member.podplane_workload_ca_key]
+  depends_on = [google_storage_bucket_iam_member.podplane_registry_writer, google_iam_workload_identity_pool_provider.cluster, google_project_iam_member.podplane_secrets_catalog, google_project_iam_member.podplane_secrets_lifecycle, google_project_iam_member.podplane_secrets_reader, google_project_iam_member.podplane_ingress_state, podplane_workload_ca_key.cluster]
 }
 
 data "google_storage_bucket_object_content" "nstance_ca" {

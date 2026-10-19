@@ -6,6 +6,11 @@ package local
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"os"
@@ -17,6 +22,74 @@ import (
 	"github.com/podplane/podplane/internal/deps"
 	"github.com/podplane/podplane/internal/vm/qemu"
 )
+
+// TestLocalServiceAccountKeyPersistence checks new P-256 keys remain stable and
+// existing RSA keys are preserved rather than silently rotated.
+func TestLocalServiceAccountKeyPersistence(t *testing.T) {
+	for _, existingRSA := range []bool{false, true} {
+		name := "new-p256"
+		if existingRSA {
+			name = "existing-rsa"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			store, err := newLocalNstanceStore(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var original string
+			if existingRSA {
+				key, err := rsa.GenerateKey(rand.Reader, 2048)
+				if err != nil {
+					t.Fatal(err)
+				}
+				priv, err := x509.MarshalPKCS8PrivateKey(key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pub, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+				if err != nil {
+					t.Fatal(err)
+				}
+				original = string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: priv}))
+				if err := store.Put(ctx, "podplane/clusters/cluster-a/service-accounts.key", []byte(original)); err != nil {
+					t.Fatal(err)
+				}
+				if err := store.Put(ctx, "podplane/clusters/cluster-a/service-accounts.pub", pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pub})); err != nil {
+					t.Fatal(err)
+				}
+			}
+			pub, priv, err := localServiceAccountKeyPair(ctx, store, "cluster-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if existingRSA {
+				if priv != original {
+					t.Fatal("replaced existing RSA key")
+				}
+			} else {
+				block, _ := pem.Decode([]byte(priv))
+				parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				key, ok := parsed.(*ecdsa.PrivateKey)
+				if !ok || key.Curve != elliptic.P256() {
+					t.Fatal("new signer must use ECDSA P-256")
+				}
+				block, _ = pem.Decode([]byte(pub))
+				verificationKey, err := x509.ParsePKIXPublicKey(block.Bytes)
+				if err != nil || !key.PublicKey.Equal(verificationKey) {
+					t.Fatal("verification key does not match signer", err)
+				}
+			}
+			pubAgain, privAgain, err := localServiceAccountKeyPair(ctx, store, "cluster-a")
+			if err != nil || pubAgain != pub || privAgain != priv {
+				t.Fatal("reloaded key pair changed", err)
+			}
+		})
+	}
+}
 
 // TestConfigureLocalNstancePreparesBootstrap checks trust, nonce, runtime files, and unregistered instance state.
 func TestConfigureLocalNstancePreparesBootstrap(t *testing.T) {

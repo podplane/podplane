@@ -27,7 +27,11 @@ The operator reconciles each `SecretProviderBinding` into a `SecretProviderClass
 
 This abstraction provides a convention-based approach to securing secrets with standard Kubernetes RBAC and namespace primitives. It enables provider-backed Kubernetes secrets without preventing a cluster operator from granting access to more advanced Secrets Store CSI Driver features.
 
+Use `SecretProviderBinding` to give an application access to secrets, and let Podplane create the `SecretProviderClass`. Only platform administrators, the Podplane operator, and the platform Flux Helm controller can create or edit a `SecretProviderClass` directly. Kubernetes enforces this restriction even if an application's RBAC permissions would otherwise allow it; copying Podplane's ownership labels does not grant access.
+
 By default, Podplane's operator chart installs a Kubernetes `ValidatingAdmissionPolicy` for Pods that use Secrets Store CSI volumes. Those Pods must set an explicit, non-empty `spec.serviceAccountName`, and every Secrets Store CSI volume on the Pod must reference a `secretProviderClass` with the same name as that service account. Pods that omit `serviceAccountName` are rejected instead of falling back to Kubernetes' `default` service account for this policy.
+
+Anyone who can create workloads in a namespace can use its service accounts and mount secrets through its bindings. Keep applications that must not share secret access in separate namespaces. Podplane's own service accounts live in reserved namespaces that application users cannot access through the standard tenant roles.
 
 Templates configure these resources automatically when you use `podplane deploy --secret`. Custom workloads must create the binding, service account, CSI volume, and read-only volume mount explicitly.
 
@@ -95,6 +99,12 @@ In `podplane.cluster.jsonc`, secrets provider metadata lives under `cluster.secr
 ```
 
 `key_prefix` is optional per provider and defaults to `cluster.id`; set it when multiple clusters should intentionally share a backend prefix.
+
+For Google Cloud clusters, Podplane sets up separate Workload Identity Federation identities for the operator and the GCP CSI provider. You can give new applications access to secrets through `SecretProviderBinding` without changing OpenTofu/Terraform or adding Google IAM grants for each application.
+
+The operator manages secrets and their versions. The CSI provider uses its own credentials (`auth: provider-adc`) to read and mount secret values, including the workload CA key. The operator can read values directly only for its ingress-certificate state.
+
+Google requires project-wide permission to create and list secrets. Permissions to manage versions and read values are limited to the configured cluster prefixes; they do not include Nstance's bootstrap secrets.
 
 Vault/OpenBao providers use Kubernetes/JWT auth, the same mechanism used by the Secrets Store CSI providers for workloads. The operator authenticates with its own Kubernetes service account token using `auth_path` (default `auth/kubernetes`) and `operator_role` (default `podplane-operator`). The workload read path authenticates separately as the workload Pod service account through the generated `SecretProviderClass` `roleName`.
 

@@ -6,6 +6,8 @@ package local
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -166,14 +168,20 @@ func serviceAccountPrivateKeySupported(privatePEM []byte) bool {
 	if err != nil {
 		return false
 	}
-	_, ok := key.(*rsa.PrivateKey)
-	return ok
+	switch key := key.(type) {
+	case *rsa.PrivateKey:
+		return true
+	case *ecdsa.PrivateKey:
+		return key.Curve == elliptic.P256()
+	default:
+		return false
+	}
 }
 
-// serviceAccountKeyPairPEM generates a PEM-encoded RSA keypair suitable for
+// serviceAccountKeyPairPEM generates a PEM-encoded ECDSA P-256 keypair suitable for
 // Kubernetes service-account signing in local clusters.
 func serviceAccountKeyPairPEM() (publicPEM, privatePEM string, err error) {
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return "", "", err
 	}

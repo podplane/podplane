@@ -313,13 +313,13 @@ func addTunnelCAFiles(doc *hclDocument, provider clusterconfig.Provider) {
 	doc.AddBlock(copy)
 }
 
-// addNstanceBootstrap orders metadata-only registration-key creation before seed bootstrap.
-func addNstanceBootstrap(doc *hclDocument, seed *hclBlock, provider clusterconfig.Provider, prefix string) {
+// cloudSigningKey configures a retained key in the same backend Nstance reads.
+func cloudSigningKey(resourceType string, provider clusterconfig.Provider, prefix string) hclBlock {
 	secretProvider := "aws-parameter-store"
 	if provider.Kind == "google" {
 		secretProvider = "google-secret-manager"
 	}
-	key := block("resource", "podplane_nstance_registration_key", "cluster")
+	key := block("resource", resourceType, "cluster")
 	key.Body.Attr("secrets_provider", str(secretProvider))
 	key.Body.Attr("secret_prefix", str(prefix))
 	if provider.Kind == "aws" {
@@ -331,6 +331,16 @@ func addNstanceBootstrap(doc *hclDocument, seed *hclBlock, provider clusterconfi
 		key.Body.Attr("project", expr("local.provider_project"))
 	}
 	key.Body.Attr("depends_on", list(expr("module.cluster")))
+	return key
+}
+
+// addNstanceBootstrap orders metadata-only registration-key creation before seed bootstrap.
+func addNstanceBootstrap(doc *hclDocument, seed *hclBlock, provider clusterconfig.Provider, prefix string) {
+	secretProvider := "aws-parameter-store"
+	if provider.Kind == "google" {
+		secretProvider = "google-secret-manager"
+	}
+	key := cloudSigningKey("podplane_nstance_registration_key", provider, prefix)
 	doc.AddBlock(key)
 	seed.Body.Attr("nstance_bootstrap", object(
 		identField("provider", str(secretProvider)), identField("secret_prefix", str(prefix)),
@@ -371,21 +381,20 @@ func seedValues(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provide
 	}
 	if provider.Kind == "google" {
 		values = append(values, field("zot-registry", expr(`{
+  googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name }
   platform = { zotRegistry = { storage = {
     driver = "gcs"
     bucket = google_storage_bucket.podplane_cluster["registry"].name
-    keyfile = "/var/run/google/identity/credentials.json"
-    googleSecretVersion = podplane_google_service_account_key.registry.secret_version
   } } }
   zot = {
     serviceAccount = { create = true, name = "zot-registry" }
+    env = [{ name = "GOOGLE_APPLICATION_CREDENTIALS", value = "/var/run/google/identity/credentials.json" }]
     extraVolumes = [
       { name = "podplane-zot-config", configMap = { name = "zot-registry-config" } },
-      { name = "google-identity", csi = {
-        driver = "secrets-store.csi.k8s.io"
-        readOnly = true
-        volumeAttributes = { secretProviderClass = "zot-registry" }
-      } }
+      { name = "google-identity", projected = { sources = [
+        { serviceAccountToken = { audience = "https://iam.googleapis.com/${google_iam_workload_identity_pool_provider.cluster.name}", expirationSeconds = 3600, path = "token" } },
+        { configMap = { name = "google-workload-identity" } }
+      ] } }
     ]
     extraVolumeMounts = [
       { name = "podplane-zot-config", mountPath = "/etc/zot/config.json", subPath = "config.json", readOnly = true },
@@ -393,6 +402,11 @@ func seedValues(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provide
     ]
   }
 }`)))
+		values = append(values,
+			field("podplane-operator", expr(`{ googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name } }`)),
+			field("secrets-store-csi-provider-gcp", expr(`{ googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name } }`)),
+			field("cilium", expr(`{ platform = { blockGoogleMetadata = true } }`)),
+		)
 	}
 	components := object(identField("values", object(values...)))
 	switch provider.Kind {
@@ -406,7 +420,6 @@ func seedValues(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provide
 			identField("apps", expr(`{
   "secrets-store-csi-driver" = { enabled = true }
   "secrets-store-csi-provider-gcp" = { enabled = true }
-  "zot-registry" = { dependsOn = ["secrets-store-csi-provider-gcp"] }
 }`)),
 		)
 	}
