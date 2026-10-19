@@ -381,11 +381,13 @@ func seedValues(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provide
 	}
 	if provider.Kind == "google" {
 		values = append(values, field("zot-registry", expr(`{
-  googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name }
-  platform = { zotRegistry = { storage = {
-    driver = "gcs"
-    bucket = google_storage_bucket.podplane_cluster["registry"].name
-  } } }
+  platform = { zotRegistry = {
+    googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name }
+    storage = {
+      driver = "gcs"
+      bucket = google_storage_bucket.podplane_cluster["registry"].name
+    }
+  } }
   zot = {
     serviceAccount = { create = true, name = "zot-registry" }
     env = [{ name = "GOOGLE_APPLICATION_CREDENTIALS", value = "/var/run/google/identity/credentials.json" }]
@@ -403,9 +405,9 @@ func seedValues(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provide
   }
 }`)))
 		values = append(values,
-			field("podplane-operator", expr(`{ googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name } }`)),
-			field("secrets-store-csi-provider-gcp", expr(`{ googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name } }`)),
-			field("cilium", expr(`{ platform = { blockGoogleMetadata = true } }`)),
+			field("podplane-operator", expr(`{ podplane = { operator = { googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name } } } }`)),
+			field("secrets-store-csi-provider-gcp", expr(`{ platform = { secretsStoreCSIProviderGCP = { googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name } } } }`)),
+			field("cilium", expr(`{ platform = { cilium = { blockGoogleMetadata = true } } }`)),
 		)
 	}
 	components := object(identField("values", object(values...)))

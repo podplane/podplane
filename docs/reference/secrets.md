@@ -21,26 +21,47 @@ Provider names, namespaces, binding names, and keys are intentionally restricted
 
 ## SecretProviderBinding
 
-Applications declare which provider-backed keys they need with a namespaced `SecretProviderBinding`.
+Use a `SecretProviderBinding` to declare which secrets an application needs. The Podplane operator creates a `SecretProviderClass` with the same name in the same namespace. The application's Pods reference that class to mount the secrets through the CSI driver.
 
-The operator reconciles each `SecretProviderBinding` into a `SecretProviderClass` with the same name in the same namespace. Workloads then reference that `SecretProviderClass` through the Secrets Store CSI volume configuration.
-
-This abstraction provides a convention-based approach to securing secrets with standard Kubernetes RBAC and namespace primitives. It enables provider-backed Kubernetes secrets without preventing a cluster operator from granting access to more advanced Secrets Store CSI Driver features.
-
-Use `SecretProviderBinding` to give an application access to secrets, and let Podplane create the `SecretProviderClass`. Only platform administrators, the Podplane operator, and the platform Flux Helm controller can create or edit a `SecretProviderClass` directly. Kubernetes enforces this restriction even if an application's RBAC permissions would otherwise allow it; copying Podplane's ownership labels does not grant access.
-
-By default, Podplane's operator chart installs a Kubernetes `ValidatingAdmissionPolicy` for Pods that use Secrets Store CSI volumes. Those Pods must set an explicit, non-empty `spec.serviceAccountName`, and every Secrets Store CSI volume on the Pod must reference a `secretProviderClass` with the same name as that service account. Pods that omit `serviceAccountName` are rejected instead of falling back to Kubernetes' `default` service account for this policy.
-
-Anyone who can create workloads in a namespace can use its service accounts and mount secrets through its bindings. Keep applications that must not share secret access in separate namespaces. Podplane's own service accounts live in reserved namespaces that application users cannot access through the standard tenant roles.
-
-Templates configure these resources automatically when you use `podplane deploy --secret`. Custom workloads must create the binding, service account, CSI volume, and read-only volume mount explicitly.
-
-For a custom workload:
+Podplane's templates handle this setup when you use `podplane deploy --secret`. For a custom workload:
 
 1. Store the value in your configured provider with `podplane secret create`.
 2. Create a `SecretProviderBinding` for the provider and keys the workload needs. The operator generates a `SecretProviderClass` with the same name.
 3. Create a dedicated service account with that name and set it explicitly as the Pod's `spec.serviceAccountName`.
 4. Add a Secrets Store CSI volume that references the generated `SecretProviderClass`, then mount it read-only into the workload.
+
+### Access controls
+
+By default, a Pod can mount a `SecretProviderClass` only when its name matches the Pod's service account. For example, a Pod running as `api` can mount the `api` class, but not `database`. Pods using Secrets Store CSI volumes must set `spec.serviceAccountName` explicitly.
+
+Applications should use bindings rather than create `SecretProviderClass` objects themselves. Only platform administrators, the Podplane operator, and the platform Flux Helm controller can create or edit those classes directly. An admission policy enforces this even when RBAC would otherwise allow the request.
+
+These rules do not isolate applications within a namespace: anyone who can create workloads there can use its service accounts and bindings. Keep applications that must not share secrets in separate namespaces. Standard tenant roles cannot access Podplane's reserved platform namespaces.
+
+The `platform-rbac` chart installs the admission policies independently of the operator. Removing the operator therefore does not remove these restrictions.
+
+### Namespace exceptions
+
+For custom CSI setups, cluster administrators can relax the name-matching rule in selected namespaces. Exceptions are disabled by default. To allow them, set these values on the `platform-rbac` chart:
+
+```yaml
+platform:
+  rbac:
+    admissionPolicies:
+      secretProviderClassRestriction:
+        excludeNamespacesWithLabel:
+          enabled: true
+```
+
+Then add this label to each namespace that needs an exception:
+
+```yaml
+metadata:
+  labels:
+    secrets.podplane.dev/secretproviderclass-restriction-policy: bypass
+```
+
+The label has no effect unless exceptions are enabled. In exempt namespaces, Pods can mount classes with names different from their service accounts. Restrictions on creating or editing classes still apply, as does the rule reserving the workload CA signing key for the operator's own class.
 
 ## Kubernetes Secrets Sync
 

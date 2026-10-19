@@ -392,11 +392,13 @@ resource "podplane_netsy_seed_gcs" "cluster" {
             }
           }
           "zot-registry" = {
-            googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name }
-            platform = { zotRegistry = { storage = {
-              driver = "gcs"
-              bucket = google_storage_bucket.podplane_cluster["registry"].name
-            } } }
+            platform = { zotRegistry = {
+              googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name }
+              storage = {
+                driver = "gcs"
+                bucket = google_storage_bucket.podplane_cluster["registry"].name
+              }
+            } }
             zot = {
               serviceAccount = { create = true, name = "zot-registry" }
               env = [{ name = "GOOGLE_APPLICATION_CREDENTIALS", value = "/var/run/google/identity/credentials.json" }]
@@ -413,9 +415,9 @@ resource "podplane_netsy_seed_gcs" "cluster" {
               ]
             }
           }
-          "podplane-operator" = { googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name } }
-          "secrets-store-csi-provider-gcp" = { googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name } }
-          "cilium" = { platform = { blockGoogleMetadata = true } }
+          "podplane-operator" = { podplane = { operator = { googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name } } } }
+          "secrets-store-csi-provider-gcp" = { platform = { secretsStoreCSIProviderGCP = { googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name } } } }
+          "cilium" = { platform = { cilium = { blockGoogleMetadata = true } } }
         }
         crds = { "secrets-store-csi-driver-crds" = { enabled = true } }
         apps = {
