@@ -37,11 +37,11 @@ archives:
 checksum:
   name_template: '{{ .ProjectName }}_{{ .Env.TF_PROVIDER_RELEASE_VERSION }}_SHA256SUMS'
   algorithm: sha256
+  # The Registry ingests only provider ZIPs and its manifest, not SBOMs or metadata.
+  ids: [provider]
   extra_files:
     - glob: cmd/terraform-provider-podplane/terraform-registry-manifest.json
       name_template: '{{ .ProjectName }}_{{ .Env.TF_PROVIDER_RELEASE_VERSION }}_manifest.json'
-    - glob: '{{ .Env.RELEASE_METADATA }}'
-      name_template: release-metadata.json
 
 signs:
   - artifacts: checksum
