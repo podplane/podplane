@@ -20,9 +20,10 @@ import (
 const (
 	defaultDepsBaseURL = "https://deps.podplane.dev"
 
-	Recommended = "recommended"
-	Minimal     = "minimal"
-	None        = "none"
+	Platform = "platform"
+	Agentic  = "agentic"
+	Minimal  = "minimal"
+	None     = "none"
 )
 
 // ResolveOptions identifies a published seed and its download cache and verification settings.
@@ -50,16 +51,21 @@ type Seed struct {
 	Digest  string
 }
 
+// HasPlatformComponents reports whether name includes the platform components.
+func HasPlatformComponents(name string) bool {
+	return name == Platform || name == Agentic
+}
+
 // ParseName returns a validated seed name, applying the default when value is empty.
 func ParseName(value string) (string, error) {
 	if value == "" {
-		value = Recommended
+		value = Agentic
 	}
 	switch value {
-	case Recommended, Minimal, None:
+	case None, Minimal, Platform, Agentic:
 		return value, nil
 	default:
-		return "", fmt.Errorf("invalid cluster.seed.name %q (must be %q, %q, or %q)", value, Recommended, Minimal, None)
+		return "", fmt.Errorf("invalid cluster.seed.name %q (must be %q, %q, %q, or %q)", value, None, Minimal, Platform, Agentic)
 	}
 }
 

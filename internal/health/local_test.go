@@ -16,61 +16,65 @@ import (
 	"github.com/podplane/podplane/pkg/seeds"
 )
 
-// TestLocalStartRecommendedChecksOrderComponents verifies recommended local
+// TestLocalStartPlatformChecksOrderComponents verifies platform and agentic local
 // start waits for each component's prerequisites in bootstrap order.
-func TestLocalStartRecommendedChecksOrderComponents(t *testing.T) {
-	checks := LocalStartChecks(LocalStartOptions{SeedName: seeds.Recommended})
-	wantOrder := []string{"cilium", "secrets-store-csi-driver", "podplane-operator", "envoy-gateway", "ingress"}
-	if len(checks) != len(wantOrder) {
-		t.Fatalf("recommended checks count = %d, want %d", len(checks), len(wantOrder))
-	}
-	byKey := map[string]Check{}
-	for i, check := range checks {
-		if check.Key != wantOrder[i] {
-			t.Fatalf("recommended check %d = %q, want %q", i, check.Key, wantOrder[i])
-		}
-		byKey[check.Key] = check
-	}
+func TestLocalStartPlatformChecksOrderComponents(t *testing.T) {
+	for _, seed := range []string{seeds.Platform, seeds.Agentic} {
+		t.Run(seed, func(t *testing.T) {
+			checks := LocalStartChecks(LocalStartOptions{SeedName: seed})
+			wantOrder := []string{"cilium", "secrets-store-csi-driver", "podplane-operator", "envoy-gateway", "ingress"}
+			if len(checks) != len(wantOrder) {
+				t.Fatalf("checks count = %d, want %d", len(checks), len(wantOrder))
+			}
+			byKey := map[string]Check{}
+			for i, check := range checks {
+				if check.Key != wantOrder[i] {
+					t.Fatalf("check %d = %q, want %q", i, check.Key, wantOrder[i])
+				}
+				byKey[check.Key] = check
+			}
 
-	secretsStore, ok := byKey["secrets-store-csi-driver"]
-	if !ok {
-		t.Fatal("recommended checks missing secrets-store-csi-driver")
-	}
-	if got, want := secretsStore.DependsOn, []string{"cilium"}; len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("secrets-store-csi-driver dependencies = %v, want %v", got, want)
-	}
+			secretsStore, ok := byKey["secrets-store-csi-driver"]
+			if !ok {
+				t.Fatal("checks missing secrets-store-csi-driver")
+			}
+			if got, want := secretsStore.DependsOn, []string{"cilium"}; len(got) != len(want) || got[0] != want[0] {
+				t.Fatalf("secrets-store-csi-driver dependencies = %v, want %v", got, want)
+			}
 
-	operator, ok := byKey["podplane-operator"]
-	if !ok {
-		t.Fatal("recommended checks missing podplane-operator")
-	}
-	if got, want := operator.DependsOn, []string{"secrets-store-csi-driver"}; len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("podplane-operator dependencies = %v, want %v", got, want)
-	}
+			operator, ok := byKey["podplane-operator"]
+			if !ok {
+				t.Fatal("checks missing podplane-operator")
+			}
+			if got, want := operator.DependsOn, []string{"secrets-store-csi-driver"}; len(got) != len(want) || got[0] != want[0] {
+				t.Fatalf("podplane-operator dependencies = %v, want %v", got, want)
+			}
 
-	envoy, ok := byKey["envoy-gateway"]
-	if !ok {
-		t.Fatal("recommended checks missing envoy-gateway")
-	}
-	if envoy.Name != "envoy-gateway" {
-		t.Fatalf("envoy-gateway name = %q, want envoy-gateway", envoy.Name)
-	}
-	if got, want := envoy.DependsOn, []string{"podplane-operator"}; len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("envoy-gateway dependencies = %v, want %v", got, want)
-	}
-	if envoy.Kind != "deployment/daemonset" {
-		t.Fatalf("envoy-gateway kind = %q, want deployment/daemonset", envoy.Kind)
-	}
+			envoy, ok := byKey["envoy-gateway"]
+			if !ok {
+				t.Fatal("checks missing envoy-gateway")
+			}
+			if envoy.Name != "envoy-gateway" {
+				t.Fatalf("envoy-gateway name = %q, want envoy-gateway", envoy.Name)
+			}
+			if got, want := envoy.DependsOn, []string{"podplane-operator"}; len(got) != len(want) || got[0] != want[0] {
+				t.Fatalf("envoy-gateway dependencies = %v, want %v", got, want)
+			}
+			if envoy.Kind != "deployment/daemonset" {
+				t.Fatalf("envoy-gateway kind = %q, want deployment/daemonset", envoy.Kind)
+			}
 
-	ingress, ok := byKey["ingress"]
-	if !ok {
-		t.Fatal("recommended checks missing ingress")
-	}
-	if got, want := ingress.DependsOn, []string{"envoy-gateway"}; len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("ingress dependencies = %v, want %v", got, want)
-	}
-	if ingress.Kind != "ingress" || !ingress.Required {
-		t.Fatalf("ingress = %#v, want required ingress check", ingress)
+			ingress, ok := byKey["ingress"]
+			if !ok {
+				t.Fatal("checks missing ingress")
+			}
+			if got, want := ingress.DependsOn, []string{"envoy-gateway"}; len(got) != len(want) || got[0] != want[0] {
+				t.Fatalf("ingress dependencies = %v, want %v", got, want)
+			}
+			if ingress.Kind != "ingress" || !ingress.Required {
+				t.Fatalf("ingress = %#v, want required ingress check", ingress)
+			}
+		})
 	}
 }
 

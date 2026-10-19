@@ -14,13 +14,17 @@ The "Containers Layer" of the Podplane [Architecture](architecture.md) is design
 
 2. __Addon Components__ for optional functionality to extend cluster capabilities - things like an ingress controller, CSI drivers, and more.
 
-During cluster creation, users are given three initial state options to choose from:
+During cluster creation, users are given four initial state options to choose from:
 
-1. __Recommended__ - which includes all Core Components + a small selection of commonly used Addon Components such as Envoy Gateway. The goal is that deployment templates such as "web" do not require any additional Addon Components to be installed.
+1. __None__ - does not install any Podplane Components, meaning you get a bare Kubernetes cluster and Nodes will be `NotReady` until a CNI is installed and they can become `Ready` and able to schedule Pods. Pods run under runc, without Podplane's [runtime policies](../guides/container-runtimes.md), until components are installed. For advanced users only.
 
 2. __Minimal__ - deploys just the Core Components. From there, users can manually install Components using `podplane install` as required.
 
-3. __None__ - does not install any Podplane Components, meaning you get a bare Kubernetes cluster and Nodes will be `NotReady` until a CNI is installed and they can become `Ready` and able to schedule Pods. Pods run under runc, without Podplane's [runtime policies](../guides/container-runtimes.md), until components are installed. For advanced users only.
+3. __Platform__ - Core Components plus commonly used addons such as Envoy Gateway, so templates such as "web" work without installing additional addons.
+
+4. __Agentic__ (default) - the Platform baseline plus agentic platform components such as Agent Sandbox.
+
+Use the platform seed to provision a traditional PaaS, and the agentic seed to provision an Agentic PaaS.
 
 Components are deployed with an opinionated, tested configuration - not the full surface area of each component's underlying official Helm chart.
 
@@ -50,7 +54,7 @@ These charts are marked as provider-specific core components and are enabled by 
 
 ### Addon Components
 
-Recommended components which can also be installed via `podplane install` atop the Minimal set:
+Components which can be installed via `podplane install` atop the Minimal seed:
 
 - `agent-sandbox`: [Agent Sandbox](https://agent-sandbox.sigs.k8s.io/) controller for isolated, stateful singleton workloads such as AI agent runtimes
     - `agent-sandbox-crds`
@@ -78,7 +82,7 @@ Cluster state is initialised via the Podplane provider for OpenTofu/Terraform.
 
 The provider uses Podplane seed files to create a Netsy `bootstrap.netsy` snapshot file, then uploads it to provider-specific object storage (S3 for AWS, GCS for Google Cloud). Before uploading, the provider checks that remote state does not already exist and performs a conditional put so it can never overwrite it by mistake. Netsy also has checks to ensure a bootstrap file is never loaded over existing cluster state.
 
-The `Recommended` and `Minimal` options each have their own Podplane seed files. The `None` option skips cluster seeding entirely.
+The `Minimal`, `Platform`, and `Agentic` options each have their own Podplane seed files. The `None` option skips cluster seeding entirely.
 
 See [Seeds](seeds.md) for how seed files, the seeds manifest, the `seedgen` seed generator utility, and the Terraform provider fit together.
 

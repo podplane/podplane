@@ -14,10 +14,34 @@ import (
 	"github.com/podplane/podplane/pkg/seeds"
 )
 
+func TestLocalStartNewClusterSeedSelection(t *testing.T) {
+	if got := localStartCmd.Flags().Lookup("components").DefValue; got != seeds.Agentic {
+		t.Fatalf("--components default = %q, want agentic", got)
+	}
+	for _, name := range []string{"", seeds.None, seeds.Minimal, seeds.Platform, seeds.Agentic, "recommended", "app", "invalid"} {
+		t.Run(name, func(t *testing.T) {
+			got, err := localStartSeedName(nil, false, name)
+			if name == "recommended" || name == "app" || name == "invalid" {
+				if err == nil {
+					t.Fatalf("invalid seed %q accepted", name)
+				}
+				return
+			}
+			want := name
+			if want == "" {
+				want = seeds.Agentic
+			}
+			if err != nil || got != want {
+				t.Fatalf("seed selection = %q, %v; want %q", got, err, want)
+			}
+		})
+	}
+}
+
 // TestLocalStartSeedNameUsesExistingClusterSeed verifies the local-start
 // TUI plans checks from the existing cluster config on restart. The
 // --components flag only applies to first boot, so a minimal existing cluster
-// must not get recommended-only progress rows such as Envoy Gateway.
+// must not get full-profile progress rows such as Envoy Gateway.
 func TestLocalStartSeedNameUsesExistingClusterSeed(t *testing.T) {
 	const existingMinimalClusterConfig = `
 {
@@ -41,7 +65,7 @@ func TestLocalStartSeedNameUsesExistingClusterSeed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := localStartSeedName(local.NewManager(c, localClusterID), true, seeds.Recommended)
+	got, err := localStartSeedName(local.NewManager(c, localClusterID), true, seeds.Agentic)
 	if err != nil {
 		t.Fatalf("localStartSeedName returned error: %v", err)
 	}

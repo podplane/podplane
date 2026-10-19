@@ -25,6 +25,15 @@ func TestClusterSchemaJSONIsValidJSON(t *testing.T) {
 	if _, ok := schema["$comment"]; ok {
 		t.Fatal("source schema should not contain generated-copy $comment")
 	}
+	seed := schema["$defs"].(map[string]any)["seed"].(map[string]any)
+	names := seed["properties"].(map[string]any)["name"].(map[string]any)["enum"]
+	if want := []any{"", "none", "minimal", "platform", "agentic"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("seed name enum = %v, want %v", names, want)
+	}
+	conditional := seed["if"].(map[string]any)["properties"].(map[string]any)["name"].(map[string]any)["enum"]
+	if want := []any{"minimal", "platform", "agentic"}; !reflect.DeepEqual(conditional, want) {
+		t.Fatalf("seed required metadata profiles = %v, want %v", conditional, want)
+	}
 }
 
 // TestWriteAddsDefaultLocalSchemaRef checks that writing adds the offline schema reference without mutating input.

@@ -58,14 +58,26 @@ func TestValidateACME(t *testing.T) {
 
 // TestValidateSeedDigest accepts only required SHA-512 seed digests.
 func TestValidateSeedDigest(t *testing.T) {
-	if err := ValidateSeed(Seed{Name: "recommended", Digest: "sha512:" + strings.Repeat("a", 128)}); err != nil {
-		t.Fatalf("ValidateSeed returned error for valid digest: %v", err)
+	for _, name := range []string{"minimal", "platform", "agentic"} {
+		if err := ValidateSeed(Seed{Name: name, Digest: "sha512:" + strings.Repeat("a", 128)}); err != nil {
+			t.Fatalf("ValidateSeed returned error for valid digest: %v", err)
+		}
+		if err := ValidateSeed(Seed{Name: name}); err == nil {
+			t.Fatal("ValidateSeed returned nil without required digest")
+		}
+		if err := ValidateSeed(Seed{Name: name, Digest: "sha512:invalid"}); err == nil {
+			t.Fatal("ValidateSeed returned nil for invalid digest")
+		}
 	}
-	if err := ValidateSeed(Seed{Name: "recommended"}); err == nil {
-		t.Fatal("ValidateSeed returned nil without required digest")
+	for _, name := range []string{"", "none"} {
+		if err := ValidateSeed(Seed{Name: name}); err != nil {
+			t.Fatalf("ValidateSeed(%q): %v", name, err)
+		}
 	}
-	if err := ValidateSeed(Seed{Name: "recommended", Digest: "sha512:invalid"}); err == nil {
-		t.Fatal("ValidateSeed returned nil for invalid digest")
+	for _, name := range []string{"recommended", "app"} {
+		if err := ValidateSeed(Seed{Name: name, Digest: "sha512:" + strings.Repeat("a", 128)}); err == nil {
+			t.Fatalf("ValidateSeed accepted removed %s profile", name)
+		}
 	}
 }
 
@@ -410,7 +422,7 @@ func networkContractConfig(t *testing.T, kind, exposure string) *ClusterConfig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Cluster.Seed = Seed{Name: "recommended", Version: "v2.0.0", Digest: "sha512:" + strings.Repeat("0", 128)}
+	cfg.Cluster.Seed = Seed{Name: "platform", Version: "v2.0.0", Digest: "sha512:" + strings.Repeat("0", 128)}
 	cfg.Cluster.Kubernetes.APILoadBalancer = "api"
 	p := &cfg.Cluster.Providers[0]
 	p.LoadBalancers = map[string]LoadBalancer{

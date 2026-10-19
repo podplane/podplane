@@ -43,7 +43,7 @@ func init() {
 	localStartCmd.Flags().StringVarP(&localStartMemory, "memory", "m", "4G", "Memory to allocate to the VM (default 4G)")
 	localStartCmd.Flags().BoolVar(&localStartConsole, "console", false, "Attach to the VM serial console after startup")
 	localStartCmd.Flags().BoolVar(&localStartFollow, "follow", false, "Stream cloud-init user-data logs while waiting for startup")
-	localStartCmd.Flags().StringVar(&localStartComponents, "components", seeds.Recommended, "Initial platform components seeded on first boot: recommended, minimal, or none")
+	localStartCmd.Flags().StringVar(&localStartComponents, "components", seeds.Agentic, "Initial platform components seeded on first boot: none, minimal, platform, or agentic")
 }
 
 var (
@@ -124,7 +124,7 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 				{Key: "api-ready", Name: "kubernetes ready", Group: "VM", Success: "ready", Expected: 2 * time.Second, Timeout: 2 * time.Minute},
 				{Key: "kubectl", Name: fmt.Sprintf("kubectl works with context %q", kubeContext), Ready: true, Success: "ready"},
 				{Key: "kubectl-test", Name: "kubectl test", Success: "ready", Expected: 2 * time.Second, Timeout: 30 * time.Second},
-				{Key: "local-git-flux-auth", Name: "local git server auth", Exclude: seedName != seeds.Recommended || !configureGitServerAuth, Success: "configured", Expected: time.Second, Timeout: 30 * time.Second},
+				{Key: "local-git-flux-auth", Name: "local git server auth", Exclude: !seeds.HasPlatformComponents(seedName) || !configureGitServerAuth, Success: "configured", Expected: time.Second, Timeout: 30 * time.Second},
 				{Key: "deploy-ready", Name: "podplane deploy can publish apps to this cluster", Ready: true, Success: "ready"},
 				{Key: "ingress-ready", Name: fmt.Sprintf("deployed app hostnames will resolve under *.%s.localhost", localClusterID), Ready: true, Success: "ready"},
 			}
@@ -214,7 +214,7 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 			}
 		}
 		printLocalStartDone(cluster.Cluster.ID)
-		if cluster.Cluster.Seed.Name == seeds.Recommended {
+		if seeds.HasPlatformComponents(cluster.Cluster.Seed.Name) {
 			if _, err := manager.LocalIngressURL(); err != nil {
 				return fmt.Errorf("get local ingress URL: %w", err)
 			}
@@ -343,9 +343,9 @@ func testLocalKubectl(cluster *clusterconfig.ClusterConfig, progress tui.TaskPro
 }
 
 // configureLocalGitServerFluxAuth applies the local Flux Git CA Secret for
-// recommended seeded clusters that source components from the local Git server.
+// platform and agentic seeded clusters that source components from the local Git server.
 func configureLocalGitServerFluxAuth(cluster *clusterconfig.ClusterConfig, manager *local.Local, progress tui.TaskProgress) error {
-	if cluster.Cluster.Seed.Name != seeds.Recommended {
+	if !seeds.HasPlatformComponents(cluster.Cluster.Seed.Name) {
 		return nil
 	}
 	name := "local git server auth"

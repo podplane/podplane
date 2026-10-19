@@ -69,7 +69,7 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, nodeCertifi
 	if err := applySecretsComponents(components, cfg, nodeCertificate); err != nil {
 		return nil, err
 	}
-	if err := applyRecommendedProviderComponents(components, cfg); err != nil {
+	if err := applyPlatformProviderComponents(components, cfg); err != nil {
 		return nil, err
 	}
 	if nodeCertificate {
@@ -219,10 +219,10 @@ func applyProviderComponents(components map[string]any, providers []clusterconfi
 	}
 }
 
-// applyRecommendedProviderComponents enables the recommended cloud lifecycle
+// applyPlatformProviderComponents enables the platform cloud lifecycle
 // stack after secrets configuration, retaining the charts' dependency graph.
-func applyRecommendedProviderComponents(components map[string]any, cfg *clusterconfig.ClusterConfig) error {
-	if cfg.Cluster.Seed.Name != seeds.Recommended || len(cfg.Cluster.Providers) != 1 {
+func applyPlatformProviderComponents(components map[string]any, cfg *clusterconfig.ClusterConfig) error {
+	if !seeds.HasPlatformComponents(cfg.Cluster.Seed.Name) || len(cfg.Cluster.Providers) != 1 {
 		return nil
 	}
 	switch cfg.Cluster.Providers[0].Kind {
@@ -231,7 +231,7 @@ func applyRecommendedProviderComponents(components map[string]any, cfg *clusterc
 		return nil
 	}
 	if len(cfg.Cluster.Secrets.Providers) == 0 {
-		return fmt.Errorf("recommended cloud seed requires cluster.secrets.providers for Podplane workload certificates used by Cluster API and Nstance operator webhooks")
+		return fmt.Errorf("platform and agentic cloud seeds require cluster.secrets.providers for Podplane workload certificates used by Cluster API and Nstance operator webhooks")
 	}
 	crds := ensureChildMap(components, "crds")
 	crds["cluster-api-crds"] = map[string]any{"enabled": true}

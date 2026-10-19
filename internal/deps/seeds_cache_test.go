@@ -20,10 +20,14 @@ func TestPopulateSeedsCacheCopiesLocalManifestSnapshots(t *testing.T) {
 	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
 		t.Fatalf("mkdir manifest dir: %v", err)
 	}
-	recommended := filepath.Join(dir, "recommended.netsy")
+	platform := filepath.Join(dir, "platform.netsy")
+	agentic := filepath.Join(dir, "agentic.netsy")
 	minimal := filepath.Join(dir, "minimal.netsy")
-	if err := os.WriteFile(recommended, []byte("recommended"), 0o644); err != nil {
-		t.Fatalf("write recommended: %v", err)
+	if err := os.WriteFile(platform, []byte("platform"), 0o644); err != nil {
+		t.Fatalf("write platform: %v", err)
+	}
+	if err := os.WriteFile(agentic, []byte("agentic"), 0o644); err != nil {
+		t.Fatalf("write agentic: %v", err)
 	}
 	if err := os.WriteFile(minimal, []byte("minimal"), 0o644); err != nil {
 		t.Fatalf("write minimal: %v", err)
@@ -32,8 +36,9 @@ func TestPopulateSeedsCacheCopiesLocalManifestSnapshots(t *testing.T) {
 		Version:    "dev",
 		Components: "dev",
 		Snapshots: map[string]SeedSnapshot{
-			"recommended": {Path: "../recommended.netsy"},
-			"minimal":     {Path: "../minimal.netsy"},
+			"platform": {Path: "../platform.netsy"},
+			"agentic":  {Path: "../agentic.netsy"},
+			"minimal":  {Path: "../minimal.netsy"},
 		},
 	}}
 	raw, err := json.Marshal(manifest)
@@ -53,7 +58,7 @@ func TestPopulateSeedsCacheCopiesLocalManifestSnapshots(t *testing.T) {
 	if err := manager.populateSeedsCache(context.Background(), loaded, manifestPath, nil, nil); err != nil {
 		t.Fatalf("populateSeedsCache: %v", err)
 	}
-	for _, name := range []string{"recommended", "minimal"} {
+	for _, name := range []string{"platform", "agentic", "minimal"} {
 		path, err := manager.CachedSeedSnapshotPath(name, "")
 		if err == nil {
 			t.Fatalf("CachedSeedSnapshotPath(%q) succeeded before manifest write: %s", name, path)
@@ -69,16 +74,16 @@ func TestPopulateSeedsCacheCopiesLocalManifestSnapshots(t *testing.T) {
 
 // TestValidateSeedSnapshotRequiresPathOrURL verifies snapshots need exactly one local or remote source.
 func TestValidateSeedSnapshotRequiresPathOrURL(t *testing.T) {
-	if err := validateSeedSnapshot("recommended", SeedSnapshot{Path: "recommended.netsy"}); err != nil {
+	if err := validateSeedSnapshot("platform", SeedSnapshot{Path: "platform.netsy"}); err != nil {
 		t.Fatalf("validate path snapshot: %v", err)
 	}
-	if err := validateSeedSnapshot("recommended", SeedSnapshot{URL: "https://example.invalid/recommended.netsy", Digest: "sha512:" + strings.Repeat("a", 128), Size: 1}); err != nil {
+	if err := validateSeedSnapshot("platform", SeedSnapshot{URL: "https://example.invalid/platform.netsy", Digest: "sha512:" + strings.Repeat("a", 128), Size: 1}); err != nil {
 		t.Fatalf("validate url snapshot: %v", err)
 	}
-	if err := validateSeedSnapshot("recommended", SeedSnapshot{}); err == nil {
+	if err := validateSeedSnapshot("platform", SeedSnapshot{}); err == nil {
 		t.Fatal("validate without path or url returned nil error")
 	}
-	if err := validateSeedSnapshot("recommended", SeedSnapshot{Path: "recommended.netsy", URL: "https://example.invalid/recommended.netsy"}); err == nil {
+	if err := validateSeedSnapshot("platform", SeedSnapshot{Path: "platform.netsy", URL: "https://example.invalid/platform.netsy"}); err == nil {
 		t.Fatal("validate with path and url returned nil error")
 	}
 }

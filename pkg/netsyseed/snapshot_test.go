@@ -638,7 +638,7 @@ func TestWriteSnapshotWritesBytes(t *testing.T) {
 	}
 	seedBytes := buf.Bytes()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/recommended.netsy") {
+		if !strings.HasSuffix(r.URL.Path, "/platform.netsy") {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -649,7 +649,7 @@ func TestWriteSnapshotWritesBytes(t *testing.T) {
 	var data bytes.Buffer
 	if err := WriteSnapshot(&data, SnapshotOptions{
 		ClusterConfigPath: cfgPath,
-		SeedPath:          server.URL + "/recommended.netsy",
+		SeedPath:          server.URL + "/platform.netsy",
 	}); err != nil {
 		t.Fatalf("WriteSnapshot error = %v", err)
 	}
@@ -701,5 +701,49 @@ func TestWriteSnapshotWritesBytes(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("platform-components HelmRelease not found in built snapshot")
+	}
+	for _, provider := range []string{"aws", "google", "local"} {
+		for _, profile := range []string{"platform", "agentic", "minimal", "none", ""} {
+			t.Run(provider+"/"+profile, func(t *testing.T) {
+				cfg.Cluster.Providers = []clusterconfig.Provider{{Kind: provider}}
+				cfg.Cluster.Seed = clusterconfig.Seed{Name: profile, Version: "v1.0.0", Digest: "sha512:" + strings.Repeat("a", 128)}
+				if err := clusterconfig.Write(cfgPath, cfg); err != nil {
+					t.Fatal(err)
+				}
+				var output bytes.Buffer
+				if err := WriteSnapshot(&output, SnapshotOptions{ClusterConfigPath: cfgPath, SeedPath: server.URL + "/platform.netsy"}); err != nil {
+					t.Fatal(err)
+				}
+				records, err := datafile.ReadSnapshot(bytes.NewReader(output.Bytes()))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, record := range records {
+					if string(record.Key) != platformComponentsHelmReleaseKey {
+						continue
+					}
+					var release struct {
+						Spec struct {
+							Values struct {
+								Platform struct {
+									Components struct {
+										Apps map[string]struct{ Enabled bool }
+										CRDs map[string]struct{ Enabled bool }
+									}
+								}
+							}
+						}
+					}
+					if err := json.Unmarshal(record.Value, &release); err != nil {
+						t.Fatal(err)
+					}
+					want := provider != "local" && (profile == "platform" || profile == "agentic")
+					components := release.Spec.Values.Platform.Components
+					if components.Apps["nstance-operator"].Enabled != want || components.Apps["cluster-api"].Enabled != want || components.CRDs["nstance-operator-crds"].Enabled != want || components.CRDs["cluster-api-crds"].Enabled != want {
+						t.Fatalf("cloud lifecycle overlay = %+v, want enabled=%v", components, want)
+					}
+				}
+			})
+		}
 	}
 }

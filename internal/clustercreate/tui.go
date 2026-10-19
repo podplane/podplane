@@ -125,7 +125,7 @@ func newConfigForm(providerKind, oidcIssuerURL, seedVersion string) (configForm,
 		{label: "Kubernetes API hostname", validate: validateDomain, visible: func(m configForm) bool { return m.domain == "" }},
 		regionField,
 		credentialsField,
-		{label: "Initial platform components (recommended, minimal, none)", value: seeds.Recommended, validate: validateSeedName},
+		{label: "Cluster seed (none, minimal, platform, agentic)", value: seeds.Agentic, validate: validateSeedName},
 		{label: "Configure networking options?", value: "no", validate: validateYesNo},
 		{label: "VPC IPv4 CIDR", value: provider.VPC.V4CIDR, validate: validateVPCCIDR, visible: func(m configForm) bool { return m.showNetworking }},
 		zoneField,
@@ -314,7 +314,7 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 	if cfg.Cluster.OIDC.IssuerURL == "" {
 		cfg.Cluster.OIDC.IssuerURL = values["OIDC issuer URL"]
 	}
-	seedName, err := seeds.ParseName(values["Initial platform components (recommended, minimal, none)"])
+	seedName, err := seeds.ParseName(values["Cluster seed (none, minimal, platform, agentic)"])
 	if err != nil {
 		return nil, err
 	}

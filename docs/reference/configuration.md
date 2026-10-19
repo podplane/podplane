@@ -155,7 +155,7 @@ This example uses an existing user-managed tunnel and Nstance-managed NAT.
       "ingress": { "enabled": false }
     },
     "seed": {
-      "name": "recommended",
+      "name": "agentic",
       "version": "v1.2.3-1",
       "digest": "sha512:00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
     },
@@ -264,7 +264,7 @@ For the operational impact of changing cluster fields after initial deployment, 
 | `cluster.kubernetes.service_cidr` | CIDR ranges for Service ClusterIPs, joined with commas for kube-apiserver `--service-cluster-ip-range` |
 | `cluster.registry.hostname` | Cluster registry hostname used by the node-local registry, `podplane push`, and optional Docker-push-compatible ingress. |
 | `cluster.registry.ingress.enabled` | Enables optional Docker-push-compatible registry ingress/token-service routing. Disabled by default; `podplane push` does not require ingress. |
-| `cluster.seed.name` | Podplane seed file to use when creating the Netsy bootstrap file - `recommended`, `minimal`, or `none`. Leave `cluster.seed` as an empty object to seed no platform-components state, leaving a bare cluster that must be bootstrapped manually. |
+| `cluster.seed.name` | Podplane seed file to use when creating the Netsy bootstrap file: `minimal`, `platform`, or `agentic` (CLI default); `none` skips seeding. Leave `cluster.seed` as an empty object to seed no platform-components state, leaving a bare cluster that must be bootstrapped manually. |
 | `cluster.seed.version` | Podplane seeds release version used for the selected seed file, e.g. `v1.2.3-1`. Generated configs pin this to the known available seed version. Omit inside an empty `cluster.seed` object. |
 | `cluster.seed.digest` | Expected SHA-512 digest of the selected seed snapshot. Generated configs pin this from the seeds manifest; seed resolution verifies the downloaded file before interpolation. |
 | `cluster.components.registry.mirror.enabled` | Render platform component image references through the configured registry mirror. Local clusters enable this automatically so seeded components pull from the VM-hosted registry backed by the local dependency cache. |
@@ -313,7 +313,7 @@ cluster before editing these modes; if already edited, the mode guard still allo
 destroy with the edited configuration. Normal updates and manual sleep do not change
 these modes.
 
-AWS/Google `recommended` clusters support [`cluster sleep`](cli/commands/cluster-sleep.md)
+AWS/Google `platform` and `agentic` clusters support [`cluster sleep`](cli/commands/cluster-sleep.md)
 and wake on API or ingress traffic.
 
 ### Certificates and authentication

@@ -16,7 +16,13 @@ The goal is to combine infrastructure and security best practices with an intuit
 
 Using the Podplane CLI, you can deploy a Podplane cluster in a few minutes.
 
-The default `recommended` cluster includes CoreDNS, Cilium CNI, and commonly used addons such as Envoy Gateway and CSI drivers. Choose the `minimal` seed for only core components, or `none` for an unseeded cluster. Addon components can also be installed later with `podplane install`.
+For default cluster state, you can choose from one of four seed options:
+- `none` for a bare cluster with no initial state
+- `minimal` for Cilium CNI, Core DNS
+- `platform` for a traditional PaaS with common components such as Envoy Gateway and CSI drivers
+- `agentic` (default) for an Agentic PaaS with `platform` components plus additional components such as Agent Sandbox.
+
+Addon components can also be installed later atop `minimal` using `podplane install`.
 
 Some CLI commands (like `podplane deploy`) require specific components and will guide you to install them if needed.
 

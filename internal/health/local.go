@@ -41,7 +41,7 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 				},
 			},
 		}
-	case seeds.Recommended:
+	case seeds.Platform, seeds.Agentic:
 		return []Check{
 			{
 				Key:      "cilium",

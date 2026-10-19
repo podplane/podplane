@@ -28,6 +28,8 @@ import (
 	"github.com/netsy-dev/netsy/pkg/datafile"
 	"github.com/nstance-dev/nstance/v2/pkg/nonce"
 	"github.com/tailscale/hujson"
+
+	"github.com/podplane/podplane/pkg/seeds"
 )
 
 const (
@@ -59,7 +61,7 @@ func nstanceBootstrapAttribute() resourceschema.SingleNestedAttribute {
 	return resourceschema.SingleNestedAttribute{
 		Optional:      true,
 		PlanModifiers: []planmodifier.Object{objectplanmodifier.RequiresReplace()},
-		Description:   "Non-secret Nstance v2 operator bootstrap references. Omit when the AWS/Google recommended-provider overlay is disabled. Credentials are generated only during Create and inserted directly into the snapshot, never Helm values.",
+		Description:   "Non-secret Nstance v2 operator bootstrap references. Omit when the AWS/Google platform or agentic provider overlay is disabled. Credentials are generated only during Create and inserted directly into the snapshot, never Helm values.",
 		Attributes: map[string]resourceschema.Attribute{
 			"provider":                resourceschema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(cloudSecretProviderAWSSSM), PlanModifiers: replace},
 			"secret_prefix":           required,
@@ -126,8 +128,8 @@ func validateBootstrapScope(opts SeedOptions) error {
 			} `json:"providers"`
 		} `json:"cluster"`
 	}
-	if json.Unmarshal(contents, &cfg) != nil || cfg.Cluster.ID != b.ClusterID.ValueString() || cfg.Cluster.Seed.Name != "recommended" {
-		return errors.New("operator bootstrap requires a matching cluster_id and the recommended seed")
+	if json.Unmarshal(contents, &cfg) != nil || cfg.Cluster.ID != b.ClusterID.ValueString() || !seeds.HasPlatformComponents(cfg.Cluster.Seed.Name) {
+		return errors.New("operator bootstrap requires a matching cluster_id and a platform or agentic seed")
 	}
 	for _, p := range cfg.Cluster.Providers {
 		if p.Kind == "aws" || p.Kind == "google" {

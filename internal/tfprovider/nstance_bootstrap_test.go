@@ -380,7 +380,7 @@ func bootstrapOptions(t *testing.T, store cloudSecretStore, secret cloudSecretOp
 		provider = "google"
 		secretsProvider = fmt.Sprintf(`{"kind":"gcp","project_id":%q}`, secret.Project)
 	}
-	config := fmt.Sprintf(`{"cluster":{"id":"testcluster","oidc":{"issuer_url":"https://oidc.example.com"},"providers":[{"kind":%q}],"secrets":{"default_provider":"default","providers":{"default":%s}},"seed":{"name":"recommended","version":"v1.0.0","digest":"sha512:%s"}}}`, provider, secretsProvider, hex.EncodeToString(sum[:]))
+	config := fmt.Sprintf(`{"cluster":{"id":"testcluster","oidc":{"issuer_url":"https://oidc.example.com"},"providers":[{"kind":%q}],"secrets":{"default_provider":"default","providers":{"default":%s}},"seed":{"name":"platform","version":"v1.0.0","digest":"sha512:%s"}}}`, provider, secretsProvider, hex.EncodeToString(sum[:]))
 	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -389,14 +389,25 @@ func bootstrapOptions(t *testing.T, store cloudSecretStore, secret cloudSecretOp
 
 // TestSeedBootstrapCloudCreateAndRecovery checks nonce contents, concurrent creation, and metadata-only recovery.
 func TestSeedBootstrapCloudCreateAndRecovery(t *testing.T) {
-	for _, provider := range []string{"s3", "gcs"} {
+	for _, provider := range []string{"s3", "gcs", "s3-agentic", "gcs-agentic"} {
 		t.Run(provider, func(t *testing.T) {
+			agentic := strings.HasSuffix(provider, "-agentic")
+			provider = strings.TrimSuffix(provider, "-agentic")
 			secretProvider := cloudSecretProviderAWSSSM
 			if provider == "gcs" {
 				secretProvider = cloudSecretProviderGCPSecretManager
 			}
 			keyStore, secret := registrationStore(t, secretProvider)
 			opts := bootstrapOptions(t, keyStore, secret)
+			if agentic {
+				config, err := os.ReadFile(opts.ClusterConfigPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(opts.ClusterConfigPath, bytes.ReplaceAll(config, []byte(`"name":"platform"`), []byte(`"name":"agentic"`)), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			scratch := t.TempDir()
 			t.Setenv("TMPDIR", scratch)
 			cloud := &snapshotCloud{provider: provider, ca: bootstrapCA(t), loseResponse: true}
@@ -547,7 +558,7 @@ func TestSeedRejectsLiveStateAndDisabledOverlay(t *testing.T) {
 			if _, err := createSeed(context.Background(), opts, store, newCloudSecretStore); err == nil || !strings.Contains(err.Error(), "overlay is disabled") || cloud.payload != nil {
 				t.Fatalf("disabled overlay: %v", err)
 			}
-			// Without bootstrap configuration, even the recommended seed is a
+			// Without bootstrap configuration, even the platform seed is a
 			// credential-free snapshot and has no dependency on a key backend.
 			opts.NstanceBootstrap = nil
 			scratch := t.TempDir()

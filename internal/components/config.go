@@ -160,7 +160,7 @@ type HelmError struct {
 // Error implements the error interface.
 func (e *HelmError) Error() string {
 	if e.ReleaseNotFound() {
-		return "platform-components is not installed in this cluster; this looks like a bare Podplane cluster. App deploys and component installs require a cluster seeded with the minimal or recommended platform components. Bootstrap platform-components manually or recreate the cluster with minimal/recommended components, then retry."
+		return "platform-components is not installed in this cluster; this looks like a bare Podplane cluster. App deploys and component installs require a cluster seeded with the minimal, platform, or agentic platform components. Bootstrap platform-components manually or recreate the cluster with minimal/platform/agentic components, then retry."
 	}
 	if e.Stderr == "" {
 		return fmt.Sprintf("helm %s: %v", e.Stage, e.Err)

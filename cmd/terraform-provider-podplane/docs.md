@@ -73,7 +73,7 @@ Google Secret Manager creates a secret and its first version in two separate ope
 
 Create uses backend create-only operations and adopts the winner if Nstance, another apply, or an earlier interrupted apply already created it. OpenTofu/Terraform stores the backend identity in `id`, the immutable `backend_version`, and the SHA-256 PKIX public-key `public_key_fingerprint`, plus non-secret configuration. Refresh reads metadata only and fails closed on key loss/version changes. Update never rotates the signer, and destroy retains it. An existing empty Google secret is handled with the same manual recovery procedure as the workload CA key.
 
-The CLI generates the signer and seed bootstrap references when the AWS/Google `recommended` overlay enables the Nstance operator. Infrastructure must be ready before signer creation, and Nstance-server VM creation must not depend on seed completion: the provider waits for the server to publish its CA.
+The CLI generates the signer and seed bootstrap references when the AWS/Google `platform` or `agentic` overlay enables the Nstance operator. Infrastructure must be ready before signer creation, and Nstance-server VM creation must not depend on seed completion: the provider waits for the server to publish its CA.
 
 ### Google service-account key
 

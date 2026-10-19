@@ -15,7 +15,7 @@ mkdir production && cd production
 podplane cluster create --no-apply
 ```
 
-Follow the prompts for the cluster name, AWS account, region, networking, VM pools, OIDC issuer, domains, secrets provider, and initial component seed. The default `recommended` seed is the best starting point for most clusters.
+Follow the prompts for the cluster name, AWS account, region, networking, VM pools, OIDC issuer, domains, secrets provider, and initial component seed. Use the `platform` seed to provision a traditional PaaS, and the (default) `agentic` seed to provision an Agentic PaaS.
 
 Commit `podplane.cluster.jsonc` and the generated files to a private infrastructure repository. Review the OpenTofu/Terraform plan before applying it:
 

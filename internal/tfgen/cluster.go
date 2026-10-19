@@ -273,7 +273,7 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		if !ok || len(manifest.JSON) == 0 {
 			return nil, fmt.Errorf("missing vmconfig manifest %s/%s", target.Kind, target.Arch)
 		}
-		if cfg.Cluster.Tunnel != nil && (target.Kind == "knc" || (target.Kind == "nst" && cfg.Cluster.Seed.Name == seeds.Recommended)) {
+		if cfg.Cluster.Tunnel != nil && (target.Kind == "knc" || (target.Kind == "nst" && seeds.HasPlatformComponents(cfg.Cluster.Seed.Name))) {
 			image, err := tunnelImage(cfg.Cluster.Tunnel.Kind, manifest)
 			if err != nil {
 				return nil, err
@@ -584,7 +584,7 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		if cfg.Cluster.NAT != nil && cfg.Cluster.NAT.Mode == "nstance" {
 			shard.Body.Attr("nat", natValue(cfg.Cluster.NAT, zone, networkName))
 		}
-		if cfg.Cluster.Tunnel != nil && cfg.Cluster.Seed.Name == seeds.Recommended {
+		if cfg.Cluster.Tunnel != nil && seeds.HasPlatformComponents(cfg.Cluster.Seed.Name) {
 			shard.Body.Attr("tunnels", wakeTunnelsValue(cfg, tunnelImages[VMTarget{Kind: "nst", Arch: serverArch(provider)}]))
 		}
 		mainDoc.AddBlock(shard)
@@ -617,7 +617,7 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 			seed.Body.Attr("project", expr("local.provider_project"))
 		}
 		seed.Body.Attr("values_content", seedValues(cfg, provider))
-		if cfg.Cluster.Seed.Name == seeds.Recommended {
+		if seeds.HasPlatformComponents(cfg.Cluster.Seed.Name) {
 			addNstanceBootstrap(&mainDoc, &seed, provider, secretPrefix)
 		}
 		dependencies := []hclValue{}
@@ -639,7 +639,7 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 			seed.Body.Attr("depends_on", list(dependencies...))
 		}
 		mainDoc.AddBlock(seed)
-		if cfg.Cluster.Tunnel != nil && cfg.Cluster.Seed.Name == seeds.Recommended {
+		if cfg.Cluster.Tunnel != nil && seeds.HasPlatformComponents(cfg.Cluster.Seed.Name) {
 			addTunnelCAFiles(&mainDoc, provider)
 		}
 	}
@@ -962,7 +962,7 @@ func groupsValue(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provid
 		pool := loadBalancer.Listeners[0].Pool
 		lbsByPool[pool] = append(lbsByPool[pool], name)
 	}
-	if cfg.Cluster.Tunnel != nil && cfg.Cluster.Seed.Name == seeds.Recommended {
+	if cfg.Cluster.Tunnel != nil && seeds.HasPlatformComponents(cfg.Cluster.Seed.Name) {
 		lbsByPool["control-plane"] = []string{"cluster"}
 	}
 	instanceType := "instance_type"

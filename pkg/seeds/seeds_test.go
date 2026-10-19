@@ -15,10 +15,11 @@ import (
 // TestParseNameDefaultsAndValidates checks supported seed names, the default, and invalid input.
 func TestParseNameDefaultsAndValidates(t *testing.T) {
 	cases := map[string]string{
-		"":          Recommended,
-		Recommended: Recommended,
-		Minimal:     Minimal,
-		None:        None,
+		"":       Agentic,
+		Platform: Platform,
+		Agentic:  Agentic,
+		Minimal:  Minimal,
+		None:     None,
 	}
 	for input, want := range cases {
 		got, err := ParseName(input)
@@ -29,8 +30,15 @@ func TestParseNameDefaultsAndValidates(t *testing.T) {
 			t.Fatalf("ParseName(%q) = %q, want %q", input, got, want)
 		}
 	}
-	if _, err := ParseName("bogus"); err == nil {
-		t.Fatalf("expected invalid seed name error")
+	for _, name := range []string{"bogus", "recommended", "app"} {
+		if _, err := ParseName(name); err == nil {
+			t.Fatalf("expected invalid seed name error for %q", name)
+		}
+	}
+	for _, name := range []string{Platform, Agentic, Minimal, None, "", "recommended", "app", "bogus"} {
+		if got, want := HasPlatformComponents(name), name == Platform || name == Agentic; got != want {
+			t.Errorf("HasPlatformComponents(%q) = %v, want %v", name, got, want)
+		}
 	}
 }
 
@@ -42,6 +50,17 @@ func TestResolveSeedPathNoneSkips(t *testing.T) {
 	}
 	if path != "" {
 		t.Fatalf("ResolveSeedPath path = %q, want empty", path)
+	}
+	configPath := filepath.Join(t.TempDir(), "cluster.jsonc")
+	if err := os.WriteFile(configPath, []byte(`{"cluster":{"id":"testcluster","oidc":{"issuer_url":"https://oidc.example.com"},"seed":{"name":""}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	seed, err := ReadClusterSeed(configPath)
+	if err != nil || seed.Name != None {
+		t.Fatalf("ReadClusterSeed with stored empty name = %+v, %v; want none", seed, err)
+	}
+	if path, err := ResolveClusterSeedPath(ResolveClusterOptions{ClusterConfigPath: configPath}); err != nil || path != "" {
+		t.Fatalf("ResolveClusterSeedPath with stored empty name = %q, %v; want no download", path, err)
 	}
 }
 

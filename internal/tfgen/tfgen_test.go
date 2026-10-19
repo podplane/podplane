@@ -94,7 +94,7 @@ func sampleClusterConfig() *clusterconfig.ClusterConfig {
 			APIPort:         6443,
 			APILoadBalancer: "api",
 		},
-		Seed: clusterconfig.Seed{Name: "recommended", Version: "v1.0.0-1", Digest: "sha512:" + strings.Repeat("0", 128)},
+		Seed: clusterconfig.Seed{Name: "platform", Version: "v1.0.0-1", Digest: "sha512:" + strings.Repeat("0", 128)},
 		NAT:  &clusterconfig.NAT{Mode: "provider"},
 		Pools: map[string]clusterconfig.Pool{
 			"control-plane": {Arch: "arm64", InstanceType: "t4g.medium", Size: 1},
@@ -187,6 +187,22 @@ func TestGenerateClusterScenarios(t *testing.T) {
 			}
 			if terraformFiles != 8 {
 				t.Fatalf("generated %d Terraform files, want 8", terraformFiles)
+			}
+			for _, profile := range []string{"agentic", "minimal", "none", ""} {
+				cfg.Cluster.Seed.Name = profile
+				profileFiles, err := GenerateCluster(filepath.Join(t.TempDir(), "podplane.cluster.jsonc"), cfg, testClusterOptions(cfg))
+				if err != nil {
+					t.Fatalf("profile %q: %v", profile, err)
+				}
+				for name, content := range fileContents(profileFiles) {
+					if profile == "agentic" {
+						if content != fileContents(files)[name] {
+							t.Errorf("agentic and platform Terraform differ in %s", name)
+						}
+					} else if strings.Contains(content, "nstance_bootstrap =") || strings.Contains(content, `NSTANCE_SLEEP_ENABLED = "true"`) || strings.Contains(content, `NSTANCE_TUNNEL_ENABLED = "true"`) {
+						t.Errorf("profile %q unexpectedly enables platform lifecycle in %s", profile, name)
+					}
+				}
 			}
 		})
 	}
@@ -589,7 +605,7 @@ func TestGenerateAWSClusterTerraformWithVaultDefault(t *testing.T) {
 		Secrets: clusterconfig.Secrets{DefaultProvider: "vault", Providers: map[string]clusterconfig.SecretsProvider{
 			"vault": {Kind: "vault", Address: "https://vault.example", MountPath: "platform", CACert: "test-ca"},
 		}},
-		Seed:       clusterconfig.Seed{Name: "recommended", Version: "v1.0.0-1", Digest: "sha512:" + strings.Repeat("0", 128)},
+		Seed:       clusterconfig.Seed{Name: "platform", Version: "v1.0.0-1", Digest: "sha512:" + strings.Repeat("0", 128)},
 		Kubernetes: clusterconfig.Kubernetes{APIHostname: "k8s.example.com"},
 		Pools: map[string]clusterconfig.Pool{
 			"control-plane": {Arch: "arm64", InstanceType: "t4g.medium", Size: 1},

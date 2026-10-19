@@ -10,7 +10,7 @@ aliases:
 
 Podplane seed files are `.netsy` files used as a template for initial cluster state.
 
-When you create a cluster, you can choose a seed option of Recommended, Minimal, or None. If you select None, no seed is used and you get bare Kubernetes cluster state. Otherwise, a corresponding seed file (`recommended.netsy` or `minimal.netsy`) has the necessary configuration interpolated into it and a Netsy `bootstrap.netsy` snapshot file is produced for Netsy to import on first startup. Existing Netsy state is never overwritten.
+When you create a cluster, you can choose a seed option from None → Minimal seed → Platform seed → Agentic seed, with Agentic as the default. Use the platform seed to provision a traditional PaaS, and the agentic seed to provision an Agentic PaaS. If you select None, no seed is used and you get bare Kubernetes cluster state. Otherwise, a corresponding seed file (`minimal.netsy`, `platform.netsy`, or `agentic.netsy`) has the necessary configuration interpolated into it and a Netsy `bootstrap.netsy` snapshot file is produced for Netsy to import on first startup. Existing Netsy state is never overwritten.
 
 ## Seed Files and Snapshots
 
@@ -24,7 +24,7 @@ The selected seed is recorded in `cluster.seed` in the cluster configuration fil
 {
   "cluster": {
     "seed": {
-      "name": "recommended", // recommended or minimal
+      "name": "agentic", // minimal, platform, or agentic (default)
       "version": "v1.2.3-1",
       "digest": "sha512:..."
     }
@@ -32,9 +32,12 @@ The selected seed is recorded in `cluster.seed` in the cluster configuration fil
 }
 ```
 
-- `recommended` seeds Core Components plus commonly used addon components such as Envoy Gateway.
-- `minimal` seeds only the Core Components needed for a usable cluster.
 - An empty `"seed": {}` object represents None, skips seeding entirely, for a bare cluster you must bootstrap manually.
+- `minimal` seeds only the Core Components needed for a usable cluster.
+- `platform` seeds Core Components plus commonly used addon components such as Envoy Gateway.
+- `agentic` adds agentic platform components such as Agent Sandbox to the `platform` baseline.
+
+An omitted interactive/CLI seed selection defaults to `agentic`; an empty stored seed remains None.
 
 ## How Cluster Creation Uses Seeds
 
@@ -55,7 +58,7 @@ The upload step is deliberately conservative: it checks for existing contents un
 Published Podplane seed files live in the [podplane/seeds](https://github.com/podplane/seeds) repository. A seeds release publishes:
 
 - a seeds manifest consumed by [podplane deps download](cli/commands/deps-download.md) and the Terraform provider, referencing:
-- seed snapshot files such as `recommended.netsy` and `minimal.netsy` stored in the git repository for the given tag.
+- seed snapshot files `minimal.netsy`, `platform.netsy`, and `agentic.netsy` stored in the git repository for the given tag.
 
 The manifest records the available seed version and the seed files' locations, sizes, and digests. Generated cluster configs pin `cluster.seed.version` and `cluster.seed.digest`, and consumers verify the exact seed file before generating the Netsy bootstrap snapshot.
 

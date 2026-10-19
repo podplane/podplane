@@ -101,11 +101,11 @@ func ValidateAWSAvailabilityZone(region, zone string) error {
 // ValidateSeed validates the optional seed configuration.
 func ValidateSeed(seed Seed) error {
 	switch seed.Name {
-	case "", "recommended", "minimal", "none":
+	case "", "none", "minimal", "platform", "agentic":
 	default:
-		return fmt.Errorf("seed.name must be recommended, minimal, or none")
+		return fmt.Errorf("seed.name must be none, minimal, platform, or agentic")
 	}
-	if seed.Name == "recommended" || seed.Name == "minimal" {
+	if seed.Name == "platform" || seed.Name == "agentic" || seed.Name == "minimal" {
 		if seed.Digest == "" {
 			return fmt.Errorf("seed.digest is required")
 		}

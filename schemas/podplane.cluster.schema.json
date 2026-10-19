@@ -446,7 +446,7 @@
       "type": "object",
       "additionalProperties": false,
       "if": {
-        "properties": { "name": { "enum": ["recommended", "minimal"] } },
+        "properties": { "name": { "enum": ["minimal", "platform", "agentic"] } },
         "required": ["name"]
       },
       "then": { "required": ["version", "digest"] },
@@ -454,7 +454,7 @@
         "name": {
           "type": "string",
           "description": "Podplane seed to use when creating the initial Netsy snapshot.",
-          "enum": ["", "recommended", "minimal", "none"]
+          "enum": ["", "none", "minimal", "platform", "agentic"]
         },
         "version": { "type": "string", "description": "Seed version recorded when the cluster was created." },
         "digest": {

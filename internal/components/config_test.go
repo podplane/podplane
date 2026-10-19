@@ -110,12 +110,29 @@ func TestHelmErrorReleaseNotFoundMessage(t *testing.T) {
 		t.Fatal("ReleaseNotFound() = false, want true")
 	}
 	message := err.Error()
-	for _, want := range []string{"platform-components is not installed", "bare Podplane cluster", "minimal or recommended"} {
+	for _, want := range []string{"platform-components is not installed", "bare Podplane cluster", "minimal, platform, or agentic"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("HelmError message %q does not contain %q", message, want)
 		}
 	}
 	if strings.Contains(message, "release: not found") {
 		t.Fatalf("HelmError message should hide raw helm release-not-found output, got %q", message)
+	}
+}
+
+// TestSeedAddons checks the image-prefetch baseline and agentic extension.
+func TestSeedAddons(t *testing.T) {
+	wantPlatform := []string{"envoy-gateway", "podplane-operator", "secrets-store-csi-driver", "zot-registry"}
+	if got := PlatformAddons(); !reflect.DeepEqual(got, wantPlatform) {
+		t.Fatalf("PlatformAddons() = %v, want %v", got, wantPlatform)
+	}
+	wantAgentic := append(append([]string{}, wantPlatform...), "agent-sandbox")
+	if got := AgenticAddons(); !reflect.DeepEqual(got, wantAgentic) {
+		t.Fatalf("AgenticAddons() = %v, want %v", got, wantAgentic)
+	}
+	PlatformAddons()[0] = "changed"
+	AgenticAddons()[0] = "changed"
+	if got := PlatformAddons(); !reflect.DeepEqual(got, wantPlatform) {
+		t.Fatalf("caller mutated addon baseline: %v", got)
 	}
 }

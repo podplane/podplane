@@ -38,12 +38,12 @@ go run . deps download \
   # --vmconfig ../vmconfig/manifests/knc.debian-13.amd64.json
 ```
 
-By default this downloads all templates, provider-neutral dependencies, core component images, recommended addon component images, and the components Git source declared by the components manifest. If you are testing provider-specific components or extra addons locally, add filters such as `--providers aws` and `--addons snapshot`.
+By default this downloads all templates, provider-neutral dependencies, core component images, addon component images, and the components Git source declared by the components manifest. If you are testing provider-specific components or extra addons locally, add filters such as `--providers aws` and `--addons snapshot`.
 
 Then start the local VM. Note that when using local development manifests, start
 with `--components none` unless you have also cached the published Podplane seed files
 under the local deps server. This creates a bare Kubernetes cluster and avoids
-trying to seed `recommended.netsy` from the local dependency cache:
+trying to seed `agentic.netsy` from the local dependency cache:
 
 ```sh
 go run . local start --components none --follow
@@ -55,15 +55,15 @@ cache and bootstrap components against the local cluster:
 ```sh
 cd ../components
 make git-sync
-DOMAIN=default.localhost make recommended
+DOMAIN=default.localhost make agentic
 ```
 
-The components repo provides three local bootstrap paths: `make minimal`, 
-`make recommended`, and `make all`. Each reads `podplane local status --json` to
+The components repo provides four local bootstrap paths: `make minimal`,
+`make platform`, `make agentic`, and `make all`. Each reads `podplane local status --json` to
 discover the local VM HTTPS Git URL and Flux `secretRef` name, and expects
 `make git-sync` to have created `~/.podplane/cache/deps/git/components.git` on
-the `local-dev` branch. Use `make recommended` when generating a new seed 
-snapshot, `make minimal` for internal development and testing, and `make all` 
+the `local-dev` branch. Use `make platform` or `make agentic` when generating the corresponding seed
+snapshot, `make minimal` for internal development and testing, and `make all`
 when testing additional addons.
 
 In a second terminal, run the vmconfig watch loop from the `vmconfig` repository:
@@ -77,7 +77,7 @@ make knc-watch
 
 `podplane deps download` normally fetches the published manifests from `https://deps.podplane.dev`. Passing local paths changes that behavior:
 
-- `--components ../components/manifests/components.json` uses the local components manifest, mirrors the component images it names into the local dependency cache, and clones/fetches the manifest-declared components Git source unless `--skip-components-git` is set. It does not cache the published Podplane seed files (`recommended.netsy` / `minimal.netsy`), so pair this workflow with `go run . local start --components none` when you want to bootstrap components manually from your local `components` checkout.
+- `--components ../components/manifests/components.json` uses the local components manifest, mirrors the selected component images into the local dependency cache, and clones/fetches the manifest-declared components Git source unless `--skip-components-git` is set. It does not cache the published Podplane seed files (`minimal.netsy`, `platform.netsy`, `agentic.netsy`), so pair this workflow with `go run . local start --components none` when you want to bootstrap components manually from your local `components` checkout.
 - `--vmconfig ../vmconfig/manifests/knc.debian-13.arm64.json` uses the local vmconfig manifest, which contains a vmconfig dependency stub instead of a released vmconfig tarball. That makes the local VM user-data skip extracting and running a prebuilt vmconfig package. For the OS image and other dependencies in the manifest, these will be mirrored into the local dependency cache, so using the local manifest means you can test out new dependencies as well as new configuration.
 - `--templates ../templates/manifests/templates.json` uses the local templates manifest. Entries with `type: "chart"` point at unpacked chart directories; the CLI runs `helm package` and writes the result into the local template chart cache used by `podplane deploy`.
 

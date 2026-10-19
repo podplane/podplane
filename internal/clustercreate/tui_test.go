@@ -81,30 +81,48 @@ func TestNewConfigFormRequiresIntentionalDomainlessAPIHostname(t *testing.T) {
 	}
 }
 
-// TestNewConfigFormDefaultsToRecommendedSeed checks the default seed name and resolved version.
-func TestNewConfigFormDefaultsToRecommendedSeed(t *testing.T) {
+// TestNewConfigFormDefaultsToAgenticSeed checks the default seed name and resolved version.
+func TestNewConfigFormDefaultsToAgenticSeed(t *testing.T) {
 	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
-	seedField := form.fields[indexForField(t, form, "Initial platform components (recommended, minimal, none)")]
-	if seedField.value != seeds.Recommended {
-		t.Fatalf("seed field default = %q, want %q", seedField.value, seeds.Recommended)
+	seedField := form.fields[indexForField(t, form, "Cluster seed (none, minimal, platform, agentic)")]
+	if seedField.value != seeds.Agentic {
+		t.Fatalf("seed field default = %q, want %q", seedField.value, seeds.Agentic)
 	}
 
 	cfg, err := form.config()
 	if err != nil {
 		t.Fatalf("config returned error: %v", err)
 	}
-	if got := cfg.Cluster.Seed.Name; got != seeds.Recommended {
-		t.Fatalf("cluster seed name = %q, want %q", got, seeds.Recommended)
+	if got := cfg.Cluster.Seed.Name; got != seeds.Agentic {
+		t.Fatalf("cluster seed name = %q, want %q", got, seeds.Agentic)
 	}
 	if got := cfg.Cluster.Seed.Version; got != "v1.2.3-1" {
 		t.Fatalf("cluster seed version = %q, want v1.2.3-1", got)
 	}
 }
 
+// TestConfigFormCanSelectPlatformSeed checks the prompt-to-config mapping.
+func TestConfigFormCanSelectPlatformSeed(t *testing.T) {
+	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
+	form.fields[indexForField(t, form, "Cluster seed (none, minimal, platform, agentic)")].value = seeds.Platform
+	cfg, err := form.config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Cluster.Seed.Name != seeds.Platform || cfg.Cluster.Seed.Version != "v1.2.3-1" {
+		t.Fatalf("platform seed = %#v", cfg.Cluster.Seed)
+	}
+	for _, name := range []string{"recommended", "app", "invalid"} {
+		if err := validateSeedName(name); err == nil {
+			t.Fatalf("invalid seed %q accepted", name)
+		}
+	}
+}
+
 // TestConfigFormCanSelectBareSeed checks that selecting none clears seed name and version.
 func TestConfigFormCanSelectBareSeed(t *testing.T) {
 	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
-	form.fields[indexForField(t, form, "Initial platform components (recommended, minimal, none)")].value = seeds.None
+	form.fields[indexForField(t, form, "Cluster seed (none, minimal, platform, agentic)")].value = seeds.None
 
 	cfg, err := form.config()
 	if err != nil {

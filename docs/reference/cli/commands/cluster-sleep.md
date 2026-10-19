@@ -21,7 +21,7 @@ Traffic to a Kubernetes API or ingress endpoint configured for wake brings the
 cluster back online. Scheduled wake timers can also wake it; there is no separate wake
 command. Wake takes time to boot the nodes and restore service.
 
-Sleep is supported on AWS and Google Cloud clusters using the `recommended`
+Sleep is supported on AWS and Google Cloud clusters using the `platform` or `agentic`
 seed. See [sleep and wake behavior](../../configuration.md#exposure-nat-and-sleep).
 
 ```shell

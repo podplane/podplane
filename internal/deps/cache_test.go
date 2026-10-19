@@ -68,7 +68,7 @@ func TestCacheDomainPaths(t *testing.T) {
 	if got, want := manager.SeedsManifestCachePath(), filepath.Join("/cache/deps", "seeds", "manifests", "seeds.json"); got != want {
 		t.Fatalf("SeedsManifestCachePath() = %q, want %q", got, want)
 	}
-	if got, want := manager.SeedSnapshotCachePath("recommended", "1.2.3-1", "recommended.netsy"), filepath.Join("/cache/deps", "seeds", "snapshots", "recommended", "1.2.3-1", "recommended.netsy"); got != want {
+	if got, want := manager.SeedSnapshotCachePath("platform", "1.2.3-1", "platform.netsy"), filepath.Join("/cache/deps", "seeds", "snapshots", "platform", "1.2.3-1", "platform.netsy"); got != want {
 		t.Fatalf("SeedSnapshotCachePath() = %q, want %q", got, want)
 	}
 }

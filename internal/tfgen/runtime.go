@@ -67,8 +67,8 @@ func serverEnvValue(cfg *clusterconfig.ClusterConfig, zone string) hclValue {
 		field("NSTANCE_SERVER_BUCKET", expr("module.cluster.bucket")),
 		field("NSTANCE_SERVER_SHARD", str(zone)),
 		field("NSTANCE_SERVER_PREFIX", str("shard/"+zone+"/")),
-		field("NSTANCE_SLEEP_ENABLED", str(strconv.FormatBool(cfg.Cluster.Seed.Name == seeds.Recommended))),
-		field("NSTANCE_TUNNEL_ENABLED", str(strconv.FormatBool(cfg.Cluster.Tunnel != nil && cfg.Cluster.Seed.Name == seeds.Recommended))),
+		field("NSTANCE_SLEEP_ENABLED", str(strconv.FormatBool(seeds.HasPlatformComponents(cfg.Cluster.Seed.Name)))),
+		field("NSTANCE_TUNNEL_ENABLED", str(strconv.FormatBool(cfg.Cluster.Tunnel != nil && seeds.HasPlatformComponents(cfg.Cluster.Seed.Name)))),
 		field("NSTANCE_TUNNEL_STORAGE", str(storage)),
 		field("NSTANCE_TUNNEL_BUCKET", expr("module.cluster.bucket")),
 		field("NSTANCE_TUNNEL_SHARD", str(zone)),
@@ -79,7 +79,7 @@ func serverEnvValue(cfg *clusterconfig.ClusterConfig, zone string) hclValue {
 
 // activityPorts returns the ports monitored for activity when deciding whether a pool can sleep.
 func activityPorts(cfg *clusterconfig.ClusterConfig, pool string) string {
-	if cfg.Cluster.Seed.Name != seeds.Recommended {
+	if !seeds.HasPlatformComponents(cfg.Cluster.Seed.Name) {
 		return ""
 	}
 	ports := []int{}
@@ -345,7 +345,7 @@ func addNstanceBootstrap(doc *hclDocument, seed *hclBlock, provider clusterconfi
 // seedValues supplies Terraform-resolved, non-sensitive component settings.
 func seedValues(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provider) hclValue {
 	values := []hclObjectField{}
-	if cfg.Cluster.Seed.Name == seeds.Recommended {
+	if seeds.HasPlatformComponents(cfg.Cluster.Seed.Name) {
 		shards := []hclObjectField{}
 		for _, zone := range sortedKeys(provider.Zones) {
 			address := "module." + safeName("shard", zone) + ".server_ips[0]"

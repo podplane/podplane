@@ -53,7 +53,7 @@ func init() {
 	depsDownloadCmd.Flags().StringVar(&depsDownloadProviders, "providers", "",
 		"Comma-separated provider-specific dependencies and component images to include (for example aws,google,proxmox), or all")
 	depsDownloadCmd.Flags().StringVar(&depsDownloadAddons, "addons", "",
-		"Comma-separated addon component images to include in addition to the recommended addons, or all")
+		"Comma-separated addon component images to include in addition to the default agentic addons (for example snapshot), or all")
 	depsDownloadCmd.Flags().StringVarP(&depsDownloadClusterConfig, "cluster-config", "f", "",
 		"Path to a cluster config file to infer providers")
 	depsDownloadCmd.Flags().BoolVar(&depsDownloadSkipSeeds, "skip-seeds", false,
@@ -75,7 +75,7 @@ func newDepsDownloadCmd(manager *deps.Manager, kind, arch string) *cobra.Command
 			}
 		}
 		providers := []string{depsDownloadProviders}
-		addons := components.RecommendedAddons()
+		addons := components.AgenticAddons()
 		addons = append(addons, depsDownloadAddons)
 		if depsDownloadClusterConfig != "" {
 			cfg, err := clusterconfig.Load(depsDownloadClusterConfig)
