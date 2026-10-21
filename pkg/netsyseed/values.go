@@ -84,6 +84,10 @@ func buildPlatformComponentsValues(cfg *clusterconfig.ClusterConfig, nodeCertifi
 	if err := applySecretsComponents(components, cfg, nodeCertificate); err != nil {
 		return nil, err
 	}
+	if cfg.Cluster.Seed.Name == seeds.Agentic {
+		ensureChildMap(components, "apps")["agent-router"] = map[string]any{"enabled": true}
+		ensureChildMap(components, "crds")["agent-router-crds"] = map[string]any{"enabled": true}
+	}
 	if err := applyPlatformProviderComponents(components, cfg); err != nil {
 		return nil, err
 	}

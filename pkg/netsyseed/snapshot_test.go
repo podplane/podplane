@@ -602,8 +602,10 @@ func TestWriteSnapshotNLBFromNodeSeed(t *testing.T) {
 func TestWriteSnapshotWritesBytes(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
-		ID:   "local",
-		OIDC: clusterconfig.OIDC{IssuerURL: "https://oidc.localhost/oidc"},
+		ID:     "local",
+		Seed:   clusterconfig.Seed{Name: "agentic", Version: "v1.0.0", Digest: "sha512:" + strings.Repeat("a", 128)},
+		OIDC:   clusterconfig.OIDC{IssuerURL: "https://oidc.localhost/oidc"},
+		SPIFFE: clusterconfig.SPIFFE{TrustDomain: "k8s.example.com"},
 		Domains: []clusterconfig.Domain{
 			{Zone: "local.localhost", Provider: &clusterconfig.DomainProvider{Kind: "local"}},
 		},
@@ -671,6 +673,11 @@ func TestWriteSnapshotWritesBytes(t *testing.T) {
 				t.Fatalf("unmarshal HelmRelease: %v", err)
 			}
 			components := obj["spec"].(map[string]any)["values"].(map[string]any)["platform"].(map[string]any)["components"].(map[string]any)
+			for section, name := range map[string]string{"apps": "agent-router", "crds": "agent-router-crds"} {
+				if components[section].(map[string]any)[name].(map[string]any)["enabled"] != true {
+					t.Fatalf("agentic snapshot did not enable %s", name)
+				}
+			}
 			envoyGateway := components["values"].(map[string]any)["envoy-gateway"].(map[string]any)
 			zone := envoyGateway["platform"].(map[string]any)["envoyGateway"].(map[string]any)["ingress"].(map[string]any)["domains"].([]any)[0].(map[string]any)["apex"]
 			if zone != "local.localhost" {

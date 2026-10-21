@@ -126,7 +126,7 @@ func TestSeedAddons(t *testing.T) {
 	if got := PlatformAddons(); !reflect.DeepEqual(got, wantPlatform) {
 		t.Fatalf("PlatformAddons() = %v, want %v", got, wantPlatform)
 	}
-	wantAgentic := append(append([]string{}, wantPlatform...), "agent-sandbox")
+	wantAgentic := append(append([]string{}, wantPlatform...), "agent-sandbox", "agent-router")
 	if got := AgenticAddons(); !reflect.DeepEqual(got, wantAgentic) {
 		t.Fatalf("AgenticAddons() = %v, want %v", got, wantAgentic)
 	}
