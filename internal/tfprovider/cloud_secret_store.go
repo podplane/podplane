@@ -39,6 +39,7 @@ type cloudSecretOptions struct {
 	Profile   string
 	Project   string
 	GCPLabels map[string]string
+	AWSTags   map[string]string
 }
 
 // Identity returns the stable identity stored in Terraform state.
@@ -119,15 +120,19 @@ func newCloudSecretStore(ctx context.Context, opts cloudSecretOptions) (cloudSec
 			return nil, fmt.Errorf("load AWS configuration: %w", err)
 		}
 		if opts.Provider == cloudSecretProviderAWSSecretsManager {
-			return &awsSecretsStore{client: awssecrets.NewFromConfig(cfg), name: opts.Name, identity: identity}, nil
+			return &awsSecretsStore{client: awssecrets.NewFromConfig(cfg), name: opts.Name, identity: identity, tags: opts.AWSTags}, nil
 		}
-		return &awsSSMStore{client: ssm.NewFromConfig(cfg), name: opts.Name, identity: identity}, nil
+		return &awsSSMStore{client: ssm.NewFromConfig(cfg), name: opts.Name, identity: identity, tags: opts.AWSTags}, nil
 	case cloudSecretProviderGCPSecretManager:
 		parts := strings.Split(opts.Name, "/")
-		if len(parts) != 4 || parts[0] != "projects" || parts[1] == "" || parts[2] != "secrets" || parts[3] == "" {
+		regional := len(parts) == 6 && parts[2] == "locations" && parts[3] != ""
+		if (len(parts) != 4 && !regional) || parts[0] != "projects" || parts[1] == "" || parts[len(parts)-2] != "secrets" || parts[len(parts)-1] == "" {
 			return nil, fmt.Errorf("invalid GCP Secret Manager name %q", opts.Name)
 		}
 		clientOpts := []option.ClientOption{}
+		if regional {
+			clientOpts = append(clientOpts, option.WithEndpoint("secretmanager."+parts[3]+".rep.googleapis.com:443"))
+		}
 		if opts.Project != "" {
 			clientOpts = append(clientOpts, option.WithQuotaProject(opts.Project))
 		}
@@ -137,8 +142,8 @@ func newCloudSecretStore(ctx context.Context, opts cloudSecretOptions) (cloudSec
 		}
 		return &gcpSecretStore{
 			client:   client,
-			parent:   strings.Join(parts[:2], "/"),
-			secretID: parts[3],
+			parent:   strings.Join(parts[:len(parts)-2], "/"),
+			secretID: parts[len(parts)-1],
 			name:     opts.Name,
 			identity: identity,
 			labels:   opts.GCPLabels,
@@ -159,6 +164,7 @@ type awsSecretsAPI interface {
 type awsSecretsStore struct {
 	client         awsSecretsAPI
 	name, identity string
+	tags           map[string]string
 }
 
 // Close releases resources held by the store.
@@ -166,7 +172,11 @@ func (s *awsSecretsStore) Close() error { return nil }
 
 // CreateOrAdopt creates the AWS secret or adopts its current immutable version.
 func (s *awsSecretsStore) CreateOrAdopt(ctx context.Context, value []byte) (cloudSecretMetadata, []byte, error) {
-	out, err := s.client.CreateSecret(ctx, &awssecrets.CreateSecretInput{Name: aws.String(s.name), SecretBinary: value})
+	input := &awssecrets.CreateSecretInput{Name: aws.String(s.name), SecretBinary: value}
+	for key, value := range s.tags {
+		input.Tags = append(input.Tags, secretstypes.Tag{Key: aws.String(key), Value: aws.String(value)})
+	}
+	out, err := s.client.CreateSecret(ctx, input)
 	if err == nil {
 		if out == nil || aws.ToString(out.VersionId) == "" {
 			return cloudSecretMetadata{}, nil, errors.New("create AWS secret: backend returned no version")
@@ -217,6 +227,7 @@ type awsSSMAPI interface {
 type awsSSMStore struct {
 	client         awsSSMAPI
 	name, identity string
+	tags           map[string]string
 }
 
 // Close releases resources held by the store.
@@ -224,7 +235,11 @@ func (s *awsSSMStore) Close() error { return nil }
 
 // CreateOrAdopt creates the secure parameter or adopts its current version.
 func (s *awsSSMStore) CreateOrAdopt(ctx context.Context, value []byte) (cloudSecretMetadata, []byte, error) {
-	out, err := s.client.PutParameter(ctx, &ssm.PutParameterInput{Name: aws.String(s.name), Type: ssmtypes.ParameterTypeSecureString, Value: aws.String(string(value)), Overwrite: aws.Bool(false)})
+	input := &ssm.PutParameterInput{Name: aws.String(s.name), Type: ssmtypes.ParameterTypeSecureString, Value: aws.String(string(value)), Overwrite: aws.Bool(false)}
+	for key, value := range s.tags {
+		input.Tags = append(input.Tags, ssmtypes.Tag{Key: aws.String(key), Value: aws.String(value)})
+	}
+	out, err := s.client.PutParameter(ctx, input)
 	if err == nil {
 		if out == nil || out.Version < 1 {
 			return cloudSecretMetadata{}, nil, errors.New("create AWS SSM parameter: backend returned no version")
@@ -288,7 +303,11 @@ type gcpSecretManagerAPI interface {
 
 // CreateOrAdopt creates the Google secret and first version or adopts the latest version.
 func (s *gcpSecretStore) CreateOrAdopt(ctx context.Context, value []byte) (cloudSecretMetadata, []byte, error) {
-	created, err := s.client.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: s.parent, SecretId: s.secretID, Secret: &secretmanagerpb.Secret{Labels: s.labels, Replication: &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_Automatic_{Automatic: &secretmanagerpb.Replication_Automatic{}}}}})
+	secret := &secretmanagerpb.Secret{Labels: s.labels}
+	if !strings.Contains(s.parent, "/locations/") {
+		secret.Replication = &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_Automatic_{Automatic: &secretmanagerpb.Replication_Automatic{}}}
+	}
+	created, err := s.client.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: s.parent, SecretId: s.secretID, Secret: secret})
 	if err != nil && status.Code(err) != codes.AlreadyExists {
 		return cloudSecretMetadata{}, nil, fmt.Errorf("create GCP secret: %w", err)
 	}

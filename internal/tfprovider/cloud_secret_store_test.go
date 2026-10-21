@@ -24,6 +24,7 @@ import (
 // fakeSecrets records AWS Secrets Manager calls for backend tests.
 type fakeSecrets struct {
 	createErr   error
+	created     *awssecrets.CreateSecretInput
 	value       []byte
 	stringValue *string
 	version     string
@@ -32,7 +33,8 @@ type fakeSecrets struct {
 }
 
 // CreateSecret returns the configured creation result.
-func (f *fakeSecrets) CreateSecret(context.Context, *awssecrets.CreateSecretInput, ...func(*awssecrets.Options)) (*awssecrets.CreateSecretOutput, error) {
+func (f *fakeSecrets) CreateSecret(_ context.Context, input *awssecrets.CreateSecretInput, _ ...func(*awssecrets.Options)) (*awssecrets.CreateSecretOutput, error) {
+	f.created = input
 	return &awssecrets.CreateSecretOutput{VersionId: aws.String(f.version)}, f.createErr
 }
 
@@ -51,10 +53,16 @@ func (f *fakeSecrets) DescribeSecret(context.Context, *awssecrets.DescribeSecret
 func TestAWSSecretsCreateAndConcurrentAdopt(t *testing.T) {
 	key := []byte("winner")
 	created := &fakeSecrets{version: "v1"}
-	store := &awsSecretsStore{client: created, name: "/p/test-secret", identity: "id"}
+	store := &awsSecretsStore{client: created, name: "/p/test-secret", identity: "id", tags: map[string]string{"podplane.dev/binding": "sourcegateway"}}
 	meta, winner, err := store.CreateOrAdopt(context.Background(), key)
 	if err != nil || meta.Version != "v1" || created.getCalls != 0 || !bytes.Equal(winner, key) {
 		t.Fatalf("create = %+v, calls %d, %v", meta, created.getCalls, err)
+	}
+	if !bytes.Equal(created.created.SecretBinary, key) || created.created.SecretString != nil {
+		t.Fatal("creation must preserve binary storage")
+	}
+	if len(created.created.Tags) != 1 || aws.ToString(created.created.Tags[0].Key) != "podplane.dev/binding" || aws.ToString(created.created.Tags[0].Value) != "sourcegateway" {
+		t.Fatal("creation did not preserve discovery tags")
 	}
 	other := []byte("loser")
 	adopted := &fakeSecrets{createErr: &secretstypes.ResourceExistsException{}, value: key, version: "winner"}
@@ -116,6 +124,7 @@ func TestSSMMetadataRejectsNonSecureString(t *testing.T) {
 // fakeGCPSecrets records Google Secret Manager calls for backend tests.
 type fakeGCPSecrets struct {
 	createErr             error
+	created               *secretmanagerpb.CreateSecretRequest
 	addErr                error
 	secret                *secretmanagerpb.Secret
 	winner                *secretmanagerpb.AccessSecretVersionResponse
@@ -123,7 +132,8 @@ type fakeGCPSecrets struct {
 }
 
 // CreateSecret returns the configured secret creation result.
-func (f *fakeGCPSecrets) CreateSecret(context.Context, *secretmanagerpb.CreateSecretRequest, ...gax.CallOption) (*secretmanagerpb.Secret, error) {
+func (f *fakeGCPSecrets) CreateSecret(_ context.Context, input *secretmanagerpb.CreateSecretRequest, _ ...gax.CallOption) (*secretmanagerpb.Secret, error) {
+	f.created = input
 	if f.secret == nil {
 		f.secret = &secretmanagerpb.Secret{Name: "projects/p/secrets/test-secret", Etag: "e1"}
 	}
@@ -233,5 +243,18 @@ func TestGCPAddResponseErrorAdoptsCommittedVersion(t *testing.T) {
 	meta, winner, err := store.CreateOrAdopt(context.Background(), key)
 	if err != nil || meta.Version != "projects/p/secrets/test-secret/versions/1" || !bytes.Equal(winner, key) || fake.addCalls != 1 || fake.accessCalls != 1 {
 		t.Fatalf("adopt committed add = %+v, add calls = %d, access calls = %d, error = %v", meta, fake.addCalls, fake.accessCalls, err)
+	}
+}
+
+// TestGCPRegionalSecret verifies regional creation omits global replication settings.
+func TestGCPRegionalSecret(t *testing.T) {
+	client := &fakeGCPSecrets{}
+	store := newTestGCPSecretStore(client)
+	store.parent = "projects/p/locations/us-west1"
+	if _, _, err := store.CreateOrAdopt(context.Background(), []byte("key")); err != nil {
+		t.Fatal(err)
+	}
+	if client.created.Parent != store.parent || client.created.Secret.Replication != nil {
+		t.Fatal("regional secrets must use the location parent without a replication policy")
 	}
 }
