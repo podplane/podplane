@@ -29,6 +29,7 @@ var secretFlags struct {
 	Kubeconfig   string
 	Stdin        bool
 	File         string
+	Binary       bool
 	DryRun       string
 	Output       string
 	HideArchived bool

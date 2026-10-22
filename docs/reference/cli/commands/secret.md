@@ -64,6 +64,13 @@ Read the exact value bytes from a file:
 podplane secret update tls-key --for ingress-worker --file ./tls.key
 ```
 
+Write raw binary bytes, without pre-encoding them:
+
+```bash
+podplane secret create signing-key --for web-api --binary --file ./key.bin
+podplane secret update signing-key --for web-api --binary --stdin < ./key.bin
+```
+
 List keys without showing their values:
 
 ```bash
@@ -107,11 +114,18 @@ podplane secret destroy database-url --for web-api
 | --- | --- |
 | `--stdin` | Read the secret value from stdin. |
 | `--file string` | Read the exact secret value bytes from a file. Mutually exclusive with `--stdin`. |
+| `--binary` | Treat input as raw binary instead of UTF-8 text. SSM and Vault/OpenBao store it as base64 text. |
 | `--dry-run client` | Print the encrypted request without writing it. |
 | `-o, --output string` | Output format for dry-run or write responses: `json` or `yaml`. |
 
 When neither `--stdin` nor `--file` is set, the CLI prompts for the value on the
 terminal without echoing input.
+
+Without `--binary`, values must be valid UTF-8 text, including for `--dry-run client`.
+File and stdin input preserve whitespace and newlines exactly. With `--binary`,
+input is raw bytes, not pre-encoded base64. Specify the flag on each binary update;
+Podplane does not infer the previous value's format. Mount behavior depends on the
+provider; see [secret value format](../../secrets.md#secret-value-format).
 
 ## List Options
 

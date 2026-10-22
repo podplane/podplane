@@ -7,6 +7,7 @@ package tfprovider
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +15,11 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
+	"github.com/nstance-dev/nstance/v2/pkg/nonce"
+
+	"github.com/podplane/podplane/internal/components"
 	"github.com/podplane/podplane/pkg/netsyseed"
 	"github.com/podplane/podplane/pkg/seeds"
 )
@@ -121,18 +126,125 @@ func resolveExplicitSeedPath(ctx context.Context, source, digest string) (seedPa
 	return tmpPath, cleanup, nil
 }
 
-// generateNetsySeedSnapshot keeps cluster-specific snapshots in memory.
-func generateNetsySeedSnapshot(ctx context.Context, opts SeedOptions, seedPath string) ([]byte, error) {
-	var snapshot bytes.Buffer
-	if err := netsyseed.WriteSnapshot(&snapshot, netsyseed.SnapshotOptions{
+// createSeed adopts completed snapshots before accessing keys. For new clusters
+// it renders configuration, prepares component prerequisites, and only then
+// publishes the snapshot. Rendering itself never provisions external state.
+func createSeed(ctx context.Context, opts SeedOptions, store seedSnapshotStore, openKeyStore func(context.Context, cloudSecretOptions) (cloudSecretStore, error)) (seedSnapshotMetadata, error) {
+	meta, adopted, err := completedSeed(ctx, opts, store)
+	if err != nil || adopted {
+		return meta, err
+	}
+	if err := store.RequireEmpty(ctx); err != nil {
+		if winner, ok, readErr := completedSeed(ctx, opts, store); readErr == nil && ok {
+			return winner, nil
+		}
+		return meta, err
+	}
+	if err := validateBootstrapScope(opts); err != nil {
+		return meta, err
+	}
+	seedPath, cleanup, err := resolveSeedPath(ctx, opts)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		return meta, err
+	}
+	prepared, err := netsyseed.Prepare(netsyseed.SnapshotOptions{
 		Context:           ctx,
 		ClusterConfigPath: opts.ClusterConfigPath,
 		SeedPath:          seedPath,
 		ValuesContent:     []byte(opts.ValuesContent),
 		ValuesFile:        opts.ValuesFile,
-	}); err != nil {
-		clear(snapshot.Bytes())
-		return nil, err
+	})
+	if err != nil {
+		return meta, err
 	}
-	return snapshot.Bytes(), nil
+	cfg, err := components.ParseValues(prepared.ComponentValues)
+	if err != nil {
+		return meta, err
+	}
+	required, err := cfg.RequiredSecrets(nil)
+	if err != nil {
+		return meta, err
+	}
+	var data bytes.Buffer
+	if err := prepared.WriteSnapshot(&data); err != nil {
+		clear(data.Bytes())
+		return meta, err
+	}
+	snapshot := data.Bytes()
+	defer func() { clear(snapshot) }()
+	if b := opts.NstanceBootstrap; b != nil {
+		// Validate overlay and object collisions before reading the signing key.
+		probe, err := addOperatorBootstrap(snapshot, b, nil, "")
+		clear(probe)
+		if err != nil {
+			return meta, err
+		}
+		waitCtx, cancel := context.WithTimeout(ctx, publicCAWait)
+		ca, err := waitPublicCA(waitCtx, func(ctx context.Context) ([]byte, error) { return store.PublicCA(ctx, b) }, 2*time.Second)
+		cancel()
+		if err != nil {
+			return meta, err
+		}
+		// Another apply may have completed while the CA was being initialized.
+		meta, adopted, err = completedSeed(ctx, opts, store)
+		if err != nil || adopted {
+			return meta, err
+		}
+		secret, _ := b.secret(opts)
+		keyStore, err := openKeyStore(ctx, secret)
+		if err != nil {
+			return meta, errors.New("cannot configure Nstance signing-key backend")
+		}
+		defer func() { _ = keyStore.Close() }()
+		current, err := keyStore.Metadata(ctx)
+		if err != nil || current.Identity != b.SigningKeyID.ValueString() || current.Version != b.SigningKeyVersion.ValueString() {
+			return meta, errors.New("recorded Nstance signing-key identity or version changed; restore the original key")
+		}
+		key, err := cloudSecretValue(ctx, keyStore, b.SigningKeyVersion.ValueString())
+		if err != nil {
+			return meta, err
+		}
+		defer clear(key)
+		fingerprint, err := nonce.FingerprintSigningKey(key)
+		if err != nil || fingerprint != b.SigningKeyFingerprint.ValueString() {
+			return meta, errors.New("recorded Nstance signing-key fingerprint mismatch; restore the original key")
+		}
+		token, err := nonce.GenerateOperatorToken(key, b.ClusterID.ValueString(), b.Tenant.ValueString(), operatorNonceTTL)
+		if err != nil {
+			return meta, errors.New("cannot generate Nstance operator registration nonce")
+		}
+		injected, err := addOperatorBootstrap(snapshot, b, ca, token)
+		if err != nil {
+			return meta, err
+		}
+		clear(snapshot)
+		snapshot = injected
+	}
+	if err := store.RequireEmpty(ctx); err != nil {
+		if winner, ok, readErr := completedSeed(ctx, opts, store); readErr == nil && ok {
+			return winner, nil
+		}
+		return meta, err
+	}
+	for _, secret := range required {
+		if err := ensureComponentSecret(ctx, opts, secret, openKeyStore); err != nil {
+			return meta, err
+		}
+	}
+	// Publish only after both snapshot construction and secret provisioning succeed.
+	if err := store.Upload(ctx, snapshot, seedCompletion(opts)); err != nil {
+		// Recover a concurrent winner or an upload whose response was lost.
+		if winner, ok, readErr := completedSeed(ctx, opts, store); readErr == nil && ok {
+			return winner, nil
+		}
+		return meta, errors.New("cannot upload create-only Netsy snapshot; retry will adopt a completed upload, never overwrite live state")
+	}
+	meta, adopted, err = completedSeed(ctx, opts, store)
+	if err == nil && !adopted {
+		err = errors.New("uploaded seed metadata is not yet available; retry to adopt")
+	}
+	return meta, err
 }

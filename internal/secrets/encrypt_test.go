@@ -13,9 +13,101 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestEncryptedRequestText verifies text and binary request construction,
+// authenticated format selection, and preservation across a stale-key retry.
+func TestEncryptedRequestText(t *testing.T) {
+	dir := t.TempDir()
+	key, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub := PublicKey{Spec: PublicKeySpec{KeyID: "latest", Algorithm: Algorithm, PublicKey: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes())}}
+	data, err := json.Marshal(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "public"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := `#!/bin/sh
+touch "$STATE/called"
+if [ "$1" = replace ]; then
+  cat > "$STATE/request"
+  if [ ! -f "$STATE/retried" ]; then
+    touch "$STATE/retried"
+    echo 'Conflict: stale public key' >&2
+    exit 1
+  fi
+  echo '{}'
+  exit 0
+fi
+cat "$STATE/public"
+`
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("STATE", dir)
+	opts := WriteOptions{ClusterID: "dev", Namespace: "system", KeyspaceName: "bao.app", Key: "token", Operation: "create", Value: []byte("private\xffvalue")}
+	if _, err := (Client{}).EncryptedRequest(opts); err == nil || err.Error() != "secret value must be valid UTF-8 text" {
+		t.Fatalf("invalid value error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "called")); !os.IsNotExist(err) {
+		t.Fatal("invalid value contacted the cluster")
+	}
+	for _, value := range []string{"  café �\r\n\t", "-----BEGIN PRIVATE KEY-----\nYWJjZA==\n-----END PRIVATE KEY-----\n", "YWJjZA=="} {
+		opts.Value = []byte(value)
+		request, err := (Client{}).EncryptedRequest(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := decryptWriteValueForTest(t, key, request.Spec.Entries[0].EncryptedValue.Ciphertext, AssociatedData(opts))
+		if string(got) != value {
+			t.Fatal("request changed plaintext")
+		}
+	}
+	for _, value := range []string{"\x00\xff\xc3\n", "YWJjZA=="} {
+		opts.Value, opts.Binary = []byte(value), true
+		request, err := (Client{}).EncryptedRequest(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entry := request.Spec.Entries[0]
+		if !entry.Binary {
+			t.Fatal("request lost binary intent")
+		}
+		// Expected protocol bytes are independent of AssociatedData's implementation.
+		aad := []byte(Algorithm + "\x00dev\x00system\x00bao.app\x00token\x00true")
+		got := decryptWriteValueForTest(t, key, entry.EncryptedValue.Ciphertext, aad)
+		if string(got) != value {
+			t.Fatal("binary plaintext changed or was pre-encoded")
+		}
+		if _, err := openWriteEnvelopeForTest(key, entry.EncryptedValue.Ciphertext, []byte(Algorithm+"\x00dev\x00system\x00bao.app\x00token\x00false")); err == nil {
+			t.Fatal("removing binary intent must invalidate the ciphertext")
+		}
+		if _, err := (Client{}).PutEncrypted(request, opts); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "request"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sent SecretProviderKeyspace
+		if err := json.Unmarshal(data, &sent); err != nil {
+			t.Fatal(err)
+		}
+		entry = sent.Spec.Entries[0]
+		if !entry.Binary || string(decryptWriteValueForTest(t, key, entry.EncryptedValue.Ciphertext, aad)) != value {
+			t.Fatal("write/retry changed binary mode or bytes")
+		}
+	}
+}
 
 // TestIsStalePublicKeyErrorRequiresConflictAndMessage verifies exact retry matching.
 func TestIsStalePublicKeyErrorRequiresConflictAndMessage(t *testing.T) {
@@ -39,14 +131,20 @@ func TestIsStalePublicKeyErrorRequiresConflictAndMessage(t *testing.T) {
 	}
 }
 
-// TestAssociatedData verifies the stable domain-separated write context.
+// TestAssociatedData verifies that both text and binary writes authenticate their mode.
 func TestAssociatedData(t *testing.T) {
 	t.Parallel()
 	opts := WriteOptions{ClusterID: "cluster-a", Namespace: "default", KeyspaceName: "openbao-local.web", Key: "api-key"}
-	got := string(AssociatedData(opts))
-	want := strings.Join([]string{Algorithm, "cluster-a", "default", "openbao-local.web", "api-key"}, "\x00")
-	if got != want {
-		t.Fatalf("AssociatedData() = %q, want %q", got, want)
+	for _, tc := range []struct {
+		binary bool
+		mode   string
+	}{{false, "false"}, {true, "true"}} {
+		opts.Binary = tc.binary
+		got := string(AssociatedData(opts))
+		want := Algorithm + "\x00cluster-a\x00default\x00openbao-local.web\x00api-key\x00" + tc.mode
+		if got != want {
+			t.Fatalf("AssociatedData() = %q, want %q", got, want)
+		}
 	}
 }
 

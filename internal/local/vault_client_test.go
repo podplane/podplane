@@ -50,7 +50,16 @@ func TestLocalVaultClient(t *testing.T) {
 	})
 
 	client := newLocalVaultClient(path)
-	created, err := client.CreateSecret("dev", "secret/data/dev/workload-ca-key", map[string]string{"value": "first"})
+	for _, values := range []map[string]string{{"value": "private\xffvalue"}, {"private\xffkey": "text"}} {
+		if created, err := client.CreateSecret("dev", "secret/data/dev/invalid", values); err == nil || created {
+			t.Fatalf("invalid text CreateSecret = %v, %v", created, err)
+		}
+		if _, ok, err := client.GetSecret("dev", "secret/data/dev/invalid"); err != nil || ok {
+			t.Fatal("invalid text was persisted")
+		}
+	}
+	const original = "  café �\r\nYWJjZA==\n"
+	created, err := client.CreateSecret("dev", "secret/data/dev/workload-ca-key", map[string]string{"value": original})
 	if err != nil || !created {
 		t.Fatalf("CreateSecret = %v, %v; want true, nil", created, err)
 	}
@@ -59,7 +68,7 @@ func TestLocalVaultClient(t *testing.T) {
 		t.Fatalf("second CreateSecret = %v, %v; want false, nil", created, err)
 	}
 	got, ok, err := client.GetSecret("dev", "secret/data/dev/workload-ca-key")
-	if err != nil || !ok || got["value"] != "first" {
+	if err != nil || !ok || got["value"] != original {
 		t.Fatalf("GetSecret = %#v, %v, %v", got, ok, err)
 	}
 	if err := client.DeleteCluster("dev"); err != nil {

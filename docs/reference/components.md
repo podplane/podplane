@@ -22,7 +22,7 @@ During cluster creation, users are given four initial state options to choose fr
 
 3. __Platform__ - Core Components plus commonly used addons such as Envoy Gateway, so templates such as "web" work without installing additional addons.
 
-4. __Agentic__ (default) - the Platform baseline plus Agent Sandbox and Agent Router.
+4. __Agentic__ (default) - the Platform baseline plus Agent Sandbox, Source Gateway, and Agent Router.
 
 Use the platform seed to provision a traditional PaaS, and the agentic seed to provision an Agentic PaaS.
 
@@ -58,6 +58,8 @@ Components which can be installed via `podplane install` atop the Minimal seed:
 
 - `agent-sandbox`: [Agent Sandbox](https://agent-sandbox.sigs.k8s.io/) controller for isolated, stateful singleton workloads such as AI agent runtimes
     - `agent-sandbox-crds`
+- `sourcegateway`: [Source Gateway](https://sourcegateway.dev/) for Git and object storage access
+    - `sourcegateway-crds`
 - `agent-router`: [Agent Router](https://theagentrouter.ai/) (renamed Envoy AI Gateway), using official release `v1.2.0`, in namespace `platform-agent-router`; reuses the installed Envoy Gateway rather than installing another gateway
     - `agent-router-crds`
 - `podplane-operator` for Podplane platform APIs and controllers. It grants the Podplane [RBAC](../guides/rbac.md) groups access to tenant namespaces, signs workload and Service certificates, publishes the workload trust bundle, injects that CA into annotated API extension resources, and manages self-signed fallback and optional ACME ingress certificates for NLB clusters. Local and tunnel clusters instead use Nstance-issued node certificates.

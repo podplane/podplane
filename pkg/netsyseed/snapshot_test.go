@@ -34,7 +34,7 @@ func TestInterpolatePlatformComponentsMergesValues(t *testing.T) {
 		},
 	}
 
-	if err := interpolatePlatformComponents(records, values); err != nil {
+	if _, err := interpolatePlatformComponents(records, values); err != nil {
 		t.Fatalf("interpolatePlatformComponents error = %v", err)
 	}
 	var got map[string]any
@@ -218,7 +218,7 @@ func TestRewriteSeedImagesPrefixesAllJSONImageFields(t *testing.T) {
 		{Key: []byte("/registry/configmaps/default/ignored"), Value: []byte(`not json`)},
 	}
 
-	if err := rewriteSeedImages(records, "dev-registry.local/", "mirror"); err != nil {
+	if err := rewriteSeedImages(records, nil, "dev-registry.local/", "mirror"); err != nil {
 		t.Fatalf("rewriteSeedImages error = %v", err)
 	}
 	var got map[string]any
@@ -674,8 +674,8 @@ func TestWriteSnapshotWritesBytes(t *testing.T) {
 			}
 			components := obj["spec"].(map[string]any)["values"].(map[string]any)["platform"].(map[string]any)["components"].(map[string]any)
 			for section, name := range map[string]string{"apps": "agent-router", "crds": "agent-router-crds"} {
-				if components[section].(map[string]any)[name].(map[string]any)["enabled"] != true {
-					t.Fatalf("agentic snapshot did not enable %s", name)
+				if _, exists := components[section].(map[string]any)[name]; exists {
+					t.Fatalf("generated snapshot unexpectedly includes %q, which was not present in the original seed", name)
 				}
 			}
 			envoyGateway := components["values"].(map[string]any)["envoy-gateway"].(map[string]any)

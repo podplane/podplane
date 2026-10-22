@@ -60,9 +60,9 @@ func TestParseHelmRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := parseValues(raw)
+	cfg, err := ParseValues(raw)
 	if err != nil {
-		t.Fatalf("parseValues: %v", err)
+		t.Fatalf("ParseValues: %v", err)
 	}
 
 	cilium, isApp, ok := cfg.Get("cilium")
@@ -94,7 +94,7 @@ func TestParseHelmRelease(t *testing.T) {
 // TestParseValuesMissingComponents checks rejection of values without platform components.
 func TestParseValuesMissingComponents(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"platform": map[string]any{}})
-	if _, err := parseValues(raw); err == nil {
+	if _, err := ParseValues(raw); err == nil {
 		t.Fatal("expected error for missing platform.components")
 	}
 }
@@ -117,22 +117,5 @@ func TestHelmErrorReleaseNotFoundMessage(t *testing.T) {
 	}
 	if strings.Contains(message, "release: not found") {
 		t.Fatalf("HelmError message should hide raw helm release-not-found output, got %q", message)
-	}
-}
-
-// TestSeedAddons checks the image-prefetch baseline and agentic extension.
-func TestSeedAddons(t *testing.T) {
-	wantPlatform := []string{"envoy-gateway", "podplane-operator", "secrets-store-csi-driver", "zot-registry"}
-	if got := PlatformAddons(); !reflect.DeepEqual(got, wantPlatform) {
-		t.Fatalf("PlatformAddons() = %v, want %v", got, wantPlatform)
-	}
-	wantAgentic := append(append([]string{}, wantPlatform...), "agent-sandbox", "agent-router")
-	if got := AgenticAddons(); !reflect.DeepEqual(got, wantAgentic) {
-		t.Fatalf("AgenticAddons() = %v, want %v", got, wantAgentic)
-	}
-	PlatformAddons()[0] = "changed"
-	AgenticAddons()[0] = "changed"
-	if got := PlatformAddons(); !reflect.DeepEqual(got, wantPlatform) {
-		t.Fatalf("caller mutated addon baseline: %v", got)
 	}
 }

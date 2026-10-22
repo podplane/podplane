@@ -30,6 +30,20 @@ Podplane's templates handle this setup when you use `podplane deploy --secret`. 
 3. Create a dedicated service account with that name and set it explicitly as the Pod's `spec.serviceAccountName`.
 4. Add a Secrets Store CSI volume that references the generated `SecretProviderClass`, then mount it read-only into the workload.
 
+### Binary values
+
+Secret create/update commands accept UTF-8 text by default. For raw binary input, pass `--binary` on each write without pre-encoding it. This flag does not configure the binding.
+
+For the binding, on the `SecretProviderBinding` spec, the `binary` field is optional and effectively defaults to `false`. Setting it, even to `false`, is only valid for Vault/OpenBao, selected by `spec.providerName` or the cluster default secrets provider.
+
+| Provider | Mounting binary values |
+| --- | --- |
+| AWS Secrets Manager / GCP | Original bytes mount automatically; do not set `binary` on your binding. |
+| Vault / OpenBao | Stored as base64; set `spec.items[].binary: true` to decode when mounted. |
+| AWS SSM Parameter Store | Mounts base64 text; omit `binary` and decode in the application. |
+
+PEM and application-defined base64 strings remain text; do not use `--binary` for them.
+
 ### Access controls
 
 By default, a Pod can mount a `SecretProviderClass` only when its name matches the Pod's service account. For example, a Pod running as `api` can mount the `api` class, but not `database`. Pods using Secrets Store CSI volumes must set `spec.serviceAccountName` explicitly.

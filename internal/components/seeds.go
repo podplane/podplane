@@ -19,5 +19,5 @@ func PlatformAddons() []string {
 
 // AgenticAddons returns the platform addons plus the agentic components.
 func AgenticAddons() []string {
-	return append(PlatformAddons(), "agent-sandbox", "agent-router")
+	return append(PlatformAddons(), "agent-sandbox", "sourcegateway", "agent-router")
 }

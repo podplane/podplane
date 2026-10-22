@@ -6,9 +6,11 @@ package secrets
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os/exec"
 	"strings"
 
 	"github.com/podplane/podplane/internal/execwrap"
@@ -62,6 +64,7 @@ type KeyspaceSpec struct {
 type EntryRequest struct {
 	Key            string          `json:"key" yaml:"key"`
 	Operation      string          `json:"operation" yaml:"operation"`
+	Binary         bool            `json:"binary,omitempty" yaml:"binary,omitempty"`
 	EncryptedValue *EncryptedValue `json:"encryptedValue,omitempty" yaml:"encryptedValue,omitempty"`
 }
 
@@ -91,6 +94,16 @@ type EntryStatus struct {
 type Client struct {
 	Context    string
 	Kubeconfig string
+}
+
+// WaitReady waits for the operator's aggregated API after its Helm release is ready.
+func (c Client) WaitReady(ctx context.Context) error {
+	args := append(kubectl.Args(c.Context, c.Kubeconfig), "wait", "--for=condition=Available", "apiservice/v1beta1.secrets-api.podplane.dev", "--timeout=5m")
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("wait for Secrets API: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 // PublicKey fetches publickeys/latest.

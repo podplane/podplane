@@ -15,7 +15,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Algorithm is the supported client-side write encryption algorithm.
@@ -29,10 +31,14 @@ type WriteOptions struct {
 	Key          string
 	Operation    string
 	Value        []byte
+	Binary       bool
 }
 
 // EncryptedRequest builds an encrypted SecretProviderKeyspace write request.
 func (c Client) EncryptedRequest(opts WriteOptions) (SecretProviderKeyspace, error) {
+	if !opts.Binary && !utf8.Valid(opts.Value) {
+		return SecretProviderKeyspace{}, fmt.Errorf("secret value must be valid UTF-8 text")
+	}
 	pub, err := c.PublicKey()
 	if err != nil {
 		return SecretProviderKeyspace{}, err
@@ -44,11 +50,13 @@ func (c Client) EncryptedRequest(opts WriteOptions) (SecretProviderKeyspace, err
 	if err != nil {
 		return SecretProviderKeyspace{}, err
 	}
-	return NewKeyspaceRequest(opts.Namespace, opts.KeyspaceName, opts.Key, opts.Operation, &EncryptedValue{
+	request := NewKeyspaceRequest(opts.Namespace, opts.KeyspaceName, opts.Key, opts.Operation, &EncryptedValue{
 		KeyID:      pub.Spec.KeyID,
 		Algorithm:  Algorithm,
 		Ciphertext: ciphertext,
-	}), nil
+	})
+	request.Spec.Entries[0].Binary = opts.Binary
+	return request, nil
 }
 
 // PutEncrypted sends an encrypted write request and retries once after key rotation.
@@ -63,7 +71,7 @@ func (c Client) PutEncrypted(request SecretProviderKeyspace, opts WriteOptions) 
 	return response, err
 }
 
-// AssociatedData returns the AES-GCM associated data for one secret value.
+// AssociatedData binds the secret's identity and binary mode to its ciphertext.
 func AssociatedData(opts WriteOptions) []byte {
 	return []byte(strings.Join([]string{
 		Algorithm,
@@ -71,6 +79,7 @@ func AssociatedData(opts WriteOptions) []byte {
 		opts.Namespace,
 		opts.KeyspaceName,
 		opts.Key,
+		strconv.FormatBool(opts.Binary),
 	}, "\x00"))
 }
 

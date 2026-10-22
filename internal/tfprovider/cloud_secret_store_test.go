@@ -51,47 +51,59 @@ func (f *fakeSecrets) DescribeSecret(context.Context, *awssecrets.DescribeSecret
 
 // TestAWSSecretsCreateAndConcurrentAdopt verifies create-only and adoption paths.
 func TestAWSSecretsCreateAndConcurrentAdopt(t *testing.T) {
-	key := []byte("winner")
+	key := []byte("  café �\r\nYWJjZA==\n")
 	created := &fakeSecrets{version: "v1"}
 	store := &awsSecretsStore{client: created, name: "/p/test-secret", identity: "id", tags: map[string]string{"podplane.dev/binding": "sourcegateway"}}
 	meta, winner, err := store.CreateOrAdopt(context.Background(), key)
 	if err != nil || meta.Version != "v1" || created.getCalls != 0 || !bytes.Equal(winner, key) {
 		t.Fatalf("create = %+v, calls %d, %v", meta, created.getCalls, err)
 	}
-	if !bytes.Equal(created.created.SecretBinary, key) || created.created.SecretString != nil {
-		t.Fatal("creation must preserve binary storage")
+	if created.created.SecretBinary != nil || aws.ToString(created.created.SecretString) != string(key) {
+		t.Fatal("creation must preserve text in SecretString")
 	}
 	if len(created.created.Tags) != 1 || aws.ToString(created.created.Tags[0].Key) != "podplane.dev/binding" || aws.ToString(created.created.Tags[0].Value) != "sourcegateway" {
 		t.Fatal("creation did not preserve discovery tags")
 	}
 	other := []byte("loser")
-	adopted := &fakeSecrets{createErr: &secretstypes.ResourceExistsException{}, value: key, version: "winner"}
+	adopted := &fakeSecrets{createErr: &secretstypes.ResourceExistsException{}, stringValue: aws.String(string(key)), version: "winner"}
 	store.client = adopted
 	meta, winner, err = store.CreateOrAdopt(context.Background(), other)
 	if err != nil || meta.Version != "winner" || adopted.getCalls != 1 || !bytes.Equal(winner, key) {
 		t.Fatalf("adopt = %+v, calls %d, %v", meta, adopted.getCalls, err)
 	}
+	pinned, err := cloudSecretValue(context.Background(), store, meta.Version)
+	if err != nil || !bytes.Equal(pinned, key) {
+		t.Fatalf("pinned read changed adopted text: %v", err)
+	}
 }
 
-// TestAWSSecretsRejectsStringOrEmptyAdoption verifies only binary keys are adopted.
-func TestAWSSecretsRejectsStringOrEmptyAdoption(t *testing.T) {
+// TestAWSSecretsRequiresText verifies adoption and pinned reads reject empty or binary values.
+func TestAWSSecretsRequiresText(t *testing.T) {
 	for _, fake := range []*fakeSecrets{
 		{createErr: &secretstypes.ResourceExistsException{}, version: "v1"},
-		{createErr: &secretstypes.ResourceExistsException{}, stringValue: aws.String("pem"), version: "v1"},
+		{createErr: &secretstypes.ResourceExistsException{}, stringValue: aws.String(""), version: "v1"},
+		{createErr: &secretstypes.ResourceExistsException{}, value: []byte("valid text stored as binary"), version: "v1"},
 	} {
 		store := &awsSecretsStore{client: fake, name: "/p/test-secret", identity: "id"}
 		if _, _, err := store.CreateOrAdopt(context.Background(), []byte("new")); err == nil {
-			t.Fatal("accepted an empty AWS Secrets Manager value")
+			t.Fatal("adopted an empty or binary AWS Secrets Manager value")
+		}
+		if _, err := cloudSecretValue(context.Background(), store, "v1"); err == nil {
+			t.Fatal("read an empty or binary AWS Secrets Manager value")
 		}
 	}
 }
 
-// fakeSSM returns configured Parameter Store metadata.
-type fakeSSM struct{ describe *ssm.DescribeParametersOutput }
+// fakeSSM records writes and returns configured Parameter Store metadata.
+type fakeSSM struct {
+	describe *ssm.DescribeParametersOutput
+	created  *ssm.PutParameterInput
+}
 
-// PutParameter is unused by metadata tests.
-func (*fakeSSM) PutParameter(context.Context, *ssm.PutParameterInput, ...func(*ssm.Options)) (*ssm.PutParameterOutput, error) {
-	return nil, errors.New("not used")
+// PutParameter records a successful create.
+func (f *fakeSSM) PutParameter(_ context.Context, input *ssm.PutParameterInput, _ ...func(*ssm.Options)) (*ssm.PutParameterOutput, error) {
+	f.created = input
+	return &ssm.PutParameterOutput{Version: 1}, nil
 }
 
 // GetParameter is unused by metadata tests.
@@ -125,6 +137,7 @@ func TestSSMMetadataRejectsNonSecureString(t *testing.T) {
 type fakeGCPSecrets struct {
 	createErr             error
 	created               *secretmanagerpb.CreateSecretRequest
+	added                 *secretmanagerpb.AddSecretVersionRequest
 	addErr                error
 	secret                *secretmanagerpb.Secret
 	winner                *secretmanagerpb.AccessSecretVersionResponse
@@ -141,7 +154,8 @@ func (f *fakeGCPSecrets) CreateSecret(_ context.Context, input *secretmanagerpb.
 }
 
 // AddSecretVersion returns the configured version creation result.
-func (f *fakeGCPSecrets) AddSecretVersion(context.Context, *secretmanagerpb.AddSecretVersionRequest, ...gax.CallOption) (*secretmanagerpb.SecretVersion, error) {
+func (f *fakeGCPSecrets) AddSecretVersion(_ context.Context, input *secretmanagerpb.AddSecretVersionRequest, _ ...gax.CallOption) (*secretmanagerpb.SecretVersion, error) {
+	f.added = input
 	f.addCalls++
 	return &secretmanagerpb.SecretVersion{Name: "projects/p/secrets/test-secret/versions/1"}, f.addErr
 }
@@ -180,6 +194,47 @@ func TestNewCloudSecretStoreRejectsMalformedName(t *testing.T) {
 	_, err := newCloudSecretStore(context.Background(), cloudSecretOptions{Provider: cloudSecretProviderGCPSecretManager, Name: "test-secret"})
 	if err == nil {
 		t.Fatal("accepted malformed Google Secret Manager name")
+	}
+}
+
+// TestCloudSecretText verifies new values remain text in each native format and
+// invalid UTF-8 cannot create even an empty backend object.
+func TestCloudSecretText(t *testing.T) {
+	for _, value := range []string{"  café �\r\nYWJjZA==\n", "private\xffvalue", "private\xc3"} {
+		sm := &fakeSecrets{version: "v1"}
+		ssmClient := &fakeSSM{}
+		gcp := &fakeGCPSecrets{}
+		stores := []cloudSecretStore{
+			&awsSecretsStore{client: sm, name: "/p/test-secret"},
+			&awsSSMStore{client: ssmClient, name: "/p/test-secret"},
+			newTestGCPSecretStore(gcp),
+		}
+		invalid := value == "private\xffvalue" || value == "private\xc3"
+		for _, store := range stores {
+			_, got, err := store.CreateOrAdopt(context.Background(), []byte(value))
+			if invalid {
+				if err == nil || err.Error() != "secret value must be valid UTF-8 text" {
+					t.Fatalf("%T invalid value error = %v", store, err)
+				}
+			} else if err != nil || string(got) != value {
+				t.Fatalf("%T failed to preserve text: %v", store, err)
+			}
+		}
+		if invalid {
+			if sm.created != nil || ssmClient.created != nil || gcp.created != nil || gcp.addCalls != 0 {
+				t.Fatal("invalid value reached a backend write")
+			}
+			continue
+		}
+		if sm.created.SecretBinary != nil || aws.ToString(sm.created.SecretString) != value {
+			t.Fatal("Secrets Manager changed text or used SecretBinary")
+		}
+		if ssmClient.created.Type != ssmtypes.ParameterTypeSecureString || aws.ToBool(ssmClient.created.Overwrite) || aws.ToString(ssmClient.created.Value) != value {
+			t.Fatal("SSM changed text or did not use create-only SecureString")
+		}
+		if gcp.added == nil || string(gcp.added.Payload.Data) != value {
+			t.Fatal("GCP changed text")
+		}
 	}
 }
 

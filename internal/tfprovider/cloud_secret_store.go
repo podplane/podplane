@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	secretmanagerpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
@@ -76,11 +77,8 @@ func cloudSecretValue(ctx context.Context, store cloudSecretStore, version strin
 	case *awsSecretsStore:
 		out, err := s.client.GetSecretValue(ctx, &awssecrets.GetSecretValueInput{SecretId: aws.String(s.name), VersionId: aws.String(version)})
 		if err == nil && out != nil && aws.ToString(out.VersionId) == version {
-			if out.SecretString != nil {
+			if out.SecretString != nil && *out.SecretString != "" {
 				return []byte(*out.SecretString), nil
-			}
-			if len(out.SecretBinary) > 0 {
-				return out.SecretBinary, nil
 			}
 		}
 	case *awsSSMStore:
@@ -160,7 +158,7 @@ type awsSecretsAPI interface {
 	DescribeSecret(context.Context, *awssecrets.DescribeSecretInput, ...func(*awssecrets.Options)) (*awssecrets.DescribeSecretOutput, error)
 }
 
-// awsSecretsStore stores opaque values in AWS Secrets Manager.
+// awsSecretsStore stores UTF-8 text in AWS Secrets Manager.
 type awsSecretsStore struct {
 	client         awsSecretsAPI
 	name, identity string
@@ -172,7 +170,10 @@ func (s *awsSecretsStore) Close() error { return nil }
 
 // CreateOrAdopt creates the AWS secret or adopts its current immutable version.
 func (s *awsSecretsStore) CreateOrAdopt(ctx context.Context, value []byte) (cloudSecretMetadata, []byte, error) {
-	input := &awssecrets.CreateSecretInput{Name: aws.String(s.name), SecretBinary: value}
+	if !utf8.Valid(value) {
+		return cloudSecretMetadata{}, nil, errors.New("secret value must be valid UTF-8 text")
+	}
+	input := &awssecrets.CreateSecretInput{Name: aws.String(s.name), SecretString: aws.String(string(value))}
 	for key, value := range s.tags {
 		input.Tags = append(input.Tags, secretstypes.Tag{Key: aws.String(key), Value: aws.String(value)})
 	}
@@ -191,10 +192,13 @@ func (s *awsSecretsStore) CreateOrAdopt(ctx context.Context, value []byte) (clou
 	if err != nil {
 		return cloudSecretMetadata{}, nil, fmt.Errorf("adopt existing AWS secret current version: %w", err)
 	}
-	if winner == nil || len(winner.SecretBinary) == 0 || winner.SecretString != nil || aws.ToString(winner.VersionId) == "" {
-		return cloudSecretMetadata{}, nil, fmt.Errorf("adopt existing AWS secret current version: value must be non-empty binary data, not a string")
+	if winner == nil || aws.ToString(winner.VersionId) == "" {
+		return cloudSecretMetadata{}, nil, errors.New("adopt existing AWS secret current version: backend returned no version")
 	}
-	return cloudSecretMetadata{s.identity, aws.ToString(winner.VersionId)}, winner.SecretBinary, nil
+	if winner.SecretString == nil || *winner.SecretString == "" {
+		return cloudSecretMetadata{}, nil, errors.New("existing AWS bootstrap secret must contain non-empty text in SecretString; its value has not been changed")
+	}
+	return cloudSecretMetadata{s.identity, aws.ToString(winner.VersionId)}, []byte(*winner.SecretString), nil
 }
 
 // Metadata returns the current AWS secret version without reading its value.
@@ -223,7 +227,7 @@ type awsSSMAPI interface {
 	DescribeParameters(context.Context, *ssm.DescribeParametersInput, ...func(*ssm.Options)) (*ssm.DescribeParametersOutput, error)
 }
 
-// awsSSMStore stores opaque values in Parameter Store.
+// awsSSMStore stores UTF-8 text in Parameter Store.
 type awsSSMStore struct {
 	client         awsSSMAPI
 	name, identity string
@@ -235,6 +239,9 @@ func (s *awsSSMStore) Close() error { return nil }
 
 // CreateOrAdopt creates the secure parameter or adopts its current version.
 func (s *awsSSMStore) CreateOrAdopt(ctx context.Context, value []byte) (cloudSecretMetadata, []byte, error) {
+	if !utf8.Valid(value) {
+		return cloudSecretMetadata{}, nil, errors.New("secret value must be valid UTF-8 text")
+	}
 	input := &ssm.PutParameterInput{Name: aws.String(s.name), Type: ssmtypes.ParameterTypeSecureString, Value: aws.String(string(value)), Overwrite: aws.Bool(false)}
 	for key, value := range s.tags {
 		input.Tags = append(input.Tags, ssmtypes.Tag{Key: aws.String(key), Value: aws.String(value)})
@@ -281,7 +288,7 @@ func (s *awsSSMStore) Metadata(ctx context.Context) (cloudSecretMetadata, error)
 	return cloudSecretMetadata{s.identity, strconv.FormatInt(out.Parameters[0].Version, 10)}, nil
 }
 
-// gcpSecretStore stores opaque values in Google Secret Manager.
+// gcpSecretStore stores UTF-8 text in Google Secret Manager.
 type gcpSecretStore struct {
 	client           gcpSecretManagerAPI
 	parent, secretID string
@@ -303,6 +310,9 @@ type gcpSecretManagerAPI interface {
 
 // CreateOrAdopt creates the Google secret and first version or adopts the latest version.
 func (s *gcpSecretStore) CreateOrAdopt(ctx context.Context, value []byte) (cloudSecretMetadata, []byte, error) {
+	if !utf8.Valid(value) {
+		return cloudSecretMetadata{}, nil, errors.New("secret value must be valid UTF-8 text")
+	}
 	secret := &secretmanagerpb.Secret{Labels: s.labels}
 	if !strings.Contains(s.parent, "/locations/") {
 		secret.Replication = &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_Automatic_{Automatic: &secretmanagerpb.Replication_Automatic{}}}

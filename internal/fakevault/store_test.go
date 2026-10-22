@@ -106,6 +106,41 @@ func TestFileStoreSetGetListDeleteSecret(t *testing.T) {
 	}
 }
 
+// TestFileStoreText verifies all writes reject invalid text without creating or
+// changing a secret, and preserve valid Unicode and whitespace exactly.
+func TestFileStoreText(t *testing.T) {
+	store := NewFileStore(&testKeyring{}, t.TempDir())
+	path := "secret/data/apps/app/key"
+	const original = "  café �\r\nYWJjZA==\n"
+	for _, values := range []map[string]string{{"value": "private\xffvalue"}, {"private\xffkey": "text"}} {
+		if created, err := store.CreateSecret("dev", path, values); err == nil || created {
+			t.Fatalf("invalid CreateSecret = %v, %v", created, err)
+		}
+		if _, ok, err := store.GetSecret("dev", path); err != nil || ok {
+			t.Fatal("invalid create persisted a value")
+		}
+	}
+	if created, err := store.CreateSecret("dev", path, map[string]string{"value": original}); err != nil || !created {
+		t.Fatalf("CreateSecret = %v, %v", created, err)
+	}
+	for _, values := range []map[string]string{{"value": "private\xffvalue"}, {"private\xffkey": "text"}} {
+		if err := store.SetSecret("dev", path, values); err == nil {
+			t.Fatal("SetSecret accepted invalid text")
+		}
+		if matched, err := store.CompareAndSetSecret("dev", path, 1, values); err == nil || matched {
+			t.Fatalf("invalid CompareAndSetSecret = %v, %v", matched, err)
+		}
+	}
+	got, ok, err := store.GetSecret("dev", path)
+	if err != nil || !ok || got["value"] != original {
+		t.Fatalf("text changed: found=%v, error=%v", ok, err)
+	}
+	entries, err := store.ListSecrets("dev")
+	if err != nil || len(entries) != 1 || entries[0].Version != 1 {
+		t.Fatalf("rejected writes changed version: %v, %v", entries, err)
+	}
+}
+
 // TestFileStoreUsesOneCachedVaultKeyPerCluster verifies file-backed secrets use
 // one lazily cached keychain item per local cluster.
 func TestFileStoreUsesOneCachedVaultKeyPerCluster(t *testing.T) {

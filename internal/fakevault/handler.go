@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const methodList = "LIST"
@@ -252,8 +253,19 @@ func (h *handler) serveWrite(rw http.ResponseWriter, r *http.Request, clusterID,
 		errorResponse(rw, http.StatusNotFound, "not found")
 		return
 	}
+	// Validate before unmarshalling strings: encoding/json replaces invalid UTF-8.
+	var raw json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		errorResponse(rw, http.StatusBadRequest, "invalid secret data")
+		return
+	}
+	defer clear(raw)
+	if !utf8.Valid(raw) {
+		errorResponse(rw, http.StatusBadRequest, "secret data must be valid UTF-8 text")
+		return
+	}
 	var body map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		errorResponse(rw, http.StatusBadRequest, "invalid secret data")
 		return
 	}

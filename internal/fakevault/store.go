@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -124,6 +125,11 @@ func (s *FileStore) setSecret(clusterID, path string, values map[string]string, 
 	}
 	if len(values) == 0 {
 		return false, fmt.Errorf("at least one key=value pair is required")
+	}
+	for key, value := range values {
+		if !utf8.ValidString(key) || !utf8.ValidString(value) {
+			return false, fmt.Errorf("secret keys and values must be valid UTF-8 text")
+		}
 	}
 	data, err := json.Marshal(values)
 	if err != nil {

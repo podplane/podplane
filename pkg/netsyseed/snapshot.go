@@ -47,66 +47,93 @@ type SnapshotOptions struct {
 // WriteSnapshot seeds a Netsy snapshot with platform-components values derived
 // from the cluster config interpolated into the seed file.
 func WriteSnapshot(w io.Writer, opts SnapshotOptions) error {
+	seed, err := Prepare(opts)
+	if err != nil {
+		return err
+	}
+	return seed.WriteSnapshot(w)
+}
+
+// PreparedSeed contains the records and merged component values for a new cluster.
+// ComponentValues is the platform-components Helm values JSON after all overrides.
+type PreparedSeed struct {
+	ComponentValues json.RawMessage
+	records         []*datafile.Record
+	clusterID       string
+}
+
+// WriteSnapshot encodes the prepared records to the supplied writer.
+func (s *PreparedSeed) WriteSnapshot(w io.Writer) error {
+	if err := datafile.WriteSnapshot(w, s.records, s.clusterID); err != nil {
+		return fmt.Errorf("write Netsy snapshot: %w", err)
+	}
+	return nil
+}
+
+// Prepare applies cluster configuration and Helm overrides once, without writing
+// or publishing a snapshot.
+func Prepare(opts SnapshotOptions) (*PreparedSeed, error) {
 	if opts.SeedPath == "" {
-		return fmt.Errorf("seed path is required")
+		return nil, fmt.Errorf("seed path is required")
 	}
 	cluster, err := clusterconfig.Load(opts.ClusterConfigPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	nodeCertificate := opts.NodeIngressCertificate || cluster.Cluster.Tunnel != nil
 	values, err := buildPlatformComponentsValues(cluster, nodeCertificate)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := mergeValuesContent(values, opts.ValuesContent, "values content"); err != nil {
-		return err
+		return nil, err
 	}
 	if err := mergeValuesFile(values, opts.ValuesFile); err != nil {
-		return err
+		return nil, err
 	}
 	if nodeCertificate {
 		applyNodeCertificateValues(values)
 	}
 	seedData, err := loadSeedFile(opts.Context, opts.SeedPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	records, err := datafile.ReadSnapshot(bytes.NewReader(seedData))
 	if err != nil {
-		return fmt.Errorf("read Podplane seed file: %w", err)
+		return nil, fmt.Errorf("read Podplane seed file: %w", err)
 	}
 	if nodeCertificate {
 		if err := disableSeedIngressCertificates(records); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if len(cluster.Cluster.Kubernetes.ServiceCIDR) > 0 {
 		network, err := clusterconfig.ServiceNetworkFromCIDRs(cluster.Cluster.Kubernetes.ServiceCIDR)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		records, err = interpolateKubernetes(records, network)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := applyNetworkValues(values, network); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	if err := interpolatePlatformComponents(records, values); err != nil {
-		return err
+	componentValues, err := interpolatePlatformComponents(records, values)
+	if err != nil {
+		return nil, err
 	}
 	records, err = interpolateEnvoyIngress(records, cluster, nodeCertificate)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := interpolateComponentsSource(records, cluster.Cluster.Components.Source); err != nil {
-		return err
+		return nil, err
 	}
 	if cluster.Cluster.Components.Registry != nil && cluster.Cluster.Components.Registry.Mirror.Enabled {
-		if err := rewriteSeedImages(records, cluster.Cluster.RegistryMirrorHostname(), cluster.Cluster.RegistryMirrorPrefix()); err != nil {
-			return err
+		if err := rewriteSeedImages(records, componentValues, cluster.Cluster.RegistryMirrorHostname(), cluster.Cluster.RegistryMirrorPrefix()); err != nil {
+			return nil, err
 		}
 	}
 	// Filtering and appending records must leave a fresh bootstrap history with
@@ -116,10 +143,11 @@ func WriteSnapshot(w io.Writer, opts SnapshotOptions) error {
 		record.CreateRevision = record.Revision
 		record.PrevRevision = 0
 	}
-	if err := datafile.WriteSnapshot(w, records, cluster.Cluster.ID); err != nil {
-		return fmt.Errorf("write Netsy snapshot: %w", err)
+	rawValues, err := json.Marshal(componentValues)
+	if err != nil {
+		return nil, fmt.Errorf("encode platform-components values: %w", err)
 	}
-	return nil
+	return &PreparedSeed{ComponentValues: rawValues, records: records, clusterID: cluster.Cluster.ID}, nil
 }
 
 // disableSeedIngressCertificates removes captured issuer settings before the
@@ -478,24 +506,24 @@ func loadSeedFile(ctx context.Context, seed string) ([]byte, error) {
 
 // interpolatePlatformComponents merges derived platform-components values into
 // the platform-components HelmRelease record in a Netsy snapshot.
-func interpolatePlatformComponents(records []*datafile.Record, values map[string]any) error {
+func interpolatePlatformComponents(records []*datafile.Record, values map[string]any) (map[string]any, error) {
 	for i := range records {
 		if string(records[i].Key) != platformComponentsHelmReleaseKey {
 			continue
 		}
 		var obj map[string]any
 		if err := json.Unmarshal(records[i].Value, &obj); err != nil {
-			return fmt.Errorf("decode platform-components HelmRelease at %s: %w", platformComponentsHelmReleaseKey, err)
+			return nil, fmt.Errorf("decode platform-components HelmRelease at %s: %w", platformComponentsHelmReleaseKey, err)
 		}
 		if obj["kind"] != "HelmRelease" || !strings.HasPrefix(stringValue(obj["apiVersion"]), "helm.toolkit.fluxcd.io/") {
-			return fmt.Errorf("record at %s is not a Flux HelmRelease", platformComponentsHelmReleaseKey)
+			return nil, fmt.Errorf("record at %s is not a Flux HelmRelease", platformComponentsHelmReleaseKey)
 		}
 		metadata, _ := obj["metadata"].(map[string]any)
 		if metadata["name"] != "platform-components" {
-			return fmt.Errorf("record at %s is not the platform-components HelmRelease", platformComponentsHelmReleaseKey)
+			return nil, fmt.Errorf("record at %s is not the platform-components HelmRelease", platformComponentsHelmReleaseKey)
 		}
 		if namespace := stringValue(metadata["namespace"]); namespace != "" && namespace != "platform-components" {
-			return fmt.Errorf("record at %s is in namespace %q, want platform-components", platformComponentsHelmReleaseKey, namespace)
+			return nil, fmt.Errorf("record at %s is in namespace %q, want platform-components", platformComponentsHelmReleaseKey, namespace)
 		}
 		spec := ensureMap(obj, "spec")
 		specValues := ensureMap(spec, "values")
@@ -504,18 +532,18 @@ func interpolatePlatformComponents(records []*datafile.Record, values map[string
 		enc := json.NewEncoder(&buf)
 		enc.SetEscapeHTML(false)
 		if err := enc.Encode(obj); err != nil {
-			return fmt.Errorf("encode platform-components HelmRelease: %w", err)
+			return nil, fmt.Errorf("encode platform-components HelmRelease: %w", err)
 		}
 		records[i].Value = buf.Bytes()
-		return nil
+		return specValues, nil
 	}
-	return fmt.Errorf("podplane seed file does not contain the platform-components HelmRelease at %s", platformComponentsHelmReleaseKey)
+	return nil, fmt.Errorf("podplane seed file does not contain the platform-components HelmRelease at %s", platformComponentsHelmReleaseKey)
 }
 
 // rewriteSeedImages prefixes JSON image fields with the configured registry
 // mirror host and path prefix. Seedgen is responsible for normalizing image
 // references before Podplane receives the seed.
-func rewriteSeedImages(records []*datafile.Record, mirrorHostname, mirrorPrefix string) error {
+func rewriteSeedImages(records []*datafile.Record, componentValues map[string]any, mirrorHostname, mirrorPrefix string) error {
 	mirrorBaseURL := strings.TrimSuffix(mirrorHostname, "/")
 	if mirrorBaseURL == "" {
 		return nil
@@ -524,6 +552,7 @@ func rewriteSeedImages(records []*datafile.Record, mirrorHostname, mirrorPrefix 
 	if mirrorPrefix != "" {
 		mirrorBaseURL += "/" + mirrorPrefix
 	}
+	rewriteImageFields(componentValues, mirrorBaseURL)
 	for i := range records {
 		var obj any
 		if err := json.Unmarshal(records[i].Value, &obj); err != nil {

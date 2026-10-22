@@ -14,6 +14,7 @@ import (
 	"github.com/podplane/podplane/internal/components"
 	"github.com/podplane/podplane/internal/config"
 	"github.com/podplane/podplane/internal/kubectl"
+	"github.com/podplane/podplane/internal/secrets"
 	"github.com/podplane/podplane/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -96,6 +97,40 @@ first if you have not yet logged in.`,
 				}
 				if !ok {
 					return fmt.Errorf("install cancelled")
+				}
+			}
+
+			prerequisites, err := cfg.RequiredSecrets(plan.Apps)
+			if err != nil {
+				return err
+			}
+			if len(prerequisites) > 0 {
+				if cfg.ClusterID == "" {
+					return fmt.Errorf("component secret initialization requires the operator's cluster ID")
+				}
+				// Bring up the Secrets API without enabling workloads that need
+				// their keys first. All writes use the same client as secret create.
+				operatorPlan, err := cfg.ResolveEnable("podplane-operator")
+				if err != nil {
+					return err
+				}
+				if err := components.SetEnabled(ctx, selected.Name, installKubeconfig, operatorPlan.Apps, operatorPlan.CRDs, true); err != nil {
+					return err
+				}
+				apiCtx, apiCancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
+				defer apiCancel()
+				operator := cfg.HelmReleaseRefs(components.EnableSet{Apps: []string{"podplane-operator"}})
+				if err := runComponentStatusProgress(apiCtx, "Preparing Secrets API", selected.Name, installKubeconfig, operator, []tui.StatusProgressItem{componentStatusProgressItem(operator[0])}); err != nil {
+					return err
+				}
+				client := secrets.Client{Context: selected.Name, Kubeconfig: installKubeconfig}
+				if err := client.WaitReady(apiCtx); err != nil {
+					return err
+				}
+				for _, requirement := range prerequisites {
+					if err := client.Ensure(cfg.ClusterID, requirement); err != nil {
+						return fmt.Errorf("initialize %s/%s: %w", requirement.Binding, requirement.Key, err)
+					}
 				}
 			}
 

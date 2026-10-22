@@ -15,16 +15,9 @@ import (
 
 const workloadCAKeyName = "workload-ca-key"
 
-// workloadCAStore is the secret storage required to bootstrap a local workload
-// certificate authority.
-type workloadCAStore interface {
-	GetSecret(clusterID, path string) (map[string]string, bool, error)
-	CreateSecret(clusterID, path string, values map[string]string) (bool, error)
-}
-
 // ensureWorkloadCAKey creates the local cluster's workload CA key once in its
 // encrypted fake Vault store. Existing keys are preserved across restarts.
-func ensureWorkloadCAKey(store workloadCAStore, clusterID string, create bool) error {
+func ensureWorkloadCAKey(store localSecretStore, clusterID string, create bool) error {
 	if store == nil {
 		return fmt.Errorf("local Vault store is required")
 	}

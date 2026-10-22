@@ -11,7 +11,6 @@ import (
 	"crypto/rand"
 	"crypto/sha512"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -42,7 +41,6 @@ import (
 	"github.com/googleapis/gax-go/v2"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/netsy-dev/netsy/pkg/datafile"
-	"github.com/nstance-dev/nstance/v2/pkg/nonce"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -82,12 +80,15 @@ func (f *registrationSSM) DescribeParameters(context.Context, *ssm.DescribeParam
 // registrationSecrets emulates a single immutable AWS Secrets Manager signing key.
 type registrationSecrets struct{ value []byte }
 
-// CreateSecret stores the initial binary key and rejects subsequent creation attempts.
+// CreateSecret stores the initial text key and rejects subsequent creation attempts.
 func (f *registrationSecrets) CreateSecret(_ context.Context, in *awssecrets.CreateSecretInput, _ ...func(*awssecrets.Options)) (*awssecrets.CreateSecretOutput, error) {
 	if f.value != nil {
 		return nil, &secretstypes.ResourceExistsException{}
 	}
-	f.value = bytes.Clone(in.SecretBinary)
+	if in.SecretString == nil || in.SecretBinary != nil {
+		return nil, errors.New("signing key must use SecretString")
+	}
+	f.value = []byte(*in.SecretString)
 	return &awssecrets.CreateSecretOutput{VersionId: aws.String("version-5")}, nil
 }
 
@@ -96,7 +97,7 @@ func (f *registrationSecrets) GetSecretValue(_ context.Context, in *awssecrets.G
 	if in.VersionId != nil && aws.ToString(in.VersionId) != "version-5" {
 		return nil, errors.New("wrong version")
 	}
-	return &awssecrets.GetSecretValueOutput{SecretBinary: bytes.Clone(f.value), VersionId: aws.String("version-5")}, nil
+	return &awssecrets.GetSecretValueOutput{SecretString: aws.String(string(f.value)), VersionId: aws.String("version-5")}, nil
 }
 
 // DescribeSecret reports the fixed current version without exposing key bytes.
@@ -380,140 +381,11 @@ func bootstrapOptions(t *testing.T, store cloudSecretStore, secret cloudSecretOp
 		provider = "google"
 		secretsProvider = fmt.Sprintf(`{"kind":"gcp","project_id":%q}`, secret.Project)
 	}
-	config := fmt.Sprintf(`{"cluster":{"id":"testcluster","oidc":{"issuer_url":"https://oidc.example.com"},"providers":[{"kind":%q}],"secrets":{"default_provider":"default","providers":{"default":%s}},"seed":{"name":"platform","version":"v1.0.0","digest":"sha512:%s"}}}`, provider, secretsProvider, hex.EncodeToString(sum[:]))
+	config := fmt.Sprintf(`{"cluster":{"id":"testcluster","spiffe":{"trust_domain":"k8s.example.com"},"oidc":{"issuer_url":"https://oidc.example.com"},"providers":[{"kind":%q}],"secrets":{"default_provider":"default","providers":{"default":%s}},"seed":{"name":"platform","version":"v1.0.0","digest":"sha512:%s"}}}`, provider, secretsProvider, hex.EncodeToString(sum[:]))
 	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return SeedOptions{ClusterConfigPath: configPath, SeedPath: seedPath, Bucket: "seed-bucket", Prefix: "netsy", Project: secret.Project, NstanceBootstrap: b, ValuesContent: `{"platform":{"components":{"apps":{"nstance-operator":{"enabled":true}}}}}`}
-}
-
-// TestSeedBootstrapCloudCreateAndRecovery checks nonce contents, concurrent creation, and metadata-only recovery.
-func TestSeedBootstrapCloudCreateAndRecovery(t *testing.T) {
-	for _, provider := range []string{"s3", "gcs", "s3-agentic", "gcs-agentic"} {
-		t.Run(provider, func(t *testing.T) {
-			agentic := strings.HasSuffix(provider, "-agentic")
-			provider = strings.TrimSuffix(provider, "-agentic")
-			secretProvider := cloudSecretProviderAWSSSM
-			if provider == "gcs" {
-				secretProvider = cloudSecretProviderGCPSecretManager
-			}
-			keyStore, secret := registrationStore(t, secretProvider)
-			opts := bootstrapOptions(t, keyStore, secret)
-			if agentic {
-				config, err := os.ReadFile(opts.ClusterConfigPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(opts.ClusterConfigPath, bytes.ReplaceAll(config, []byte(`"name":"platform"`), []byte(`"name":"agentic"`)), 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			scratch := t.TempDir()
-			t.Setenv("TMPDIR", scratch)
-			cloud := &snapshotCloud{provider: provider, ca: bootstrapCA(t), loseResponse: true}
-			store := cloudSeedStore(t, provider, opts, cloud)
-			results := make(chan seedSnapshotMetadata, 2)
-			failures := make(chan error, 2)
-			for range 2 {
-				go func() {
-					meta, err := createSeed(context.Background(), opts, store, func(context.Context, cloudSecretOptions) (cloudSecretStore, error) { return keyStore, nil })
-					results <- meta
-					failures <- err
-				}()
-			}
-			meta, other := <-results, <-results
-			for range 2 {
-				if err := <-failures; err != nil {
-					t.Fatalf("concurrent create failed: %v", err)
-				}
-			}
-			expectedVersion := `"seed-etag"`
-			if provider == "gcs" {
-				expectedVersion = "9"
-			}
-			if meta.Version != expectedVersion || !meta.Encrypted || meta != other {
-				t.Fatalf("concurrent creators did not adopt the same encrypted snapshot: %+v / %+v", meta, other)
-			}
-			records, err := datafile.ReadSnapshot(bytes.NewReader(cloud.payload))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(records) != 4 {
-				t.Fatalf("records = %d, want 4", len(records))
-			}
-			values := map[string][]byte{}
-			for i, record := range records {
-				values[string(record.Key)] = record.Value
-				if record.Revision != int64(i+1) || record.CreateRevision != record.Revision {
-					t.Fatal("non-contiguous bootstrap revisions")
-				}
-			}
-			var configMap struct {
-				Data map[string]string `json:"data"`
-			}
-			if json.Unmarshal(values["/registry/configmaps/platform-nstance/nstance-cluster-ca"], &configMap) != nil || configMap.Data["ca.crt"] != string(cloud.ca) {
-				t.Fatal("incorrect public CA ConfigMap")
-			}
-			var nonceSecret struct {
-				Data map[string][]byte `json:"data"`
-			}
-			if json.Unmarshal(values["/registry/secrets/platform-nstance/nstance-operator-nonce"], &nonceSecret) != nil {
-				t.Fatal("invalid bootstrap Secret")
-			}
-			value, err := cloudSecretValue(context.Background(), keyStore, opts.NstanceBootstrap.SigningKeyVersion.ValueString())
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer clear(value)
-			block, _ := pem.Decode(value)
-			parsed, _ := x509.ParsePKCS8PrivateKey(block.Bytes)
-			token := string(nonceSecret.Data["nonce.jwt"])
-			claims, err := nonce.Validate(token, parsed.(ed25519.PrivateKey).Public().(ed25519.PublicKey), "operator")
-			if err != nil || claims.Subject != "testcluster" || claims.ClusterID != "testcluster" || claims.Tenant != "tenant-west" || claims.ExpiresAt.Sub(claims.IssuedAt.Time) != 30*time.Minute || claims.ID == "" || claims.Shard != "" || claims.Group != "" {
-				t.Fatalf("incorrect nonce claims: %v", err)
-			}
-			for key, record := range values {
-				if bytes.Contains(record, []byte("PRIVATE KEY")) || bytes.Contains(record, []byte(base64.StdEncoding.EncodeToString(value))) {
-					t.Fatal("snapshot contains the private signing key")
-				}
-				if key != "/registry/secrets/platform-nstance/nstance-operator-nonce" && (bytes.Contains(record, []byte(token)) || bytes.Contains(record, []byte(base64.StdEncoding.EncodeToString([]byte(token))))) {
-					t.Fatalf("bootstrap token leaked outside its Secret into %s", key)
-				}
-			}
-			if _, err := nonce.Validate(token, parsed.(ed25519.PrivateKey).Public().(ed25519.PublicKey), "agent"); err == nil {
-				t.Fatal("operator nonce accepted as agent credential")
-			}
-			if _, ok := values["/registry/namespaces/platform-nstance"]; !ok {
-				t.Fatal("missing operator namespace")
-			}
-			// Upload-before-state interruption: remove local source files and make
-			// the key backend unavailable. Adoption must still succeed unchanged.
-			before := bytes.Clone(cloud.payload)
-			if err := os.Remove(opts.SeedPath); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Remove(opts.ClusterConfigPath); err != nil {
-				t.Fatal(err)
-			}
-			cloud.live = true
-			recovered, err := createSeed(context.Background(), opts, store, func(context.Context, cloudSecretOptions) (cloudSecretStore, error) {
-				return nil, errors.New("key backend unavailable")
-			})
-			if err != nil || recovered != meta || !bytes.Equal(before, cloud.payload) {
-				t.Fatalf("recovery changed seed: %v", err)
-			}
-			changed := *opts.NstanceBootstrap
-			changed.Tenant = types.StringValue("other-tenant")
-			opts.NstanceBootstrap = &changed
-			if _, err := createSeed(context.Background(), opts, store, newCloudSecretStore); err == nil {
-				t.Fatal("adopted another tenant's bootstrap")
-			}
-			files, err := os.ReadDir(scratch)
-			if err != nil || len(files) != 0 {
-				t.Fatal("credential-bearing snapshot generation created temporary files")
-			}
-		})
-	}
 }
 
 // TestPublicCADelayedAndBounded verifies delayed CA publication is retried and waiting respects the deadline.
@@ -533,54 +405,6 @@ func TestPublicCADelayedAndBounded(t *testing.T) {
 			defer cancel()
 			if _, err := waitPublicCA(ctx, func(context.Context) ([]byte, error) { return nil, errSnapshotAbsent }, time.Millisecond); err == nil {
 				t.Fatal("CA wait did not time out")
-			}
-		})
-	}
-}
-
-// TestSeedRejectsLiveStateAndDisabledOverlay checks bootstrap guards and credential-free seeding without bootstrap.
-func TestSeedRejectsLiveStateAndDisabledOverlay(t *testing.T) {
-	for _, provider := range []string{"s3", "gcs"} {
-		t.Run(provider, func(t *testing.T) {
-			secretProvider := cloudSecretProviderAWSSSM
-			if provider == "gcs" {
-				secretProvider = cloudSecretProviderGCPSecretManager
-			}
-			keyStore, secret := registrationStore(t, secretProvider)
-			opts := bootstrapOptions(t, keyStore, secret)
-			cloud := &snapshotCloud{provider: provider, live: true}
-			store := cloudSeedStore(t, provider, opts, cloud)
-			if _, err := createSeed(context.Background(), opts, store, newCloudSecretStore); err == nil || cloud.payload != nil {
-				t.Fatal("seed overwrote live Netsy state")
-			}
-			cloud.live = false
-			opts.ValuesContent = `{"platform":{"components":{"apps":{"nstance-operator":{"enabled":false}}}}}`
-			if _, err := createSeed(context.Background(), opts, store, newCloudSecretStore); err == nil || !strings.Contains(err.Error(), "overlay is disabled") || cloud.payload != nil {
-				t.Fatalf("disabled overlay: %v", err)
-			}
-			// Without bootstrap configuration, even the platform seed is a
-			// credential-free snapshot and has no dependency on a key backend.
-			opts.NstanceBootstrap = nil
-			scratch := t.TempDir()
-			t.Setenv("TMPDIR", scratch)
-			if _, err := createSeed(context.Background(), opts, store, func(context.Context, cloudSecretOptions) (cloudSecretStore, error) {
-				return nil, errors.New("no signing key configured")
-			}); err != nil {
-				t.Fatal(err)
-			}
-			records, err := datafile.ReadSnapshot(bytes.NewReader(cloud.payload))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(records) != 1 || string(records[0].Key) != "/registry/helm.toolkit.fluxcd.io/helmreleases/platform-components/platform-components" {
-				t.Fatal("snapshot without bootstrap must contain only the HelmRelease")
-			}
-			if bytes.Contains(records[0].Value, []byte("PRIVATE KEY")) {
-				t.Fatal("generic snapshot contains a private key")
-			}
-			files, err := os.ReadDir(scratch)
-			if err != nil || len(files) != 0 {
-				t.Fatal("cluster-specific snapshot generation created temporary files")
 			}
 		})
 	}

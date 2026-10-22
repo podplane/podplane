@@ -38,7 +38,7 @@ func newSecretCreateCmd(c *config.Config) *cobra.Command {
 				return err
 			}
 			client := secrets.Client{Context: ctx.Context, Kubeconfig: secretFlags.Kubeconfig}
-			opts := secrets.WriteOptions{Namespace: ctx.Namespace, KeyspaceName: ctx.KeyspaceName, ClusterID: ctx.ClusterID, Key: args[0], Operation: "create", Value: value}
+			opts := secrets.WriteOptions{Namespace: ctx.Namespace, KeyspaceName: ctx.KeyspaceName, ClusterID: ctx.ClusterID, Key: args[0], Operation: "create", Value: value, Binary: secretFlags.Binary}
 			request, err := client.EncryptedRequest(opts)
 			if err != nil {
 				return err
@@ -59,6 +59,7 @@ func newSecretCreateCmd(c *config.Config) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&secretFlags.Stdin, "stdin", false, "Read the secret value from stdin")
 	cmd.Flags().StringVar(&secretFlags.File, "file", "", "Read the secret value from a file")
+	cmd.Flags().BoolVar(&secretFlags.Binary, "binary", false, "Treat input as raw binary instead of UTF-8 text (SSM and Vault/OpenBao store it as base64)")
 	cmd.Flags().StringVar(&secretFlags.DryRun, "dry-run", "", "If set to client, print the encrypted SecretProviderKeyspace manifest without writing")
 	cmd.Flags().StringVarP(&secretFlags.Output, "output", "o", "", "Output format for dry-run/list responses: json or yaml")
 	return cmd

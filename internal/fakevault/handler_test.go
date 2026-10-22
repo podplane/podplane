@@ -155,6 +155,28 @@ func (s *memoryStore) ListSecrets(clusterID string) ([]Secret, error) {
 	return secrets, nil
 }
 
+// TestHandlerSecretText verifies malformed UTF-8 is rejected before JSON can
+// replace bytes, while valid replacement characters and Unicode survive intact.
+func TestHandlerSecretText(t *testing.T) {
+	store := &memoryStore{}
+	handler := NewTrustedHandler(store)
+	for _, body := range []string{"{\"data\":{\"value\":\"private\xffvalue\"}}", "{\"data\":{\"private\xffkey\":\"value\"}}"} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/vault/dev/v1/secret/data/dev/key", strings.NewReader(body)))
+		if rec.Code != http.StatusBadRequest || strings.Contains(rec.Body.String(), "private") {
+			t.Fatalf("invalid UTF-8 response = %d, %s", rec.Code, rec.Body.String())
+		}
+		if len(store.secrets) != 0 {
+			t.Fatal("invalid UTF-8 was persisted")
+		}
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/vault/dev/v1/secret/data/dev/key", strings.NewReader(`{"data":{"value":"  café �\r\nYWJjZA==\n"}}`)))
+	if rec.Code != http.StatusOK || store.secrets["dev:secret/data/dev/key"]["value"] != "  café �\r\nYWJjZA==\n" {
+		t.Fatalf("valid text changed: status=%d", rec.Code)
+	}
+}
+
 // TestHandlerLoginAndReadSecret verifies a signed operator JWT grants cluster-wide reads.
 func TestHandlerLoginAndReadSecret(t *testing.T) {
 	store := &memoryStore{secrets: map[string]map[string]string{

@@ -14,11 +14,18 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // localVaultURL supplies the HTTP authority required by requests transported
 // over the local Vault Unix socket.
 const localVaultURL = "http://podplane.local"
+
+// localSecretStore provides create-only bootstrap storage for local secrets.
+type localSecretStore interface {
+	GetSecret(clusterID, path string) (map[string]string, bool, error)
+	CreateSecret(clusterID, path string, values map[string]string) (bool, error)
+}
 
 // localVaultClient accesses the trusted fake Vault API over its user-only Unix
 // socket.
@@ -68,6 +75,11 @@ func (c *localVaultClient) GetSecret(clusterID, path string) (map[string]string,
 // CreateSecret creates one secret through the local fake Vault KV-v2 API. It
 // reports false when a value already exists at path.
 func (c *localVaultClient) CreateSecret(clusterID, path string, values map[string]string) (bool, error) {
+	for key, value := range values {
+		if !utf8.ValidString(key) || !utf8.ValidString(value) {
+			return false, fmt.Errorf("secret keys and values must be valid UTF-8 text")
+		}
+	}
 	payload, err := json.Marshal(map[string]any{
 		"options": map[string]int{"cas": 0},
 		"data":    values,
