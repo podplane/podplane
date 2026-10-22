@@ -10,9 +10,11 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -297,14 +299,31 @@ func TestStartRefusesMixedNstanceMajorVersions(t *testing.T) {
 			dir := t.TempDir()
 			cache := filepath.Join(dir, "deps")
 			manager := deps.NewManager("", cache)
+			// Cache every artifact so startup reaches the version check.
+			cached := func(name, version string) deps.Dependency {
+				content := []byte(name)
+				dep := deps.Dependency{Version: version, URL: "https://example.invalid/" + name, Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(content)), Size: int64(len(content))}
+				path := manager.VMConfigArtifactCachePath(name, dep)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, content, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return dep
+			}
 			manifest := deps.Manifest{VMConfig: deps.VMConfig{
-				Dependencies: map[string]deps.Dependency{"nstance-agent": {Version: version}},
+				OS:           deps.OSInfo{Image: cached(deps.ImageDepName, "")},
+				Dependencies: map[string]deps.Dependency{"nstance-agent": cached("nstance-agent", version)},
 			}}
 			raw, err := json.Marshal(manifest)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if err := manager.WriteCachedManifest("knc", "arm64", raw); err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.WriteCachedComponentsManifest([]byte(`{"components":{"version":"test","images":[]}}`)); err != nil {
 				t.Fatal(err)
 			}
 			local := &Local{

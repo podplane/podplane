@@ -93,10 +93,11 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	kind := m.instanceKind
 	arch := m.arch
 
-	manifest, err := depsManager.Verify(kind, arch)
+	providers := []string{"openbao", "local"}
+	manifest, err := depsManager.Verify(kind, arch, providers)
 	if errors.Is(err, deps.ErrNotCached) || errors.Is(err, deps.ErrIncomplete) {
 		download := func(progress func(deps.DownloadEvent)) error {
-			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: []string{"openbao", "local"}})
+			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: providers})
 		}
 		if opts.RunDownloadProgress != nil {
 			err = opts.RunDownloadProgress(download)
@@ -106,7 +107,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to download deps: %w", err)
 		}
-		manifest, err = depsManager.Verify(kind, arch)
+		manifest, err = depsManager.Verify(kind, arch, providers)
 	}
 	if err != nil {
 		return "", fmt.Errorf("failed to verify deps: %w", err)
@@ -118,7 +119,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	registryEntries, registryReadErr := os.ReadDir(depsManager.RegistryCacheDir())
 	if registryReadErr != nil || len(registryEntries) == 0 {
 		download := func(progress func(deps.DownloadEvent)) error {
-			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: []string{"openbao", "local"}})
+			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: providers})
 		}
 		if opts.RunDownloadProgress != nil {
 			err = opts.RunDownloadProgress(download)

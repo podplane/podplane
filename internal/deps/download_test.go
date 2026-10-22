@@ -10,6 +10,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -252,7 +254,7 @@ func TestDownloadUsesLocalManifestFile(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cacheDir, "vmconfig", "artifacts", "dep", "1", "dep")); err != nil {
 		t.Fatalf("dep was not cached: %v", err)
 	}
-	if _, err := manager.Verify(DefaultKind, "arm64"); err != nil {
+	if _, err := manager.Verify(DefaultKind, "arm64", nil); err != nil {
 		t.Fatalf("Verify returned error after downloading local manifest with vmconfig stub: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(cacheDir, "vmconfig", "artifacts", VMConfigDepName, "dev")); !os.IsNotExist(err) {
@@ -388,11 +390,7 @@ func TestVerifyRequiresCachedVMConfigImages(t *testing.T) {
 	manifest := Manifest{VMConfig: VMConfig{
 		Version: "test",
 		Kind:    DefaultKind,
-		OS: OSInfo{Image: Dependency{
-			URL:    "https://example.invalid/os-image",
-			Digest: "sha256:" + strings.Repeat("0", 64),
-			Size:   1,
-		}},
+		OS:      OSInfo{Image: writeCachedOSImage(t, manager)},
 		Images: []VMConfigImage{{
 			Image:    "registry.k8s.io/pause:3.10.2",
 			Digest:   "sha256:" + strings.Repeat("1", 64),
@@ -409,7 +407,7 @@ func TestVerifyRequiresCachedVMConfigImages(t *testing.T) {
 		t.Fatalf("write cached manifest: %v", err)
 	}
 
-	_, err = manager.Verify(DefaultKind, "arm64")
+	_, err = manager.Verify(DefaultKind, "arm64", nil)
 	if err == nil {
 		t.Fatal("Verify returned nil error, want missing vmconfig image error")
 	}
@@ -645,4 +643,76 @@ func sha256Hex(body []byte) string {
 // serverURL builds a fixture HTTP URL using the incoming request's host.
 func serverURL(r *http.Request, path string) string {
 	return "http://" + r.Host + path
+}
+
+// TestVerifyRequiresSelectedProviderDeps confirms a download for other
+// providers cannot hide a selected provider's dependency or component image
+// from verification.
+func TestVerifyRequiresSelectedProviderDeps(t *testing.T) {
+	manager := NewManager("https://example.invalid", t.TempDir())
+	content := []byte("lvm2")
+	lvm2 := Dependency{Version: "1", URL: "https://example.invalid/lvm2.deb", Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(content)), Size: int64(len(content)), Providers: []string{"local"}}
+	manifest := Manifest{VMConfig: VMConfig{
+		Version:      "test",
+		Kind:         DefaultKind,
+		OS:           OSInfo{Image: writeCachedOSImage(t, manager)},
+		Dependencies: map[string]Dependency{"lvm2": lvm2},
+	}}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.WriteCachedManifest(DefaultKind, "arm64", raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Verify(DefaultKind, "arm64", []string{"aws"}); !errors.Is(err, ErrIncomplete) || !strings.Contains(err.Error(), "components manifest not cached") {
+		t.Fatalf("Verify without components manifest = %v, want incomplete", err)
+	}
+	components := ComponentsManifest{Components: Components{Version: "test", Images: []ComponentImage{{
+		Components: []string{"csi-openebs-lvm"},
+		Image:      "docker.io/openebs/lvm-driver:1.10.1",
+		Digest:     "sha256:" + strings.Repeat("3", 64),
+		Size:       1,
+		Platform:   "linux/arm64",
+		Providers:  []string{"local"},
+	}}}}
+	if raw, err = json.Marshal(components); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.WriteCachedComponentsManifest(raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Verify(DefaultKind, "arm64", []string{"aws"}); err != nil {
+		t.Fatalf("Verify for aws = %v, want nil", err)
+	}
+	local := []string{"openbao", "local"}
+	if _, err := manager.Verify(DefaultKind, "arm64", local); !errors.Is(err, ErrIncomplete) || !strings.Contains(err.Error(), "lvm2") {
+		t.Fatalf("Verify for local = %v, want missing lvm2", err)
+	}
+	path := manager.VMConfigArtifactCachePath("lvm2", lvm2)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Verify(DefaultKind, "arm64", local); !errors.Is(err, ErrIncomplete) || !strings.Contains(err.Error(), "missing or corrupt image: docker.io/openebs/lvm-driver:1.10.1") {
+		t.Fatalf("Verify for local = %v, want missing lvm-driver image", err)
+	}
+}
+
+// writeCachedOSImage caches a small OS image artifact and returns its entry.
+func writeCachedOSImage(t *testing.T, manager *Manager) Dependency {
+	t.Helper()
+	content := []byte("image")
+	sum := sha256.Sum256(content)
+	image := Dependency{URL: "https://example.invalid/os-image", Digest: fmt.Sprintf("sha256:%x", sum), Size: int64(len(content))}
+	path := manager.VMConfigArtifactCachePath(ImageDepName, image)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return image
 }
