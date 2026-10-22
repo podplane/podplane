@@ -93,7 +93,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	kind := m.instanceKind
 	arch := m.arch
 
-	providers := []string{"openbao", "local"}
+	providers := []string{deps.LocalProviders}
 	manifest, err := depsManager.Verify(kind, arch, providers)
 	if errors.Is(err, deps.ErrNotCached) || errors.Is(err, deps.ErrIncomplete) {
 		download := func(progress func(deps.DownloadEvent)) error {

@@ -122,6 +122,11 @@ type ItemFilter struct {
 	CachedOnly bool
 }
 
+// LocalProviders selects the providers a local VM needs: its own provider and
+// the OpenBao-compatible local secrets backend. Provider filters split values
+// on commas, so it can be used as a single selector.
+const LocalProviders = "openbao,local"
+
 // Item pairs a dependency with its name (the OS image uses ImageDepName).
 // It is the unit returned by Manifest.Items.
 type Item struct {

@@ -51,7 +51,7 @@ func init() {
 	depsDownloadCmd.Flags().StringVar(&depsDownloadArchs, "arch", "",
 		"Comma-separated target architectures to download (amd64,arm64). Defaults to the configured architecture")
 	depsDownloadCmd.Flags().StringVar(&depsDownloadProviders, "providers", "",
-		"Comma-separated provider-specific dependencies and component images to include (for example aws,google,proxmox), or all")
+		"Comma-separated provider-specific dependencies and component images to include (for example aws,google,proxmox), all, or none for provider-neutral items only. Defaults to '"+deps.LocalProviders+"' unless --cluster-config is set")
 	depsDownloadCmd.Flags().StringVar(&depsDownloadAddons, "addons", "",
 		"Comma-separated addon component images to include in addition to the default agentic addons (for example snapshot), or all")
 	depsDownloadCmd.Flags().StringVarP(&depsDownloadClusterConfig, "cluster-config", "f", "",
@@ -74,24 +74,12 @@ func newDepsDownloadCmd(manager *deps.Manager, kind, arch string) *cobra.Command
 				}
 			}
 		}
-		providers := []string{depsDownloadProviders}
+		providers, err := depsDownloadProviderList(depsDownloadProviders, depsDownloadClusterConfig)
+		if err != nil {
+			return err
+		}
 		addons := components.AgenticAddons()
 		addons = append(addons, depsDownloadAddons)
-		if depsDownloadClusterConfig != "" {
-			cfg, err := clusterconfig.Load(depsDownloadClusterConfig)
-			if err != nil {
-				return err
-			}
-			for _, provider := range cfg.Cluster.Providers {
-				providers = append(providers, provider.Kind)
-			}
-			for _, domain := range cfg.Cluster.Domains {
-				if domain.Provider != nil {
-					providers = append(providers, domain.Provider.Kind)
-				}
-			}
-			providers = append(providers, inferredSecretsProviders(providers)...)
-		}
 
 		if depsDownloadDryRun {
 			fmt.Println("Fetching latest dependency manifest...")
@@ -117,7 +105,7 @@ func newDepsDownloadCmd(manager *deps.Manager, kind, arch string) *cobra.Command
 			return nil
 		}
 
-		err := tui.RunDownloadProgress("Downloading Podplane dependencies", func(progress func(deps.DownloadEvent)) error {
+		err = tui.RunDownloadProgress("Downloading Podplane dependencies", func(progress func(deps.DownloadEvent)) error {
 			for i, arch := range archs {
 				err := manager.Download(kind, arch, deps.DownloadOptions{
 					Archs:                     archs,
@@ -145,6 +133,33 @@ func newDepsDownloadCmd(manager *deps.Manager, kind, arch string) *cobra.Command
 	}
 
 	return depsDownloadCmd
+}
+
+// depsDownloadProviderList selects explicit providers, providers inferred from
+// a cluster config, or the local VM providers when neither is given. Because
+// no item is tagged with a provider named "none", --providers none selects
+// provider-neutral items only.
+func depsDownloadProviderList(explicit, clusterConfigPath string) ([]string, error) {
+	if explicit == "" && clusterConfigPath == "" {
+		return []string{deps.LocalProviders}, nil
+	}
+	providers := []string{explicit}
+	if clusterConfigPath != "" {
+		cfg, err := clusterconfig.Load(clusterConfigPath)
+		if err != nil {
+			return nil, err
+		}
+		for _, provider := range cfg.Cluster.Providers {
+			providers = append(providers, provider.Kind)
+		}
+		for _, domain := range cfg.Cluster.Domains {
+			if domain.Provider != nil {
+				providers = append(providers, domain.Provider.Kind)
+			}
+		}
+		providers = append(providers, inferredSecretsProviders(providers)...)
+	}
+	return providers, nil
 }
 
 // inferredSecretsProviders returns secrets provider component selectors implied by infra provider selectors.

@@ -10,11 +10,12 @@ aliases:
 
 Force-downloads the latest dependency versions into the local cache.
 
-Provider-specific dependencies are opt-in. By default, `deps download` downloads provider-neutral dependencies, core components, and the addon component images needed by the default `agentic` seed.
+By default, `deps download` prepares the cache for `podplane local start`: provider-neutral dependencies, core components, the addon component images needed by the default `agentic` seed, and the `openbao` and `local` provider entries.
 
-- Use `--providers aws`, `--providers aws,google`, or `--providers all` to include provider-specific entries.
+- Use `--providers aws`, `--providers aws,google`, or `--providers all` to select provider-specific entries instead of `openbao,local`.
+- Use `--providers none` to download provider-neutral entries only.
 - Use `--addons snapshot` for snapshot support, or `--addons all` for all addons beyond the agentic defaults.
-- Pass `-f/--cluster-config <path>` specifying a cluster config file to infer providers.
+- Pass `-f/--cluster-config <path>` specifying a cluster config file to infer providers instead of `openbao,local`.
 
 The components manifest also declares the Git source Flux uses for platform component charts. `deps download` clones or fetches that repository into the local Git dependency cache unless `--skip-components-git` is set.
 
@@ -42,7 +43,7 @@ podplane deps download [flags]
 | --- | --- |
 | `--dry-run` | Print what would be downloaded without actually downloading anything |
 | `--arch string` | Comma-separated target architectures to download (`amd64`, `arm64`). Defaults to the configured architecture |
-| `--providers string` | Comma-separated provider-specific dependencies and component images to include, for example `aws`, `google`, or `all` |
+| `--providers string` | Comma-separated provider-specific dependencies and component images to include, for example `aws`, `google`, `all`, or `none` for provider-neutral entries only. Defaults to `openbao,local` unless `--cluster-config` is set |
 | `--addons string` | Comma-separated addon component images to include in addition to the default agentic addons (for example `snapshot`), or `all` |
 | `-f, --cluster-config string` | Path to a cluster config file to infer providers |
 | `--vmconfig string` | Path to a local vmconfig manifest JSON file |
