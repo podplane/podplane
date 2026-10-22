@@ -91,7 +91,7 @@ func newDeployCmd(c *config.Config) *cobra.Command {
 			return err
 		}
 		mirrorSetArgs := deploy.TemplateMirrorSetArgs(chart.Images, args[0], clusterSummary, deployImage, deploySet)
-		secretSetArgs, err := deploySecretSetArgs(clusterSummary, deployName, deploySecrets)
+		secretSetArgs, err := deploySecretSetArgs(deployName, deploySecrets)
 		if err != nil {
 			return err
 		}
@@ -116,28 +116,18 @@ func newDeployCmd(c *config.Config) *cobra.Command {
 }
 
 // deploySecretSetArgs renders the simple --secret UX into the template's
-// SecretProviderBinding values array. User-supplied --set values win by being
-// appended after these defaults.
-func deploySecretSetArgs(summary config.ClusterSummary, bindingName string, keys []string) ([]string, error) {
+// SecretProviderBinding values array, omitting providerName to follow the
+// operator's cluster default. User-supplied --set values win by being appended
+// after these defaults.
+func deploySecretSetArgs(bindingName string, keys []string) ([]string, error) {
 	if len(keys) == 0 {
 		return nil, nil
 	}
 	if err := secrets.ValidateScopeName("--name", bindingName); err != nil {
 		return nil, err
 	}
-	providerName := summary.Secrets.DefaultProvider
-	if providerName == "" || len(summary.Secrets.Providers) == 0 {
-		return nil, fmt.Errorf("--secret requires a cached default secrets provider for this cluster; rerun login/local start after configuring cluster.secrets")
-	}
-	if _, ok := summary.Secrets.Providers[providerName]; !ok {
-		return nil, fmt.Errorf("default secrets provider %q is not configured for cluster %q", providerName, summary.ID)
-	}
-	if err := secrets.ValidateProviderName(providerName); err != nil {
-		return nil, err
-	}
 	args := []string{
 		"secrets[0].bindingName=" + bindingName,
-		"secrets[0].providerName=" + providerName,
 		"secrets[0].mountPath=/var/run/podplane/secrets",
 	}
 	for i, key := range keys {

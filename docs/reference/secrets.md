@@ -21,7 +21,7 @@ Provider names, namespaces, binding names, and keys are intentionally restricted
 
 ## SecretProviderBinding
 
-Use a `SecretProviderBinding` to declare which secrets an application needs. The Podplane operator creates a `SecretProviderClass` with the same name in the same namespace. The application's Pods reference that class to mount the secrets through the CSI driver.
+Use a `SecretProviderBinding` to declare which secrets an application needs. The Podplane operator creates a `SecretProviderClass` with the same name in the same namespace. The application's Pods reference that class to mount the secrets through the CSI driver. Omit `spec.providerName` in `SecretProviderBinding` to follow the Podplane operator's configured cluster default secrets provider on every reconciliation. Set it explicitly to pin a named provider. If the default is missing or the selected provider is unknown, the operator marks the binding `Ready=False` with reason `Invalid`; it does not choose another provider.
 
 Podplane's templates handle this setup when you use `podplane deploy --secret`. For a custom workload:
 

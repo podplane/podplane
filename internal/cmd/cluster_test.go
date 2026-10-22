@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -97,39 +96,20 @@ func TestClusterDeleteNoApplyValidatesOnly(t *testing.T) {
 	}
 }
 
-// TestDeploySecretSetArgsUseSecretProviderBindingItems checks provider, mount path, and item values for secret bindings.
+// TestDeploySecretSetArgsUseSecretProviderBindingItems checks inherited-provider bindings, mount paths, and item values.
 func TestDeploySecretSetArgsUseSecretProviderBindingItems(t *testing.T) {
-	summary := config.ClusterSummary{
-		ID: "test-cluster",
-		Secrets: clusterconfig.Secrets{
-			DefaultProvider: "aws-secrets-manager",
-			Providers: map[string]clusterconfig.SecretsProvider{
-				"aws-secrets-manager": {Kind: "aws", ObjectType: "secretsmanager"},
-			},
-		},
-	}
-
-	got, err := deploySecretSetArgs(summary, "aok-source-controller", []string{"github-private-key", "webhook-secret"})
+	got, err := deploySecretSetArgs("aok-source-controller", []string{"github-private-key", "webhook-secret"})
 	if err != nil {
 		t.Fatalf("deploySecretSetArgs error = %v", err)
 	}
 	want := []string{
 		"secrets[0].bindingName=aok-source-controller",
-		"secrets[0].providerName=aws-secrets-manager",
 		"secrets[0].mountPath=/var/run/podplane/secrets",
 		"secrets[0].items[0].key=github-private-key",
 		"secrets[0].items[1].key=webhook-secret",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("deploySecretSetArgs = %#v, want %#v", got, want)
-	}
-}
-
-// TestDeploySecretSetArgsRequiresDefaultProvider checks secret bindings fail without a cached default provider.
-func TestDeploySecretSetArgsRequiresDefaultProvider(t *testing.T) {
-	_, err := deploySecretSetArgs(config.ClusterSummary{ID: "test-cluster"}, "app", []string{"github-private-key"})
-	if err == nil || !strings.Contains(err.Error(), "default secrets provider") {
-		t.Fatalf("deploySecretSetArgs error = %v, want default provider error", err)
 	}
 }
 

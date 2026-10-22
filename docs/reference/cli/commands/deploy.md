@@ -33,7 +33,7 @@ podplane deploy web --name hello --image ghcr.io/podplane/hello:latest \
 
 Environment variable names must use Kubernetes-compatible names such as `HELLO_MESSAGE`. These values are stored in the rendered Deployment and Helm release metadata, so use them for non-secret configuration only.
 
-Use `--secret <key>` to bind a key from the cluster's default secrets provider. Repeat the flag for multiple keys. The CLI uses `--name` as the binding name and configures the template to mount the selected keys read-only at `/var/run/podplane/secrets`. Use template-specific `--set secrets[...]` values for advanced bindings, providers, or mount paths.
+Use `--secret <key>` to bind a key from the cluster's default secrets provider. Repeat the flag for multiple keys. The CLI uses `--name` as the binding name and configures the template to mount the selected keys read-only at `/var/run/podplane/secrets`. Use template-specific `--set secrets[...]` values for advanced bindings, providers, or mount paths. The CLI omits `spec.providerName` from the binding so it follows the operator's current cluster default on every reconciliation, without requiring cached secrets-provider metadata. To pin a provider, pass `--set 'secrets[0].providerName=aws-secrets-manager'`; explicit `--set` values take precedence over the `--secret` defaults.
 
 `--hostname` and `--path` are ergonomic shortcuts for template routing values (`route.hostname` and `route.path`). If the selected template's `values.schema.json` does not support those values, deploy fails before running Helm. Other template-specific values should be configured with Helm-compatible `--set`, for example `--set app.port=8080`. For non-standard external HTTPS ports, set `route.port`, for example `--set route.port=8443`.
 
