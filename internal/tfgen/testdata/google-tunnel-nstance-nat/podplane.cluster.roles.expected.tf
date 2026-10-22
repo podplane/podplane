@@ -82,7 +82,7 @@ resource "google_project_iam_custom_role" "podplane_secrets_lifecycle" {
   project = each.value.project
   role_id = "pp_${substr(sha256(join("/", [module.cluster.bucket, each.key])), 0, 20)}_secrets_lifecycle"
   title = "Podplane secrets_lifecycle"
-  permissions = ["secretmanager.secrets.get", "secretmanager.versions.get", "secretmanager.versions.list", "secretmanager.versions.add", "secretmanager.versions.disable", "secretmanager.versions.enable", "secretmanager.versions.destroy"]
+  permissions = ["secretmanager.secrets.get", "secretmanager.secrets.delete", "secretmanager.versions.get", "secretmanager.versions.list", "secretmanager.versions.add", "secretmanager.versions.disable", "secretmanager.versions.enable", "secretmanager.versions.destroy"]
 }
 
 resource "google_project_iam_member" "podplane_secrets_lifecycle" {

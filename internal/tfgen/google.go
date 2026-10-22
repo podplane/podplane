@@ -116,7 +116,7 @@ func addGoogleSecretsPermissions(doc *hclDocument, cfg *clusterconfig.ClusterCon
 		permissions                         []string
 	}{
 		{"secrets_catalog", "platform-podplane-operator", "platform-podplane-operator", "", []string{"secretmanager.secrets.create", "secretmanager.secrets.list"}},
-		{"secrets_lifecycle", "platform-podplane-operator", "platform-podplane-operator", clusterSecrets + " && resource.name != " + quote(prefix+"workload-ca-key") + " && !resource.name.startsWith(" + quote(prefix+"workload-ca-key/") + ")", []string{"secretmanager.secrets.get", "secretmanager.versions.get", "secretmanager.versions.list", "secretmanager.versions.add", "secretmanager.versions.disable", "secretmanager.versions.enable", "secretmanager.versions.destroy"}},
+		{"secrets_lifecycle", "platform-podplane-operator", "platform-podplane-operator", clusterSecrets + " && resource.name != " + quote(prefix+"workload-ca-key") + " && !resource.name.startsWith(" + quote(prefix+"workload-ca-key/") + ")", []string{"secretmanager.secrets.get", "secretmanager.secrets.delete", "secretmanager.versions.get", "secretmanager.versions.list", "secretmanager.versions.add", "secretmanager.versions.disable", "secretmanager.versions.enable", "secretmanager.versions.destroy"}},
 		{"secrets_reader", "platform-secrets-store-csi-provider-gcp", "platform-secrets-store-csi-provider-gcp", clusterSecrets, []string{"secretmanager.versions.access"}},
 		{"ingress_state", "platform-podplane-operator", "platform-podplane-operator", "resource.name.startsWith(" + quote(prefix+"platform-cluster_ingress-certificates_") + ")", []string{"secretmanager.versions.access"}},
 	} {
