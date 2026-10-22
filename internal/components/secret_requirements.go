@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/podplane/podplane/internal/secrets"
@@ -28,7 +29,7 @@ func (c *Config) RequiredSecrets(apps []string) ([]secrets.ProvisionSpec, error)
 	}
 	var requirements []secrets.ProvisionSpec
 	for _, app := range apps {
-		for _, requirement := range componentSecrets(app) {
+		for _, requirement := range componentSecrets[app] {
 			if namespace := c.Apps[app].Namespace; namespace != "" {
 				requirement.Namespace = namespace
 			}
@@ -50,35 +51,37 @@ func (c *Config) RequiredSecrets(apps []string) ([]secrets.ProvisionSpec, error)
 	return requirements, nil
 }
 
+// SecretApps lists the components that declare required secrets, so local
+// clusters can provision them before any component is enabled.
+func SecretApps() []string {
+	return slices.Sorted(maps.Keys(componentSecrets))
+}
+
+const sourceGatewayKeyBytes = 32
+
 // componentSecrets declares each component's keys and generation requirements.
-func componentSecrets(app string) []secrets.ProvisionSpec {
-	switch app {
-	case "sourcegateway":
-		const keyBytes = 32
-		return []secrets.ProvisionSpec{{
-			Namespace: "platform-sourcegateway",
-			Binding:   "sourcegateway", Key: "encryption-key",
-			Generate: func() ([]byte, error) {
-				raw := make([]byte, keyBytes)
-				defer clear(raw)
-				rand.Read(raw)
-				return base64.StdEncoding.AppendEncode(nil, raw), nil
-			},
-			Validate: func(value []byte) error {
-				value = bytes.TrimSpace(value)
-				decoded := make([]byte, base64.StdEncoding.DecodedLen(len(value)))
-				defer clear(decoded)
-				n, err := base64.StdEncoding.Strict().Decode(decoded, value)
-				if err != nil || bytes.ContainsAny(value, "\r\n") {
-					return fmt.Errorf("secret must be canonical standard base64")
-				}
-				if n != keyBytes {
-					return fmt.Errorf("secret must decode to exactly %d bytes", keyBytes)
-				}
-				return nil
-			},
-		}}
-	default:
-		return nil
-	}
+var componentSecrets = map[string][]secrets.ProvisionSpec{
+	"sourcegateway": {{
+		Namespace: "platform-sourcegateway",
+		Binding:   "sourcegateway", Key: "encryption-key",
+		Generate: func() ([]byte, error) {
+			raw := make([]byte, sourceGatewayKeyBytes)
+			defer clear(raw)
+			rand.Read(raw)
+			return base64.StdEncoding.AppendEncode(nil, raw), nil
+		},
+		Validate: func(value []byte) error {
+			value = bytes.TrimSpace(value)
+			decoded := make([]byte, base64.StdEncoding.DecodedLen(len(value)))
+			defer clear(decoded)
+			n, err := base64.StdEncoding.Strict().Decode(decoded, value)
+			if err != nil || bytes.ContainsAny(value, "\r\n") {
+				return fmt.Errorf("secret must be canonical standard base64")
+			}
+			if n != sourceGatewayKeyBytes {
+				return fmt.Errorf("secret must decode to exactly %d bytes", sourceGatewayKeyBytes)
+			}
+			return nil
+		},
+	}},
 }

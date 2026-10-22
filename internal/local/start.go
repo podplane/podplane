@@ -23,6 +23,7 @@ import (
 
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/clusterspec"
+	"github.com/podplane/podplane/internal/components"
 	"github.com/podplane/podplane/internal/deps"
 	"github.com/podplane/podplane/internal/osboot"
 	"github.com/podplane/podplane/internal/tui"
@@ -263,6 +264,17 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	stashPath, err := m.WriteLocalClusterConfig(clusterID, hostOIDCIssuer, m.OIDCCACertPath(), LocalKubernetesAPIHostname(clusterID), apiPort, seed, componentsSource)
 	if err != nil {
 		return "", fmt.Errorf("failed to write local cluster config: %w", err)
+	}
+	// Create component secrets in local vault on every start, before writing
+	// any seed snapshot that enables the components reading them. Clusters
+	// bootstrapped without a seed (such as by the components repo's make
+	// targets) rely on this too.
+	clusterCfg, err := clusterconfig.Load(stashPath)
+	if err != nil {
+		return "", fmt.Errorf("read local cluster config: %w", err)
+	}
+	if err := m.prepareComponentSecrets(&components.Config{ClusterID: clusterID, Secrets: clusterCfg.Cluster.Secrets}); err != nil {
+		return "", fmt.Errorf("prepare local component secrets: %w", err)
 	}
 	if !vmExisted {
 		// Seed before VM creation so a later create failure doesn't leave

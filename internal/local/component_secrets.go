@@ -13,10 +13,12 @@ import (
 	"github.com/podplane/podplane/internal/secrets"
 )
 
-// prepareComponentSecrets provisions prerequisites through local Vault, never
-// redirecting a remote provider's secrets into the local backend.
+// prepareComponentSecrets provisions every component's prerequisites through
+// local Vault, whether or not the component is enabled yet, so seeded clusters,
+// local bootstraps and later installs all find them. It never redirects a
+// remote provider's secrets into the local backend.
 func (m *Local) prepareComponentSecrets(cfg *components.Config) error {
-	required, err := cfg.RequiredSecrets(nil)
+	required, err := cfg.RequiredSecrets(components.SecretApps())
 	if err != nil {
 		return err
 	}

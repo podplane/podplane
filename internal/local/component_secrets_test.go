@@ -15,8 +15,9 @@ import (
 	"github.com/podplane/podplane/internal/fakevault"
 )
 
-// TestLocalComponentSecrets checks create-only provisioning through the real local
-// Vault transport, including refusing to route remote providers locally.
+// TestLocalComponentSecrets checks create-only provisioning of every component's
+// secrets, enabled or not, through the real local Vault transport, including
+// refusing to route remote providers locally.
 func TestLocalComponentSecrets(t *testing.T) {
 	path := filepath.Join(filepath.Dir(shortSocketPath(t)), localVaultSocketName)
 	listener, err := localVaultListener(path)
@@ -38,9 +39,10 @@ func TestLocalComponentSecrets(t *testing.T) {
 		if remote {
 			address = "https://vault.example.com"
 		}
+		// No apps are enabled: local start provisions every component's
+		// secrets so bootstraps that enable them later find them.
 		cfg := &components.Config{
 			ClusterID: "dev",
-			Apps:      map[string]components.Entry{"sourcegateway": {Enabled: true}},
 			Secrets: clusterconfig.Secrets{
 				DefaultProvider: "local",
 				Providers: map[string]clusterconfig.SecretsProvider{

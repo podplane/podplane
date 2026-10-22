@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
-	"github.com/podplane/podplane/internal/components"
 	"github.com/podplane/podplane/internal/s3fake"
 	"github.com/podplane/podplane/pkg/netsyseed"
 	"github.com/podplane/podplane/pkg/seeds"
@@ -71,18 +70,10 @@ func (m *Local) ensureInitialNetsySnapshot(clusterConfigPath, depsBaseURL, zotRe
 	if err != nil {
 		return err
 	}
-	cfg, err := components.ParseValues(prepared.ComponentValues)
-	if err != nil {
-		return err
-	}
 	var data bytes.Buffer
 	if err := prepared.WriteSnapshot(&data); err != nil {
 		return err
 	}
-	if err := m.prepareComponentSecrets(cfg); err != nil {
-		return err
-	}
-	// Publish only after both snapshot construction and secret provisioning succeed.
 	if err := s3fake.WriteObject(filepath.Join(m.dataDir, "s3"), localNetsyBucketName(m.clusterID), "bootstrap.netsy", data.Bytes()); err != nil {
 		return fmt.Errorf("write local Netsy snapshot: %w", err)
 	}

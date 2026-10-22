@@ -7,7 +7,6 @@ package local
 import (
 	"bytes"
 	"crypto/sha512"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -20,7 +19,6 @@ import (
 	"github.com/netsy-dev/netsy/pkg/datafile"
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/deps"
-	"github.com/podplane/podplane/internal/fakevault"
 	"github.com/podplane/podplane/internal/vm/qemu"
 	"github.com/podplane/podplane/pkg/seeds"
 )
@@ -217,62 +215,6 @@ func TestEnsureInitialNetsySnapshotWritesSnapshot(t *testing.T) {
 	}
 	if !foundMetadata {
 		t.Fatalf("expected fake S3 metadata for bootstrap.netsy in %s", metadataDir)
-	}
-}
-
-// TestInitialSnapshotWaitsForSecrets checks that failed provisioning leaves no
-// consumable snapshot and a retry publishes only after the key exists.
-func TestInitialSnapshotWaitsForSecrets(t *testing.T) {
-	dir := t.TempDir()
-	m := newTestLocalManager(dir, "dev")
-	m.depsCacheDir = filepath.Join(dir, "deps")
-	m.runtimeDir = filepath.Dir(shortSocketPath(t))
-	cfgPath := writeMinimalLocalClusterConfig(t, dir, "dev")
-	var seed bytes.Buffer
-	if err := datafile.WriteSnapshot(&seed, []*datafile.Record{{Revision: 1, Key: []byte(componentsHelmReleaseKey), Value: []byte(`{"apiVersion":"helm.toolkit.fluxcd.io/v2","kind":"HelmRelease","metadata":{"name":"platform-components","namespace":"platform-components"},"spec":{"values":{"platform":{"components":{"apps":{"sourcegateway":{"enabled":true}}}}}}}`)}}, "generic"); err != nil {
-		t.Fatal(err)
-	}
-	digest := sha512.Sum512(seed.Bytes())
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/manifests/seeds.json":
-			_, _ = fmt.Fprintf(w, `{"seeds":{"version":%q,"snapshots":{"platform":{"url":"http://%s/netsy/platform.netsy","digest":"sha512:%x","size":%d}}}}`, testSeedVersion, r.Host, digest, seed.Len())
-		case "/netsy/platform.netsy":
-			_, _ = w.Write(seed.Bytes())
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-	selection := clusterconfig.Seed{Name: seeds.Platform, Version: testSeedVersion, Digest: fmt.Sprintf("sha512:%x", digest)}
-	snapshotPath := filepath.Join(localS3BucketDir(dir, localNetsyBucketName("dev")), "bootstrap.netsy")
-	if err := m.ensureInitialNetsySnapshot(cfgPath, server.URL, "https://10.0.2.15:19443/s3/cache", selection); err == nil || !strings.Contains(err.Error(), "create component secret") {
-		t.Fatalf("expected provisioning to fail with Vault unavailable, got %v", err)
-	}
-	if _, err := os.Stat(snapshotPath); !os.IsNotExist(err) {
-		t.Fatalf("snapshot must remain unpublished when provisioning fails: %v", err)
-	}
-	socket := filepath.Join(m.runtimeDir, localVaultSocketName)
-	listener, err := localVaultListener(socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	vault := &http.Server{Handler: fakevault.NewTrustedHandler(fakevault.NewFileStore(localVaultTestKeyring{}, t.TempDir()))}
-	go func() { _ = vault.Serve(listener) }()
-	t.Cleanup(func() { _ = vault.Close() })
-	if err := m.ensureInitialNetsySnapshot(cfgPath, server.URL, "https://10.0.2.15:19443/s3/cache", selection); err != nil {
-		t.Fatal(err)
-	}
-	values, ok, err := newLocalVaultClient(socket).GetSecret("dev", "secret/data/dev/platform-sourcegateway/sourcegateway/encryption-key")
-	if err != nil || !ok {
-		t.Fatalf("missing provisioned key: %v", err)
-	}
-	key, err := base64.StdEncoding.Strict().DecodeString(values["value"])
-	if err != nil || len(key) != 32 {
-		t.Fatal("provisioned key must encode 32 bytes")
-	}
-	if info, err := os.Stat(snapshotPath); err != nil || info.Size() == 0 {
-		t.Fatalf("expected published snapshot after provisioning: %v", err)
 	}
 }
 

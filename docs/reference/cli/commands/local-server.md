@@ -25,7 +25,7 @@ Connections to the VM's ingress gateway and Kubernetes API verify node certifica
 
 The fake S3 service exposes durable local-cluster buckets such as `<cluster-id>-netsy` and `<cluster-id>-telemetry` under `/s3/data/`. Cache-backed buckets are exposed separately under `/s3/cache/`; currently this includes the shared `registry` bucket used by the node-local registry for mirrored images from the local registry cache.
 
-The local server is the only process that opens the encrypted fake Vault store or its keyring encryption keys. Services inside local VMs use the HTTPS Vault-compatible API with Kubernetes service account authentication. Host-side lifecycle operations, such as creating the workload CA key and deleting/cleaning up a cluster's secrets, use the same API over a user-only Unix socket.
+The local server is the only process that opens the encrypted fake Vault store or its keyring encryption keys. Services inside local VMs use the HTTPS Vault-compatible API with Kubernetes service account authentication. Host-side lifecycle operations, such as creating the workload CA key and component secrets (for example Source Gateway's encryption key) and deleting/cleaning up a cluster's secrets, use the same API over a user-only Unix socket.
 
 ```
 podplane local server [flags]
