@@ -189,6 +189,15 @@ func addPodplaneAWSRoles(doc *hclDocument, cfg *clusterconfig.ClusterConfig, acc
 	serverRegistry.Body.Attr("policy", expr("data.aws_iam_policy_document.podplane_cluster[\"registry-read-only\"].json"))
 	doc.AddBlock(serverRegistry)
 
+	ebs := block("resource", "aws_iam_role", "ebs_csi")
+	ebs.Body.Attr("name", str("${local.name_prefix}-ebs-csi"))
+	ebs.Body.Attr("assume_role_policy", expr("data.aws_iam_policy_document.assume_from_knc.json"))
+	doc.AddBlock(ebs)
+	ebsPolicy := block("resource", "aws_iam_role_policy_attachment", "ebs_csi")
+	ebsPolicy.Body.Attr("role", expr("aws_iam_role.ebs_csi.name"))
+	ebsPolicy.Body.Attr("policy_arn", str("arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"))
+	doc.AddBlock(ebsPolicy)
+
 	if route53ACMEEnabled(cfg) {
 		addACMERoute53Role(doc)
 	}
@@ -246,6 +255,7 @@ func addPodplaneKNCPolicy(doc *hclDocument, cfg *clusterconfig.ClusterConfig, ac
 		expr("aws_iam_role.podplane_cluster[\"netsy\"].arn"),
 		expr("aws_iam_role.podplane_cluster[\"registry-read-only\"].arn"),
 		expr("aws_iam_role.podplane_cluster[\"registry-read-write\"].arn"),
+		expr("aws_iam_role.ebs_csi.arn"),
 	}
 	if route53ACMEEnabled(cfg) {
 		resources = append(resources, expr("aws_iam_role.acme_route53[0].arn"))

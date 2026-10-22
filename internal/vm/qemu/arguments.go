@@ -59,7 +59,7 @@ func QemuBinary(arch string) string {
 // virtio root disk. When monitor is true, qemu is also started with
 // "-monitor stdio" so the operator can interact with it from the terminal
 // that launched `podplane local start --monitor`.
-func QemuArguments(monitor bool, arch, vmImage, cloudInitDataISOPath, serialConsolePath, cpus, memory string, directBoot *vm.DirectBootOptions, ports []vm.PortForward) []string {
+func QemuArguments(monitor bool, arch, vmImage, dataDisk, cloudInitDataISOPath, serialConsolePath, cpus, memory string, directBoot *vm.DirectBootOptions, ports []vm.PortForward) []string {
 	var biosImagePath string
 	var args []string
 	switch arch {
@@ -140,6 +140,9 @@ func QemuArguments(monitor bool, arch, vmImage, cloudInitDataISOPath, serialCons
 		)
 	}
 	args = append(args,
+		// data disk
+		"-drive", fmt.Sprintf("file=%s,if=none,id=data0,format=qcow2,discard=unmap,detect-zeroes=unmap", dataDisk),
+		"-device", "virtio-blk-pci,drive=data0,serial=podplane-data",
 		// cloud-init cidata ISO (NoCloud datasource with cidata volume label)
 		"-drive", fmt.Sprintf("file=%s,format=raw,if=virtio,media=cdrom", cloudInitDataISOPath),
 		// serial console socket for `podplane local console`

@@ -41,17 +41,19 @@ var localStartCmd = &cobra.Command{
 func init() {
 	localStartCmd.Flags().StringVarP(&localStartCPUs, "cpus", "c", "2", "CPU cores to allocate to the VM (default 2)")
 	localStartCmd.Flags().StringVarP(&localStartMemory, "memory", "m", "4G", "Memory to allocate to the VM (default 4G)")
+	localStartCmd.Flags().StringVar(&localStartDataDiskSize, "data-disk-size", "256G", "Persistent data disk size in qemu-img syntax; existing disks only grow when explicitly set")
 	localStartCmd.Flags().BoolVar(&localStartConsole, "console", false, "Attach to the VM serial console after startup")
 	localStartCmd.Flags().BoolVar(&localStartFollow, "follow", false, "Stream cloud-init user-data logs while waiting for startup")
 	localStartCmd.Flags().StringVar(&localStartComponents, "components", seeds.Agentic, "Initial platform components seeded on first boot: none, minimal, platform, or agentic")
 }
 
 var (
-	localStartCPUs       string
-	localStartMemory     string
-	localStartConsole    bool
-	localStartFollow     bool
-	localStartComponents string
+	localStartCPUs         string
+	localStartMemory       string
+	localStartDataDiskSize string
+	localStartConsole      bool
+	localStartFollow       bool
+	localStartComponents   string
 )
 
 // newLocalStartCmd creates the `local start` command. After the VM is up it
@@ -78,7 +80,19 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 		if vmExists && cmd.Flags().Changed("components") {
 			return fmt.Errorf("--components can only be used when creating a new local cluster; existing local cluster %q already has its initial components recorded in cluster.jsonc", localClusterID)
 		}
+		var dataDiskSize string
+		if cmd.Flags().Changed("data-disk-size") {
+			if localStartDataDiskSize == "" {
+				return fmt.Errorf("--data-disk-size must not be empty")
+			}
+			dataDiskSize = localStartDataDiskSize
+		}
 		if running {
+			if dataDiskSize != "" {
+				if err := manager.EnsureDataDisk(dataDiskSize); err != nil {
+					return err
+				}
+			}
 			_, _ = fmt.Fprintln(os.Stdout, "VM is already running")
 			if localStartConsole {
 				if err := manager.Console(); err != nil {
@@ -93,6 +107,7 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 		startOpts := local.StartOptions{
 			CPUs:               localStartCPUs,
 			Memory:             localStartMemory,
+			DataDiskSize:       dataDiskSize,
 			StreamUserdataLogs: localStartFollow,
 			Components:         localStartComponents,
 			RunDownloadProgress: func(run func(progress func(deps.DownloadEvent)) error) error {

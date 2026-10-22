@@ -378,8 +378,16 @@ func seedValues(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provide
   platform = { zotRegistry = { storage = { bucket = aws_s3_bucket.podplane_cluster["registry"].bucket, region = local.aws_region } } }
   zot = { podAnnotations = { "iam.amazonaws.com/role" = aws_iam_role.podplane_cluster["registry-read-write"].arn } }
 }`)))
+		values = append(values, field("csi-aws-ebs", expr(`{ "aws-ebs-csi-driver" = {
+  controller = { podAnnotations = { "iam.amazonaws.com/role" = aws_iam_role.ebs_csi.arn } }
+} }`)))
 	}
 	if provider.Kind == "google" {
+		values = append(values, field("csi-gce-pd", object(identField("platform", object(identField("csiGcePd", object(
+			identField("googleWorkloadIdentity", object(identField("provider", expr("google_iam_workload_identity_pool_provider.cluster.name")))),
+			identField("projectID", expr("local.provider_project")),
+			identField("zone", str(sortedKeys(provider.Zones)[0])),
+		)))))))
 		values = append(values, field("zot-registry", expr(`{
   platform = { zotRegistry = {
     googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name }
@@ -415,6 +423,7 @@ func seedValues(cfg *clusterconfig.ClusterConfig, provider clusterconfig.Provide
 	case "aws":
 		components = append(components, identField("apps", expr(`{
   "zot-registry" = { namespaceAnnotations = { "iam.amazonaws.com/allowed-roles" = jsonencode([aws_iam_role.podplane_cluster["registry-read-write"].arn]) } }
+  "csi-aws-ebs" = { namespaceAnnotations = { "iam.amazonaws.com/allowed-roles" = jsonencode([aws_iam_role.ebs_csi.arn]) } }
 }`)))
 	case "google":
 		components = append(components,

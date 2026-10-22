@@ -77,7 +77,7 @@ ethernets:
 	_, _ = fmt.Fprintln(output, "Starting VM...")
 	cmd := execwrap.Command(
 		QemuBinary(m.arch),
-		QemuArguments(monitor, m.arch, vmImage, cloudInitDataISO, serialConsolePath, cpus, memory, boot, ports)...,
+		QemuArguments(monitor, m.arch, vmImage, m.DataDiskPath(), cloudInitDataISO, serialConsolePath, cpus, memory, boot, ports)...,
 	)
 	cmd.Stdout = output
 	cmd.Stderr = output

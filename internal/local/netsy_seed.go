@@ -58,7 +58,7 @@ func (m *Local) ensureInitialNetsySnapshot(clusterConfigPath, depsBaseURL, zotRe
 	if seedPath == "" {
 		return nil
 	}
-	valuesContent, err := zotRuntimeValues(zotRegistryEndpoint)
+	valuesContent, err := localRuntimeValues(zotRegistryEndpoint)
 	if err != nil {
 		return err
 	}
@@ -89,24 +89,32 @@ func (m *Local) ensureInitialNetsySnapshot(clusterConfigPath, depsBaseURL, zotRe
 	return nil
 }
 
-// zotRuntimeValues returns the local Zot endpoint and fake-S3 values overlay.
-func zotRuntimeValues(endpoint string) ([]byte, error) {
+// localRuntimeValues selects local storage and the fake-S3 registry endpoint.
+func localRuntimeValues(endpoint string) ([]byte, error) {
 	parsed, err := url.Parse(endpoint)
 	if err != nil || parsed.Hostname() == "" {
 		return nil, fmt.Errorf("invalid zot registry endpoint %q", endpoint)
 	}
-	values := map[string]any{"platform": map[string]any{"components": map[string]any{"values": map[string]any{
-		"zot-registry": map[string]any{
-			"platform": map[string]any{"zotRegistry": map[string]any{"storage": map[string]any{
-				"endpoint": endpoint, "secure": true, "skipVerify": true, "forcePathStyle": true,
-				"accessKeyID": "test", "secretAccessKey": "test",
-			}}},
-			"zot": map[string]any{"hostAliases": []map[string]any{{"ip": parsed.Hostname(), "hostnames": []string{"oidc.localhost"}}}},
+	componentValues := map[string]any{
+		"apps": map[string]any{"csi-openebs-lvm": map[string]any{"enabled": true}},
+		"crds": map[string]any{
+			"csi-openebs-lvm-crds": map[string]any{"enabled": true},
+			"snapshot-crds":        map[string]any{"enabled": true},
 		},
-	}}}}
+		"values": map[string]any{
+			"zot-registry": map[string]any{
+				"platform": map[string]any{"zotRegistry": map[string]any{"storage": map[string]any{
+					"endpoint": endpoint, "secure": true, "skipVerify": true, "forcePathStyle": true,
+					"accessKeyID": "test", "secretAccessKey": "test",
+				}}},
+				"zot": map[string]any{"hostAliases": []map[string]any{{"ip": parsed.Hostname(), "hostnames": []string{"oidc.localhost"}}}},
+			},
+		},
+	}
+	values := map[string]any{"platform": map[string]any{"components": componentValues}}
 	data, err := json.Marshal(values)
 	if err != nil {
-		return nil, fmt.Errorf("marshal local Zot values: %w", err)
+		return nil, fmt.Errorf("marshal local component values: %w", err)
 	}
 	return data, nil
 }

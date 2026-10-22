@@ -35,6 +35,7 @@ import (
 type StartOptions struct {
 	CPUs                string
 	Memory              string
+	DataDiskSize        string // Empty means --data-disk-size was omitted.
 	StreamUserdataLogs  bool
 	Components          string
 	RunDownloadProgress func(run func(progress func(deps.DownloadEvent)) error) error
@@ -94,7 +95,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	manifest, err := depsManager.Verify(kind, arch)
 	if errors.Is(err, deps.ErrNotCached) || errors.Is(err, deps.ErrIncomplete) {
 		download := func(progress func(deps.DownloadEvent)) error {
-			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: []string{"openbao"}})
+			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: []string{"openbao", "local"}})
 		}
 		if opts.RunDownloadProgress != nil {
 			err = opts.RunDownloadProgress(download)
@@ -116,7 +117,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	registryEntries, registryReadErr := os.ReadDir(depsManager.RegistryCacheDir())
 	if registryReadErr != nil || len(registryEntries) == 0 {
 		download := func(progress func(deps.DownloadEvent)) error {
-			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: []string{"openbao"}})
+			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: []string{"openbao", "local"}})
 		}
 		if opts.RunDownloadProgress != nil {
 			err = opts.RunDownloadProgress(download)
@@ -437,6 +438,9 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	}
 
 	// Start the VM
+	if err := m.EnsureDataDisk(opts.DataDiskSize); err != nil {
+		return "", err
+	}
 	progress.Started("vm", "VM", fmt.Sprintf("qemu · %s CPU · %s", opts.CPUs, opts.Memory))
 	if err := m.vm.Start(rendered, opts.CPUs, opts.Memory, sshAuthorizedKey, false, directBoot, vmPortForwards); err != nil {
 		progress.Failed("vm", "VM", err)
@@ -525,6 +529,12 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	}
 
 	return stashPath, nil
+}
+
+// EnsureDataDisk prepares local persistent storage, or validates the requested
+// size without modifying the disk when the VM is already running.
+func (m *Local) EnsureDataDisk(size string) error {
+	return m.vm.EnsureDataDisk(size)
 }
 
 // repairExistingNstanceAgentEnv updates nstance endpoint config for existing

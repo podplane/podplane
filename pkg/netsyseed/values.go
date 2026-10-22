@@ -244,6 +244,8 @@ func applyProviderComponents(components map[string]any, providers []clusterconfi
 		switch provider.Kind {
 		case "aws":
 			apps["csi-aws-ebs"] = map[string]any{"enabled": true}
+		case "google":
+			apps["csi-gce-pd"] = map[string]any{"enabled": true}
 		}
 	}
 }

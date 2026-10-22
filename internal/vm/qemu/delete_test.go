@@ -22,7 +22,7 @@ func TestDeleteRemovesStoppedVMArtifacts(t *testing.T) {
 		VMName:     "podplane-local-cluster-a",
 	}
 
-	for _, path := range []string{m.VMImagePath(), m.CloudInitDataDiskPath(), m.SerialConsolePath()} {
+	for _, path := range []string{m.VMImagePath(), m.DataDiskPath(), m.CloudInitDataDiskPath(), m.SerialConsolePath()} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", path, err)
 		}
@@ -43,7 +43,7 @@ func TestDeleteRemovesStoppedVMArtifacts(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	for _, path := range []string{m.VMImagePath(), m.CloudInitDataDiskPath(), m.SerialConsolePath(), pidFile.FilePath()} {
+	for _, path := range []string{m.VMImagePath(), m.DataDiskPath(), m.CloudInitDataDiskPath(), m.SerialConsolePath(), pidFile.FilePath()} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists after delete: %v", path, err)
 		}

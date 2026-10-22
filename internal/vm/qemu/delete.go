@@ -11,21 +11,12 @@ import (
 
 // Delete deletes a qemu VM
 func (m *Qemu) Delete() error {
-	// Check the VM exists and return early if not
-	exists, err := m.Exists()
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return nil
-	}
-
 	// Check that VM is stopped
-	running, err := m.Running()
+	pid, err := m.PID()
 	if err != nil {
 		return err
 	}
-	if running {
+	if pid != 0 {
 		return fmt.Errorf("VM is still running. Please stop it first")
 	}
 
@@ -33,8 +24,13 @@ func (m *Qemu) Delete() error {
 	vmImage := m.VMImagePath()
 
 	// Delete the VM image
-	if err := os.Remove(vmImage); err != nil {
+	if err := os.Remove(vmImage); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete VM image: %w", err)
+	}
+
+	// Delete the VM data disk image
+	if err := os.Remove(m.DataDiskPath()); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete data disk: %w", err)
 	}
 
 	// Delete the cloud-init data ISO (best-effort; may not exist)

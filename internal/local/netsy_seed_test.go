@@ -185,6 +185,14 @@ func TestEnsureInitialNetsySnapshotWritesSnapshot(t *testing.T) {
 	if components["apps"].(map[string]any)["secrets-store-csi-driver"].(map[string]any)["enabled"] != true {
 		t.Fatal("local secrets CSI driver must remain enabled")
 	}
+	if components["apps"].(map[string]any)["csi-openebs-lvm"].(map[string]any)["enabled"] != true {
+		t.Fatal("local LVM CSI driver must be enabled")
+	}
+	for _, name := range []string{"csi-openebs-lvm-crds", "snapshot-crds"} {
+		if components["crds"].(map[string]any)[name].(map[string]any)["enabled"] != true {
+			t.Fatalf("local %s must be enabled", name)
+		}
+	}
 	zot := componentValues["zot-registry"].(map[string]any)
 	storage := zot["platform"].(map[string]any)["zotRegistry"].(map[string]any)["storage"].(map[string]any)
 	if got, want := storage["endpoint"], "https://10.0.2.15:19443/s3/cache"; got != want {

@@ -622,6 +622,9 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 			addNstanceBootstrap(&mainDoc, &seed, provider, secretPrefix)
 		}
 		dependencies := []hclValue{}
+		if provider.Kind == "aws" {
+			dependencies = append(dependencies, expr("aws_iam_role_policy_attachment.ebs_csi"), expr("aws_iam_role_policy.podplane_knc"))
+		}
 		if provider.Kind == "google" {
 			dependencies = append(dependencies,
 				expr("google_storage_bucket_iam_member.podplane_registry_writer"),
@@ -630,6 +633,9 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 				expr("google_project_iam_member.podplane_secrets_lifecycle"),
 				expr("google_project_iam_member.podplane_secrets_reader"),
 				expr("google_project_iam_member.podplane_ingress_state"),
+				expr("google_project_iam_member.csi_gce_pd_storage"),
+				expr("google_project_iam_member.csi_gce_pd_instances"),
+				expr("google_service_account_iam_member.csi_gce_pd_agent"),
 			)
 		}
 		if managedWorkloadCAKey {

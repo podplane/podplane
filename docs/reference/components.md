@@ -47,10 +47,16 @@ The current component charts require Kubernetes 1.37 or later. This is also the 
 These charts are marked as provider-specific core components and are enabled by cluster bootstrap configuration when required:
 
 - `csi-aws-ebs` for persistent storage on AWS
+- `csi-gce-pd` for Persistent Disk storage on Google Cloud
+- `csi-openebs-lvm` for local VM persistent storage
+    - `csi-openebs-lvm-crds` and `snapshot-crds` (CRDs only; no snapshot controller)
 - `cluster-api` for the [Cluster API](https://cluster-api.sigs.k8s.io/) core controller on AWS and Google Cloud
     - `cluster-api-crds`
 - `nstance-operator` for the [Nstance Operator](https://nstance.dev/docs/components/nstance-operator/) on AWS and Google Cloud (requires `cluster-api`)
     - `nstance-operator-crds`
+
+See [Persistent Storage](persistent-storage.md) for default StorageClasses,
+PVCs, volume expansion, and what happens to data when a volume or VM is deleted.
 
 ### Addon Components
 

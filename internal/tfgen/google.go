@@ -43,6 +43,36 @@ func addPodplaneGooglePermissions(doc *hclDocument, cfg *clusterconfig.ClusterCo
 
 	addGoogleWorkloadIdentity(doc)
 	addGoogleSecretsPermissions(doc, cfg)
+	addGoogleDiskPermissions(doc, accountName)
+}
+
+// addGoogleDiskPermissions grants the PD controller disk management and access
+// to instances running as the agent account, without granting host credentials.
+func addGoogleDiskPermissions(doc *hclDocument, accountName string) {
+	principal := googleWorkloadPrincipal("platform-csi-gce-pd", "platform-csi-gce-pd-controller")
+	storage := block("resource", "google_project_iam_member", "csi_gce_pd_storage")
+	storage.Body.Attr("project", expr("local.provider_project"))
+	storage.Body.Attr("role", str("roles/compute.storageAdmin"))
+	storage.Body.Attr("member", principal)
+	doc.AddBlock(storage)
+
+	role := block("resource", "google_project_iam_custom_role", "csi_gce_pd")
+	role.Body.Attr("project", expr("local.provider_project"))
+	role.Body.Attr("role_id", str("pp_${substr(sha256(module.cluster.bucket), 0, 20)}_csi_gce_pd"))
+	role.Body.Attr("title", str("Podplane PD CSI instance access"))
+	role.Body.Attr("permissions", stringValueList([]string{"compute.instances.get", "compute.instances.attachDisk", "compute.instances.detachDisk"}))
+	doc.AddBlock(role)
+	instances := block("resource", "google_project_iam_member", "csi_gce_pd_instances")
+	instances.Body.Attr("project", expr("local.provider_project"))
+	instances.Body.Attr("role", expr("google_project_iam_custom_role.csi_gce_pd.id"))
+	instances.Body.Attr("member", principal)
+	doc.AddBlock(instances)
+
+	account := block("resource", "google_service_account_iam_member", "csi_gce_pd_agent")
+	account.Body.Attr("service_account_id", str("projects/${local.provider_project}/serviceAccounts/${module."+accountName+".agent_iam_role_arn}"))
+	account.Body.Attr("role", str("roles/iam.serviceAccountUser"))
+	account.Body.Attr("member", principal)
+	doc.AddBlock(account)
 }
 
 // googleWorkloadPrincipal identifies one Kubernetes ServiceAccount, not an entire namespace.

@@ -28,6 +28,11 @@ func (m *Qemu) VMImagePath() string {
 	return filepath.Join(directory, filename)
 }
 
+// DataDiskPath returns the durable disk used by the guest's podplane LVM VG.
+func (m *Qemu) DataDiskPath() string {
+	return filepath.Join(m.VMImageDirectory(), m.vmFileName("data", "qcow2"))
+}
+
 // VMPIDFilename returns the filename to use for a VM PID file
 func (m *Qemu) VMPIDFilename() string {
 	return m.vmFileName("pid", "json")

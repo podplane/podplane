@@ -282,9 +282,13 @@ resource "podplane_netsy_seed_s3" "cluster" {
             platform = { zotRegistry = { storage = { bucket = aws_s3_bucket.podplane_cluster["registry"].bucket, region = local.aws_region } } }
             zot = { podAnnotations = { "iam.amazonaws.com/role" = aws_iam_role.podplane_cluster["registry-read-write"].arn } }
           }
+          "csi-aws-ebs" = { "aws-ebs-csi-driver" = {
+            controller = { podAnnotations = { "iam.amazonaws.com/role" = aws_iam_role.ebs_csi.arn } }
+          } }
         }
         apps = {
           "zot-registry" = { namespaceAnnotations = { "iam.amazonaws.com/allowed-roles" = jsonencode([aws_iam_role.podplane_cluster["registry-read-write"].arn]) } }
+          "csi-aws-ebs" = { namespaceAnnotations = { "iam.amazonaws.com/allowed-roles" = jsonencode([aws_iam_role.ebs_csi.arn]) } }
         }
       }
     }
@@ -300,5 +304,5 @@ resource "podplane_netsy_seed_s3" "cluster" {
     namespace = "platform-nstance-operator"
     ca_bucket = module.cluster.bucket
   }
-  depends_on = [podplane_workload_ca_key.cluster, aws_iam_role_policy.podplane_workload_ca_key]
+  depends_on = [aws_iam_role_policy_attachment.ebs_csi, aws_iam_role_policy.podplane_knc, podplane_workload_ca_key.cluster, aws_iam_role_policy.podplane_workload_ca_key]
 }

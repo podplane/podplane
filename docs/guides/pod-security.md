@@ -51,6 +51,8 @@ These components need host access and run in `privileged` namespaces:
 | `cilium` | Manages node networking: privileged containers, host networking, hostPath mounts, and added capabilities |
 | `coredns` | Mounts the node's systemd-resolved `resolv.conf` for upstream DNS |
 | `csi-aws-ebs` | Attaches and mounts volumes on the node |
+| `csi-gce-pd` | Mount propagation, devices, and kubelet plugin sockets for Google Persistent Disk |
+| `csi-openebs-lvm` | Manages local LVM devices and mounts volumes through kubelet plugin sockets |
 | `secrets-store-csi-driver` | Mounts secrets into Pods on the node |
 | `secrets-store-csi-provider-*` | Mount the CSI driver's provider socket directory |
 | `envoy-gateway` | Binds host port 443 and, with node certificates, mounts them from the node |
@@ -65,6 +67,10 @@ labels, so other groups cannot use these levels. See [RBAC](rbac.md).
 A namespace's Pod Security level doesn't choose its Pods' runtime: a
 `privileged` namespace still runs Pods in gVisor unless an admin also allows
 runc. See [Container Runtimes](container-runtimes.md).
+
+The three persistent-storage driver namespaces also allow runc and are in the
+platform runtime default allowlist. Their node plugins require native host
+integration; granting a privileged Pod Security level alone is insufficient.
 
 ## Relaxing the Defaults
 

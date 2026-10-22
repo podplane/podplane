@@ -391,6 +391,17 @@ resource "podplane_netsy_seed_gcs" "cluster" {
               }
             }
           }
+          "csi-gce-pd" = {
+            platform = {
+              csiGcePd = {
+                googleWorkloadIdentity = {
+                  provider = google_iam_workload_identity_pool_provider.cluster.name
+                }
+                projectID = local.provider_project
+                zone = "us-central1-a"
+              }
+            }
+          }
           "zot-registry" = {
             platform = { zotRegistry = {
               googleWorkloadIdentity = { provider = google_iam_workload_identity_pool_provider.cluster.name }
@@ -438,7 +449,7 @@ resource "podplane_netsy_seed_gcs" "cluster" {
     namespace = "platform-nstance-operator"
     ca_bucket = module.cluster.bucket
   }
-  depends_on = [google_storage_bucket_iam_member.podplane_registry_writer, google_iam_workload_identity_pool_provider.cluster, google_project_iam_member.podplane_secrets_catalog, google_project_iam_member.podplane_secrets_lifecycle, google_project_iam_member.podplane_secrets_reader, google_project_iam_member.podplane_ingress_state, podplane_workload_ca_key.cluster]
+  depends_on = [google_storage_bucket_iam_member.podplane_registry_writer, google_iam_workload_identity_pool_provider.cluster, google_project_iam_member.podplane_secrets_catalog, google_project_iam_member.podplane_secrets_lifecycle, google_project_iam_member.podplane_secrets_reader, google_project_iam_member.podplane_ingress_state, google_project_iam_member.csi_gce_pd_storage, google_project_iam_member.csi_gce_pd_instances, google_service_account_iam_member.csi_gce_pd_agent, podplane_workload_ca_key.cluster]
 }
 
 data "google_storage_bucket_object_content" "nstance_ca" {

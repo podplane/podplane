@@ -45,20 +45,26 @@ func TestBuildPlatformComponentsValuesLocalDomain(t *testing.T) {
 	}
 }
 
-// TestBuildPlatformComponentsValuesAWSProviderEnablesEBSCSI selects the AWS storage driver.
-func TestBuildPlatformComponentsValuesAWSProviderEnablesEBSCSI(t *testing.T) {
-	cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
-		Providers: []clusterconfig.Provider{{Kind: "aws"}},
-	}}
-	values, err := buildPlatformComponentsValues(cfg, false)
-	if err != nil {
-		t.Fatalf("buildPlatformComponentsValues error = %v", err)
-	}
-	components := values["platform"].(map[string]any)["components"].(map[string]any)
-	apps := components["apps"].(map[string]any)
-	app := apps["csi-aws-ebs"].(map[string]any)
-	if got, want := app["enabled"], true; got != want {
-		t.Fatalf("apps.csi-aws-ebs.enabled = %v, want %v", got, want)
+// TestBuildPlatformComponentsValuesStorage selects only the provider's storage driver.
+func TestBuildPlatformComponentsValuesStorage(t *testing.T) {
+	for _, provider := range []string{"aws", "google"} {
+		t.Run(provider, func(t *testing.T) {
+			cfg := &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{
+				Providers: []clusterconfig.Provider{{Kind: provider}},
+			}}
+			values, err := buildPlatformComponentsValues(cfg, false)
+			if err != nil {
+				t.Fatalf("buildPlatformComponentsValues error = %v", err)
+			}
+			components := values["platform"].(map[string]any)["components"].(map[string]any)
+			apps := components["apps"].(map[string]any)
+			for kind, name := range map[string]string{"aws": "csi-aws-ebs", "google": "csi-gce-pd"} {
+				app, ok := apps[name].(map[string]any)
+				if kind == provider && (!ok || app["enabled"] != true) || kind != provider && ok {
+					t.Fatalf("provider %s: apps.%s = %v", provider, name, app)
+				}
+			}
+		})
 	}
 }
 

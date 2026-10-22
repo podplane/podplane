@@ -54,6 +54,10 @@ type Manager interface {
 	// Exists checks if a VM exists
 	Exists() (bool, error)
 
+	// EnsureDataDisk creates or grows the persistent data disk. An empty size
+	// preserves an existing disk or uses the default for a new disk.
+	EnsureDataDisk(size string) error
+
 	// Start starts a VM instance. The userData string is the rendered
 	// cloud-init user-data script; the VM backend is responsible for
 	// delivering it to the guest (e.g. via a cidata ISO). When monitor is

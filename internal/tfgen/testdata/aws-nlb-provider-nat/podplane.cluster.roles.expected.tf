@@ -64,11 +64,21 @@ resource "aws_iam_role_policy" "podplane_server_registry" {
   policy = data.aws_iam_policy_document.podplane_cluster["registry-read-only"].json
 }
 
+resource "aws_iam_role" "ebs_csi" {
+  name = "${local.name_prefix}-ebs-csi"
+  assume_role_policy = data.aws_iam_policy_document.assume_from_knc.json
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi" {
+  role = aws_iam_role.ebs_csi.name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
 data "aws_iam_policy_document" "podplane_knc" {
   statement {
     sid = "AssumePodplaneWorkloadRoles"
     actions = ["sts:AssumeRole"]
-    resources = [aws_iam_role.podplane_cluster["netsy"].arn, aws_iam_role.podplane_cluster["registry-read-only"].arn, aws_iam_role.podplane_cluster["registry-read-write"].arn]
+    resources = [aws_iam_role.podplane_cluster["netsy"].arn, aws_iam_role.podplane_cluster["registry-read-only"].arn, aws_iam_role.podplane_cluster["registry-read-write"].arn, aws_iam_role.ebs_csi.arn]
   }
 
   statement {

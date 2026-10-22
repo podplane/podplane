@@ -136,3 +136,28 @@ resource "google_project_iam_member" "podplane_ingress_state" {
     expression = "resource.name.startsWith(\"projects/${data.google_project.secrets[each.key].number}/secrets/${each.value.prefix}_platform-cluster_ingress-certificates_\")"
   }
 }
+
+resource "google_project_iam_member" "csi_gce_pd_storage" {
+  project = local.provider_project
+  role = "roles/compute.storageAdmin"
+  member = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.cluster.name}/subject/system:serviceaccount:platform-csi-gce-pd:platform-csi-gce-pd-controller"
+}
+
+resource "google_project_iam_custom_role" "csi_gce_pd" {
+  project = local.provider_project
+  role_id = "pp_${substr(sha256(module.cluster.bucket), 0, 20)}_csi_gce_pd"
+  title = "Podplane PD CSI instance access"
+  permissions = ["compute.instances.get", "compute.instances.attachDisk", "compute.instances.detachDisk"]
+}
+
+resource "google_project_iam_member" "csi_gce_pd_instances" {
+  project = local.provider_project
+  role = google_project_iam_custom_role.csi_gce_pd.id
+  member = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.cluster.name}/subject/system:serviceaccount:platform-csi-gce-pd:platform-csi-gce-pd-controller"
+}
+
+resource "google_service_account_iam_member" "csi_gce_pd_agent" {
+  service_account_id = "projects/${local.provider_project}/serviceAccounts/${module.account__us_central1.agent_iam_role_arn}"
+  role = "roles/iam.serviceAccountUser"
+  member = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.cluster.name}/subject/system:serviceaccount:platform-csi-gce-pd:platform-csi-gce-pd-controller"
+}
