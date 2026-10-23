@@ -28,6 +28,10 @@ Use `--components` to select which platform components are seeded into Netsy whe
 
 Seeding is only performed during cluster creation / first boot. Later runs of `podplane local start` never overwrite existing Netsy state, and explicitly passing `--components` for an existing local cluster returns an error. To use a different initial component set, delete the local cluster and create it again with the desired `--components` value.
 
+In newly seeded local clusters, Pods can reach services on your laptop at
+`host.podplane.internal` using the service's listening port, for example
+`http://host.podplane.internal:1234/v1`. Host firewall and Pod egress rules still apply.
+
 ```
 podplane local start [flags]
 ```

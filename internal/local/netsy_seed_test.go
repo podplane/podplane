@@ -121,7 +121,8 @@ func TestEnsureInitialNetsySnapshotSkipsNonEmptyBucket(t *testing.T) {
 // snapshot file is written to the local fake-S3 bucket.
 func TestEnsureInitialNetsySnapshotWritesSnapshot(t *testing.T) {
 	dir := t.TempDir()
-	m := &Local{dataDir: dir, clusterID: "dev", depsCacheDir: filepath.Join(dir, "deps")}
+	m := newTestLocalManager(dir, "dev")
+	m.depsCacheDir = filepath.Join(dir, "deps")
 	cfgPath := writeMinimalLocalClusterConfig(t, dir, "dev")
 
 	seedBytes := buildSeedSnapshot(t, "dev", 7)
@@ -172,6 +173,12 @@ func TestEnsureInitialNetsySnapshotWritesSnapshot(t *testing.T) {
 	values := release["spec"].(map[string]any)["values"].(map[string]any)
 	components := values["platform"].(map[string]any)["components"].(map[string]any)
 	componentValues := components["values"].(map[string]any)
+	dns := componentValues["coredns"].(map[string]any)["platform"].(map[string]any)["coredns"].(map[string]any)
+	recordsByName := dns["staticRecords"].(map[string]any)
+	addresses := recordsByName["host.podplane.internal"].([]any)
+	if len(recordsByName) != 1 || len(addresses) != 1 || addresses[0] != "10.0.2.2" {
+		t.Fatalf("local static DNS records = %v, want host.podplane.internal -> 10.0.2.2 (not the node IP)", recordsByName)
+	}
 	ingress := componentValues["envoy-gateway"].(map[string]any)["platform"].(map[string]any)["envoyGateway"].(map[string]any)["ingress"].(map[string]any)
 	if ingress["certificates"].(map[string]any)["provider"] != "node" {
 		t.Fatalf("local ingress certificates = %v, want node provider", ingress["certificates"])

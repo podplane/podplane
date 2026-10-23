@@ -57,7 +57,7 @@ func (m *Local) ensureInitialNetsySnapshot(clusterConfigPath, depsBaseURL, zotRe
 	if seedPath == "" {
 		return nil
 	}
-	valuesContent, err := localRuntimeValues(zotRegistryEndpoint)
+	valuesContent, err := localRuntimeValues(zotRegistryEndpoint, m.vm.Addr())
 	if err != nil {
 		return err
 	}
@@ -80,8 +80,9 @@ func (m *Local) ensureInitialNetsySnapshot(clusterConfigPath, depsBaseURL, zotRe
 	return nil
 }
 
-// localRuntimeValues selects local storage and the fake-S3 registry endpoint.
-func localRuntimeValues(endpoint string) ([]byte, error) {
+// localRuntimeValues selects local storage, the fake-S3 registry endpoint,
+// and the DNS record for reaching the host from cluster workloads.
+func localRuntimeValues(endpoint, hostAddress string) ([]byte, error) {
 	parsed, err := url.Parse(endpoint)
 	if err != nil || parsed.Hostname() == "" {
 		return nil, fmt.Errorf("invalid zot registry endpoint %q", endpoint)
@@ -93,6 +94,11 @@ func localRuntimeValues(endpoint string) ([]byte, error) {
 			"snapshot-crds":        map[string]any{"enabled": true},
 		},
 		"values": map[string]any{
+			"coredns": map[string]any{
+				"platform": map[string]any{"coredns": map[string]any{
+					"staticRecords": map[string][]string{"host.podplane.internal": {hostAddress}},
+				}},
+			},
 			"zot-registry": map[string]any{
 				"platform": map[string]any{"zotRegistry": map[string]any{"storage": map[string]any{
 					"endpoint": endpoint, "secure": true, "skipVerify": true, "forcePathStyle": true,
