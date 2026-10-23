@@ -151,6 +151,17 @@ func validateTemplateValues(v *TemplateVars) error {
 			return fmt.Errorf("ServerEnv.%s contains a NUL or newline", name)
 		}
 	}
+	// Dependency names and types form artifact filenames in the script.
+	depName := regexp.MustCompile(`^[a-z0-9][a-z0-9.+-]*$`)
+	depType := regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9]+)*$`)
+	for _, item := range v.Manifest.InstallItems(v.ManifestFilter()) {
+		if !depName.MatchString(item.Name) {
+			return fmt.Errorf("vmconfig dependency name %q is not a valid artifact name", item.Name)
+		}
+		if !depType.MatchString(item.Dep.Type) {
+			return fmt.Errorf("vmconfig dependency %s type %q is not a valid artifact type", item.Name, item.Dep.Type)
+		}
+	}
 	if v.Manifest.VMConfig.Kind != "nst" && len(v.ServerEnv) > 0 {
 		return fmt.Errorf("ServerEnv is only supported for nst")
 	}

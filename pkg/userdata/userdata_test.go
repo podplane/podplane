@@ -333,6 +333,43 @@ func TestValidate_InvalidProvider(t *testing.T) {
 	}
 }
 
+// TestRender_ArtifactFilenames checks artifacts are named <name>.<type> for any
+// vmconfig type, binaries keep their bare name, and unsafe names or types are
+// rejected before they reach the script.
+func TestRender_ArtifactFilenames(t *testing.T) {
+	v := baseVars("local")
+	v.Manifest.VMConfig.Dependencies["gvisor"] = deps.Dependency{
+		Version: "20261005.0",
+		URL:     "https://example/deps/gvisor.tar.zstd",
+		Type:    "tar.zstd",
+		Digest:  "sha512:" + strings.Repeat("d", 128),
+	}
+	out, err := v.Render()
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, want := range []string{`/gvisor.tar.zstd"`, `/vmconfig.tar.gz"`, `/runc"`} {
+		if !strings.Contains(out, `-o "${ARTIFACTS_DIR}`+want) {
+			t.Errorf("expected artifact download to ${ARTIFACTS_DIR}%s", want)
+		}
+	}
+
+	for _, test := range []struct{ name, typ string }{
+		{"../runc", "binary"},
+		{"runc", "tar.gz/../x"},
+		{"runc", `tar.gz"`},
+		{"runc", ""},
+	} {
+		v := baseVars("local")
+		v.Manifest.VMConfig.Dependencies = map[string]deps.Dependency{
+			test.name: {Version: "1", URL: "https://example/x", Type: test.typ, Digest: "sha256:" + strings.Repeat("b", 64)},
+		}
+		if _, err := v.Render(); err == nil {
+			t.Errorf("expected validation error for dependency %q type %q", test.name, test.typ)
+		}
+	}
+}
+
 // TestValidate_MissingManifest checks rendering requires a dependency manifest.
 func TestValidate_MissingManifest(t *testing.T) {
 	v := baseVars("local")
