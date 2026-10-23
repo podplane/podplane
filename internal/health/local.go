@@ -25,6 +25,7 @@ type LocalStartOptions struct {
 }
 
 // LocalStartChecks returns seed-specific local-start post-API health checks.
+// see also: internal/cmd/local_start.go newLocalStartCmd
 func LocalStartChecks(opts LocalStartOptions) []Check {
 	switch opts.SeedName {
 	case seeds.Minimal:
@@ -60,7 +61,7 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 				Kind:      "daemonsets",
 				Required:  true,
 				DependsOn: []string{"cilium"},
-				Expected:  20 * time.Second,
+				Expected:  15 * time.Second,
 				Timeout:   3 * time.Minute,
 				Run: func(ctx context.Context) Result {
 					return readSecretsStoreCSI(ctx, opts.KubeContext, opts.Kubeconfig)
@@ -72,7 +73,7 @@ func LocalStartChecks(opts LocalStartOptions) []Check {
 				Kind:      "deployment",
 				Required:  true,
 				DependsOn: []string{"secrets-store-csi-driver"},
-				Expected:  5 * time.Second,
+				Expected:  10 * time.Second,
 				Timeout:   3 * time.Minute,
 				Run: func(ctx context.Context) Result {
 					return readWorkload(ctx, opts.KubeContext, opts.Kubeconfig, "platform-podplane-operator", "deployment", "platform-podplane-operator")

@@ -126,13 +126,14 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 				return err
 			}
 			checks := health.LocalStartChecks(health.LocalStartOptions{SeedName: seedName, KubeContext: kubeContext, LocalIngressURL: manager.LocalIngressURL})
+			// see also: internal/health/local.go LocalStartChecks
 			items := []tui.TaskProgressItem{
 				{Key: "server", Name: "local server", Expected: 2 * time.Second, Timeout: 10 * time.Second},
 				{Key: "vm-image", Name: "VM image", Group: "VM", Exclude: vmExists, Success: "created", Expected: time.Second, Timeout: 30 * time.Second},
 				{Key: "vm", Name: "VM boot", Group: "VM", Success: "started", Expected: 2 * time.Second, Timeout: 30 * time.Second},
 				{Key: "cloud-init", Name: "cloud-init user-data", Group: "VM", Exclude: vmExists, Success: "completed", Expected: 12 * time.Second, Timeout: 10 * time.Minute},
 				{Key: "system-services", Name: "systemd services", Group: "VM", Success: "started", Expected: 2 * time.Second, Timeout: 2 * time.Minute},
-				{Key: "https-forward", Name: "local HTTPS server forwarder", Group: "VM", Success: "configured", Expected: time.Second, Timeout: 30 * time.Second},
+				{Key: "https-forward", Name: "local HTTPS proxy", Group: "VM", Success: "configured", Expected: time.Second, Timeout: 30 * time.Second},
 				{Key: "nstance-agent", Name: "nstance", Group: "VM", Success: "registered", Expected: 5 * time.Second, Timeout: 2 * time.Minute},
 				{Key: "netsy", Name: "netsy", Group: "VM", Success: "healthy", Expected: 7 * time.Second, Timeout: 2 * time.Minute},
 				{Key: "api-live", Name: "kubernetes live", Group: "VM", Success: "live", Expected: 7 * time.Second, Timeout: 2 * time.Minute},
