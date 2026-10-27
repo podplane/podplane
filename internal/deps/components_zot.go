@@ -18,6 +18,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+
+	"github.com/podplane/podplane/internal/filecache"
 )
 
 const zotRootDirectory = "."
@@ -216,6 +218,9 @@ func componentImageCached(destDir string, image ComponentImage) (bool, error) {
 		return false, fmt.Errorf("parse image %q: %w", image.Image, err)
 	}
 	repo := mirrorRepoFromChartImage(defaultMirrorPrefix, image.Image)
+	if !filecache.ValidPath(repo) {
+		return false, fmt.Errorf("invalid image repository path %q", repo)
+	}
 	repoDir := filepath.Join(destDir, zotRootDirectory, filepath.FromSlash(repo))
 	_, wantTag, chartDigest := splitImageRef(image.Image)
 	if wantTag != "" {
@@ -422,6 +427,9 @@ func writeDescriptorBlobs(ctx context.Context, repoDir string, repo name.Reposit
 
 // existingBlobComplete checks that a cached blob has the expected size and SHA-256 digest.
 func existingBlobComplete(path, digest string, size int64) (bool, error) {
+	if err := validateBlobDigest(digest); err != nil {
+		return false, err
+	}
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
 		return false, nil
@@ -470,6 +478,9 @@ func ociPlatformFromString(platform string) *ociPlatform {
 
 // descriptorBlobsComplete verifies a manifest descriptor and every referenced blob.
 func descriptorBlobsComplete(repoDir, digest string) (bool, error) {
+	if err := validateBlobDigest(digest); err != nil {
+		return false, err
+	}
 	body, err := os.ReadFile(blobPath(repoDir, digest))
 	if os.IsNotExist(err) {
 		return false, nil
@@ -544,6 +555,15 @@ func writeReader(path string, r io.ReadCloser) error {
 	return os.Rename(tmp, path)
 }
 
+// validateBlobDigest checks that a digest names a SHA-256 blob, not a file path.
+func validateBlobDigest(digest string) error {
+	hash, err := v1.NewHash(digest)
+	if err != nil || hash.Algorithm != "sha256" {
+		return fmt.Errorf("invalid SHA-256 blob digest %q", digest)
+	}
+	return nil
+}
+
 // blobPath returns zot's blob path for a digest inside a repository directory.
 func blobPath(repoDir, digest string) string {
 	return filepath.Join(repoDir, "blobs", "sha256", strings.TrimPrefix(digest, "sha256:"))
@@ -562,6 +582,11 @@ func readRepoIndex(repoDir string) (ociIndex, error) {
 	var index ociIndex
 	if err := json.Unmarshal(raw, &index); err != nil {
 		return ociIndex{}, err
+	}
+	for _, entry := range index.Manifests {
+		if err := validateBlobDigest(entry.Digest); err != nil {
+			return ociIndex{}, err
+		}
 	}
 	if index.SchemaVersion == 0 {
 		index.SchemaVersion = 2
@@ -678,7 +703,9 @@ func upsertIndexDescriptor(index *ociIndex, entry ociDescriptor) {
 		if existing.Annotations != nil {
 			existingRef = existing.Annotations["org.opencontainers.image.ref.name"]
 		}
-		if existing.Digest == entry.Digest || (refName != "" && existingRef == refName) {
+		// Different tags can point to the same digest. Keep each alias, and
+		// retain untagged descriptors used to resolve digest-pinned images.
+		if existingRef == refName && (existing.Digest == entry.Digest || refName != "") {
 			index.Manifests[i] = entry
 			return
 		}

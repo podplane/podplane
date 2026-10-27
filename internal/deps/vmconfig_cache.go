@@ -79,6 +79,11 @@ func (m *Manager) ReadCachedManifest(kind, arch string) (*Manifest, []byte, erro
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return nil, raw, fmt.Errorf("failed to parse cached manifest: %w", err)
 	}
+	for _, item := range manifest.Items() {
+		if err := validateCachePath(m.VMConfigArtifactsCacheDir(), m.VMConfigArtifactCachePath(item.Name, item.Dep)); err != nil {
+			return nil, raw, err
+		}
+	}
 	return &manifest, raw, nil
 }
 

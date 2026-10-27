@@ -30,6 +30,8 @@ func newDepsCmd(c *config.Config) *cobra.Command {
 
 	depsCmd.AddCommand(newDepsStatusCmd(manager, kind, arch))
 	depsCmd.AddCommand(newDepsDownloadCmd(manager, kind, arch))
+	depsCmd.AddCommand(newDepsBundleCmd(manager, kind, c.CacheDirectory()))
+	depsCmd.AddCommand(newDepsImportCmd(manager, kind, arch))
 	depsCmd.AddCommand(newDepsTFCmd(tfdeps.New(c.DepsCacheDir())))
 
 	return depsCmd

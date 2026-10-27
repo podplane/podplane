@@ -8,7 +8,13 @@ aliases:
 
 ## Overview
 
-Starts a local single-node cluster VM, creating it if it doesn't exist. Packages are automatically downloaded and cached if not already present. A local server (serving packages and hosting a fake OIDC server) is started in the background.
+Starts a local single-node cluster VM, creating it if it doesn't exist.
+
+Packages are automatically downloaded and cached if not already present.
+
+If you have already run `deps download` or `deps import`, use `--offline` to require a complete, verified local cache - missing dependencies cause an error instead of a download, and background dependency update checks are disabled. This does not restrict application network traffic.
+
+A local server (serving packages and hosting a fake OIDC server) is started in the background.
 
 Use `--console` to attach to the VM serial console after startup completes. This behaves like running [`podplane local console`](local-console.md) immediately after `local start`; press `Ctrl-]` to detach without stopping the VM.
 
@@ -46,4 +52,5 @@ podplane local start [flags]
 | `--data-disk-size string` | Persistent data disk capacity (default `256G` for a missing disk); explicitly set to grow a stopped VM's disk |
 | `--console` | Attach to the VM serial console after startup |
 | `--follow` | Stream cloud-init user-data logs while waiting for startup |
+| `--offline` | Verify the complete local dependency cache; never download missing dependencies or check for updates |
 | `--components string` | Platform components seeded when creating a local cluster: `none`, `minimal`, `platform`, or `agentic` (default). This flag is rejected when starting existing local clusters. |

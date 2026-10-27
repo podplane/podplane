@@ -44,6 +44,7 @@ func init() {
 	localStartCmd.Flags().StringVar(&localStartDataDiskSize, "data-disk-size", "256G", "Persistent data disk size in qemu-img syntax; existing disks only grow when explicitly set")
 	localStartCmd.Flags().BoolVar(&localStartConsole, "console", false, "Attach to the VM serial console after startup")
 	localStartCmd.Flags().BoolVar(&localStartFollow, "follow", false, "Stream cloud-init user-data logs while waiting for startup")
+	localStartCmd.Flags().BoolVar(&localStartOffline, "offline", false, "Require a complete dependency cache; never download dependencies or check for updates")
 	localStartCmd.Flags().StringVar(&localStartComponents, "components", seeds.Agentic, "Initial platform components seeded on first boot: none, minimal, platform, or agentic")
 }
 
@@ -53,6 +54,7 @@ var (
 	localStartDataDiskSize string
 	localStartConsole      bool
 	localStartFollow       bool
+	localStartOffline      bool
 	localStartComponents   string
 )
 
@@ -110,6 +112,7 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 			DataDiskSize:       dataDiskSize,
 			StreamUserdataLogs: localStartFollow,
 			Components:         localStartComponents,
+			Offline:            localStartOffline,
 			RunDownloadProgress: func(run func(progress func(deps.DownloadEvent)) error) error {
 				return tui.RunDownloadProgress("Downloading Podplane dependencies", run)
 			},

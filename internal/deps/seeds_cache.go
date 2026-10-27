@@ -76,6 +76,11 @@ func (m *Manager) ReadCachedSeedsManifest() (*SeedsManifest, []byte, error) {
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return nil, raw, fmt.Errorf("failed to parse cached seeds manifest: %w", err)
 	}
+	for name, snapshot := range manifest.Seeds.Snapshots {
+		if err := validateCachePath(m.SeedsSnapshotsCacheDir(), m.seedSnapshotCachePath(&manifest, name, snapshot)); err != nil {
+			return nil, raw, err
+		}
+	}
 	return &manifest, raw, nil
 }
 

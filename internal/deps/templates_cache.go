@@ -62,6 +62,17 @@ func (m *Manager) ReadCachedTemplatesManifest() (*TemplatesManifest, []byte, err
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return nil, raw, fmt.Errorf("failed to parse cached templates manifest: %w", err)
 	}
+	for _, chart := range manifest.Templates.Charts {
+		repo := filepath.Join(m.TemplatesChartsCacheDir(), filepath.FromSlash(templateChartRepo(chart)))
+		if err := validateCachePath(m.TemplatesChartsCacheDir(), repo); err != nil {
+			return nil, raw, err
+		}
+		if chart.ChartLayerDigest != "" {
+			if err := validateBlobDigest(chart.ChartLayerDigest); err != nil {
+				return nil, raw, err
+			}
+		}
+	}
 	return &manifest, raw, nil
 }
 

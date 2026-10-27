@@ -53,32 +53,30 @@ func QemuBinary(arch string) string {
 }
 
 // QemuArguments builds the command arguments to pass to qemu based on the
-// architecture specified. cloudInitDataISOPath is the path to a NoCloud
+// host OS and guest architecture specified. cloudInitDataISOPath is the path to a NoCloud
 // cidata ISO that delivers user-data to the guest. When directBoot is present,
 // QEMU loads the kernel/initrd directly and the qcow2 remains attached as the
 // virtio root disk. When monitor is true, qemu is also started with
 // "-monitor stdio" so the operator can interact with it from the terminal
 // that launched `podplane local start --monitor`.
-func QemuArguments(monitor bool, arch, vmImage, dataDisk, cloudInitDataISOPath, serialConsolePath, cpus, memory string, directBoot *vm.DirectBootOptions, ports []vm.PortForward) []string {
+func QemuArguments(monitor bool, hostOS, arch, vmImage, dataDisk, cloudInitDataISOPath, serialConsolePath, cpus, memory string, directBoot *vm.DirectBootOptions, ports []vm.PortForward) []string {
 	var biosImagePath string
 	var args []string
+	accel := "kvm"
+	if hostOS == "darwin" {
+		accel = "hvf"
+	}
 	switch arch {
 	case "amd64":
-		// TODO: detect correct path
-		biosImagePath = "/usr/share/OVMF/OVMF_CODE_4M.fd"
+		biosImagePath = "edk2-x86_64-code.fd"
 		args = []string{
-			// use virtualisation (not emulation) with KVM hardware
-			// acceleration. `virt` is an ARM machine type; x86_64 uses Q35.
-			"-machine", "q35,accel=kvm",
-			// networking: TODO
+			"-machine", "q35,accel=" + accel,
 		}
 	case "arm64":
-		// TODO: detect correct path
-		biosImagePath = "/opt/homebrew/share/qemu/edk2-aarch64-code.fd"
+		biosImagePath = "edk2-aarch64-code.fd"
 		args = []string{
-			// use virtualisation (not emulation) with Hypervisor Framework (HVF)
-			// hardware acceleration and support phyiscal memory over 4GB
-			"-machine", "virt,accel=hvf,highmem=on",
+			// Native acceleration and physical memory above 4 GB.
+			"-machine", "virt,accel=" + accel + ",highmem=on",
 			// networking via vmnet-shared/virtio-net-pci (host machine is NET_START)
 			// "-nic", fmt.Sprintf(
 			// 	"vmnet-shared,start-address=%s,end-address=%s,subnet=%s,subnet-mask=%s,mac=%s",
@@ -127,7 +125,7 @@ func QemuArguments(monitor bool, arch, vmImage, dataDisk, cloudInitDataISOPath, 
 		)
 	} else {
 		args = append(args,
-			// bios image for firmware/GRUB fallback boot
+			// Let QEMU resolve firmware in its relocatable share/qemu directory.
 			"-bios", biosImagePath,
 			// machine image (preserve existing fallback firmware boot path)
 			"-hda", vmImage,

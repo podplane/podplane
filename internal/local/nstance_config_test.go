@@ -15,10 +15,13 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/podplane/podplane/internal/deps"
@@ -340,6 +343,41 @@ func TestStartRefusesMixedNstanceMajorVersions(t *testing.T) {
 				RunDownloadProgress: func(func(func(deps.DownloadEvent)) error) error { return os.ErrNotExist },
 			}); err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("mixed-version startup: %v", err)
+			}
+		})
+	}
+}
+
+// TestStartOfflineRefusesMissingDependenciesWithoutNetwork checks that absent
+// or corrupt cached manifests fail startup without contacting the dependency service.
+func TestStartOfflineRefusesMissingDependenciesWithoutNetwork(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "offline", http.StatusNotFound)
+	}))
+	defer server.Close()
+	for _, corrupt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("corrupt=%t", corrupt), func(t *testing.T) {
+			dir := t.TempDir()
+			cache := filepath.Join(dir, "deps")
+			if corrupt {
+				manager := deps.NewManager(server.URL, cache)
+				if err := manager.WriteCachedManifest("knc", "arm64", []byte(`{"vmconfig":`)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			local := &Local{
+				dataDir: dir, runtimeDir: dir, clusterID: "demo", instanceKind: "knc", arch: "arm64",
+				depsBaseURL: server.URL, depsCacheDir: cache,
+				vm: qemu.NewQemu(qemu.Options{DataDir: dir, RuntimeDir: dir, ClusterID: "demo", Arch: "arm64"}),
+			}
+			path, err := local.Start(StartOptions{Offline: true})
+			if path != "" || err == nil || !strings.Contains(err.Error(), "podplane deps import") || !strings.Contains(err.Error(), "podplane deps download") {
+				t.Fatalf("offline startup = %q, %v; want import and download instructions before startup", path, err)
+			}
+			if requests.Load() != 0 {
+				t.Fatal("offline startup contacted the dependency service")
 			}
 		})
 	}

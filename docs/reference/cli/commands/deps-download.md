@@ -10,6 +10,8 @@ aliases:
 
 Force-downloads the latest dependency versions into the local cache.
 
+> For USB distribution and air-gapped installs, use [deps bundle](deps-bundle.md) on an online machine and [deps import](deps-import.md) on the recipient instead. `deps download` always remains an online refresh operation.
+
 By default, `deps download` prepares the cache for `podplane local start`: provider-neutral dependencies, core components, the addon component images needed by the default `agentic` seed, and the `openbao` and `local` provider entries.
 
 - Use `--providers aws`, `--providers aws,google`, or `--providers all` to select provider-specific entries instead of `openbao,local`.

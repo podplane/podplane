@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/podplane/podplane/internal/cloudinit"
 	"github.com/podplane/podplane/internal/execwrap"
@@ -77,8 +78,27 @@ ethernets:
 	_, _ = fmt.Fprintln(output, "Starting VM...")
 	cmd := execwrap.Command(
 		QemuBinary(m.arch),
-		QemuArguments(monitor, m.arch, vmImage, m.DataDiskPath(), cloudInitDataISO, serialConsolePath, cpus, memory, boot, ports)...,
+		QemuArguments(monitor, runtime.GOOS, m.arch, vmImage, m.DataDiskPath(), cloudInitDataISO, serialConsolePath, cpus, memory, boot, ports)...,
 	)
+	// Portable QEMU includes edk2 beside its executable. Keep the existing
+	// OVMF fallback for Debian and Debian-based hosts whose QEMU installations do not.
+	if boot == nil && runtime.GOOS == "linux" && m.arch == "amd64" {
+		binary, err := filepath.EvalSymlinks(cmd.Path)
+		if err == nil {
+			bundled := filepath.Join(filepath.Dir(binary), "..", "share", "qemu", "edk2-x86_64-code.fd")
+			if _, err := os.Stat(bundled); os.IsNotExist(err) {
+				const ovmf = "/usr/share/OVMF/OVMF_CODE_4M.fd"
+				if _, err := os.Stat(ovmf); err == nil {
+					for i, arg := range cmd.Args {
+						if arg == "-bios" {
+							cmd.Args[i+1] = ovmf
+							break
+						}
+					}
+				}
+			}
+		}
+	}
 	cmd.Stdout = output
 	cmd.Stderr = output
 	if err := cmd.Start(); err != nil {

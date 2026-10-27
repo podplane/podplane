@@ -14,7 +14,7 @@ import (
 // TestQemuArgumentsDirectBoot checks kernel boot, virtio disks, and serial socket arguments.
 func TestQemuArgumentsDirectBoot(t *testing.T) {
 	boot := &vm.DirectBootOptions{KernelPath: "/cache/vmlinuz", InitrdPath: "/cache/initrd", Cmdline: "root=UUID=abc ro"}
-	args := QemuArguments(false, "arm64", "/vms/os.qcow2", "/vms/data.qcow2", "/vms/cidata.iso", "/run/vms/console.sock", "2", "4G", boot, nil)
+	args := QemuArguments(false, "darwin", "arm64", "/vms/os.qcow2", "/vms/data.qcow2", "/vms/cidata.iso", "/run/vms/console.sock", "2", "4G", boot, nil)
 
 	assertContainsPair(t, args, "-kernel", "/cache/vmlinuz")
 	assertContainsPair(t, args, "-initrd", "/cache/initrd")
@@ -35,7 +35,7 @@ func TestQemuArgumentsDirectBoot(t *testing.T) {
 
 // TestQemuArgumentsFirmwareFallback checks firmware boot omits direct-boot and QMP options.
 func TestQemuArgumentsFirmwareFallback(t *testing.T) {
-	args := QemuArguments(false, "arm64", "/vms/os.qcow2", "/vms/data.qcow2", "/vms/cidata.iso", "/run/vms/console.sock", "2", "4G", nil, nil)
+	args := QemuArguments(false, "darwin", "arm64", "/vms/os.qcow2", "/vms/data.qcow2", "/vms/cidata.iso", "/run/vms/console.sock", "2", "4G", nil, nil)
 
 	if !slices.Contains(args, "-bios") {
 		t.Fatal("firmware fallback should include -bios")
@@ -63,18 +63,30 @@ func TestQemuArgumentsUsesSelectedLocalPorts(t *testing.T) {
 		{HostBindAddress: "127.0.0.1", HostPort: 15001, GuestPort: 5000},
 		{HostBindAddress: "127.0.0.1", HostPort: 18443, GuestPort: 443},
 	}
-	args := QemuArguments(false, "arm64", "/vms/os.qcow2", "/vms/data.qcow2", "/vms/cidata.iso", "/run/vms/console.sock", "2", "4G", nil, ports)
+	args := QemuArguments(false, "darwin", "arm64", "/vms/os.qcow2", "/vms/data.qcow2", "/vms/cidata.iso", "/run/vms/console.sock", "2", "4G", nil, ports)
 
 	assertContainsPair(t, args, "-nic", "user,hostfwd=tcp:127.0.0.1:3222-:22,hostfwd=tcp:127.0.0.1:16443-:6443,hostfwd=tcp:127.0.0.1:18081-:8080,hostfwd=tcp:127.0.0.1:15001-:5000,hostfwd=tcp:127.0.0.1:18443-:443")
 }
 
-// TestQemuArgumentsUsesQ35ForAMD64 checks x86 uses Q35 with KVM and a virtio NIC.
+// TestQemuArgumentsUsesQ35ForAMD64 checks x86 uses Q35 and host-native acceleration.
 func TestQemuArgumentsUsesQ35ForAMD64(t *testing.T) {
-	args := QemuArguments(false, "amd64", "/vms/os.qcow2", "/vms/data.qcow2", "/vms/cidata.iso", "/run/vms/console.sock", "2", "4G", nil, nil)
-
-	assertContainsPair(t, args, "-machine", "q35,accel=kvm")
-	assertContainsPair(t, args, "-nic", "user,model=virtio-net-pci")
-	assertNotContains(t, args, "virt,accel=kvm,highmem=on")
+	for _, tc := range []struct{ os, arch, machine string }{
+		{"linux", "amd64", "q35,accel=kvm"},
+		{"darwin", "amd64", "q35,accel=hvf"},
+		{"linux", "arm64", "virt,accel=kvm,highmem=on"},
+		{"darwin", "arm64", "virt,accel=hvf,highmem=on"},
+	} {
+		t.Run(tc.os+"-"+tc.arch, func(t *testing.T) {
+			args := QemuArguments(false, tc.os, tc.arch, "/vms/os.qcow2", "/vms/data.qcow2", "/vms/cidata.iso", "/run/vms/console.sock", "2", "4G", nil, nil)
+			assertContainsPair(t, args, "-machine", tc.machine)
+			if tc.arch == "amd64" {
+				assertContainsPair(t, args, "-nic", "user,model=virtio-net-pci")
+				assertContainsPair(t, args, "-bios", "edk2-x86_64-code.fd")
+			} else {
+				assertContainsPair(t, args, "-bios", "edk2-aarch64-code.fd")
+			}
+		})
+	}
 }
 
 // assertContainsPair fails unless an option and its value occur consecutively.

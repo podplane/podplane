@@ -71,6 +71,18 @@ func TestLocalComponentsSourceUsesSemverForReleasedManifest(t *testing.T) {
 	if source.Ref.Branch != "" {
 		t.Fatalf("source.Ref.Branch = %q, want empty", source.Ref.Branch)
 	}
+
+	// Offline kits pin the chart commit to their cached images. Do not widen
+	// that pin to a range that could select a different release from the mirror.
+	commit := strings.Repeat("a", 40)
+	manifest := fmt.Sprintf(`{"components":{"version":"1.2.1","source":{"url":"https://github.com/podplane/components.git","ref":{"commit":%q}}}}`, commit)
+	if err := manager.WriteCachedComponentsManifest([]byte(manifest)); err != nil {
+		t.Fatal(err)
+	}
+	source, err = localComponentsSource(manager, clusterconfig.Seed{Name: seeds.Agentic, Version: testSeedVersion}, "10.0.2.15")
+	if err != nil || source.Ref.Commit != commit || source.Ref.Semver != "" {
+		t.Fatalf("lost offline source pin: %+v, %v", source, err)
+	}
 }
 
 // TestEnsureInitialNetsySnapshotNoneSkips verifies that seed name "none" leaves

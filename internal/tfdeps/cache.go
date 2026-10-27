@@ -20,8 +20,10 @@ import (
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclparse"
-	"github.com/podplane/podplane/internal/tfgen"
 	"github.com/zclconf/go-cty/cty"
+
+	"github.com/podplane/podplane/internal/filecache"
+	"github.com/podplane/podplane/internal/tfgen"
 )
 
 const (
@@ -156,7 +158,7 @@ func (c *Cache) download(ctx context.Context, engine Engine, platforms []string,
 		return fmt.Errorf("install Nstance module version %s: %w", moduleVersion, err)
 	}
 	if updateCurrent {
-		if err := copyFileAtomic(filepath.Join(stage, lockFileName), filepath.Join(c.root, lockFileName)); err != nil {
+		if err := filecache.Copy(filepath.Join(stage, lockFileName), filepath.Join(c.root, lockFileName)); err != nil {
 			return fmt.Errorf("retain provider lock information: %w", err)
 		}
 		versionPath := filepath.Join(c.root, modulesDirName, nstanceDirName, currentVersionFile)
@@ -331,7 +333,7 @@ func (c *Cache) configureVersion(clusterDir, version, providerKind string, prese
 		return Configuration{}, err
 	}
 	if !preserveLock {
-		if err := copyFileAtomic(filepath.Join(c.root, lockFileName), filepath.Join(clusterDir, lockFileName)); err != nil {
+		if err := filecache.Copy(filepath.Join(c.root, lockFileName), filepath.Join(clusterDir, lockFileName)); err != nil {
 			return Configuration{}, fmt.Errorf("write provider lock information: %w", err)
 		}
 	}
@@ -655,40 +657,18 @@ func installModuleVersion(stage, dst string) error {
 	return os.Rename(stage, dst)
 }
 
-// copyFileAtomic atomically copies src to dst.
-func copyFileAtomic(src, dst string) error {
-	raw, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	info, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-	return writeFileAtomic(dst, raw, info.Mode().Perm())
-}
-
 // writeFileAtomic replaces path with content without exposing a partial file.
 func writeFileAtomic(path string, content []byte, mode fs.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-")
+	root, err := os.OpenRoot(filepath.Dir(path))
 	if err != nil {
 		return err
 	}
-	tmpPath := tmp.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
+	defer func() { _ = root.Close() }()
+	return filecache.WriteFile(root, filepath.Base(path), mode, func(w io.Writer) error {
+		_, err := w.Write(content)
 		return err
-	}
-	if _, err := tmp.Write(content); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	})
 }

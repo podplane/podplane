@@ -39,6 +39,7 @@ type StartOptions struct {
 	DataDiskSize        string // Empty means --data-disk-size was omitted.
 	StreamUserdataLogs  bool
 	Components          string
+	Offline             bool
 	RunDownloadProgress func(run func(progress func(deps.DownloadEvent)) error) error
 	Progress            tui.TaskProgress
 }
@@ -94,7 +95,16 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	arch := m.arch
 
 	providers := []string{deps.LocalProviders}
-	manifest, err := depsManager.Verify(kind, arch, providers)
+	var manifest *deps.Manifest
+	var err error
+	if opts.Offline {
+		manifest, err = depsManager.VerifyOffline(kind, arch, providers, components.AgenticAddons())
+		if err != nil {
+			return "", fmt.Errorf("offline dependencies unavailable; run `podplane deps import <bundle-directory>` or `podplane deps download` while online: %w", err)
+		}
+	} else {
+		manifest, err = depsManager.Verify(kind, arch, providers)
+	}
 	if errors.Is(err, deps.ErrNotCached) || errors.Is(err, deps.ErrIncomplete) {
 		download := func(progress func(deps.DownloadEvent)) error {
 			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: providers})
@@ -118,6 +128,9 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	}
 	registryEntries, registryReadErr := os.ReadDir(depsManager.RegistryCacheDir())
 	if registryReadErr != nil || len(registryEntries) == 0 {
+		if opts.Offline {
+			return "", fmt.Errorf("offline registry cache is missing or empty; run `podplane deps import <bundle-directory>` or `podplane deps download` while online")
+		}
 		download := func(progress func(deps.DownloadEvent)) error {
 			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: providers})
 		}
@@ -137,7 +150,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	// the manifest is fresh, so we don't pay for goroutine setup or HTTP.
 	nudgeCh := make(chan string, 1)
 	close(nudgeCh) // default: no nudge
-	if depsManager.IsStale(kind, arch, 7*24*time.Hour) {
+	if !opts.Offline && depsManager.IsStale(kind, arch, 7*24*time.Hour) {
 		nudgeCh = make(chan string, 1)
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -838,10 +851,11 @@ func localComponentsSource(depsManager *deps.Manager, seed clusterconfig.Seed, n
 
 // localClusterComponentsSourceRef converts the manifest source ref into the
 // ref Podplane should write into cluster config for Flux.
-// Released manifest versions are converted to caret semver ranges.
+// Released manifest versions are converted to caret semver ranges unless an
+// offline kit has pinned the source commit to match its cached images.
 func localClusterComponentsSourceRef(ref deps.ComponentsSourceRef, version string) clusterconfig.ComponentsSourceRef {
 	clusterRef := clusterconfig.ComponentsSourceRef{Branch: ref.Branch, Tag: ref.Tag, Semver: ref.Semver, Commit: ref.Commit}
-	if version != "" && version != "dev" {
+	if ref.Commit == "" && version != "" && version != "dev" {
 		clusterRef = clusterconfig.ComponentsSourceRef{Semver: "^" + version}
 	}
 	return clusterRef
