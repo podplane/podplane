@@ -104,6 +104,12 @@ func TestDependencyParseDigest(t *testing.T) {
 			errContains: "invalid sha256 hex length",
 		},
 		{
+			name:        "sha256 containing path traversal",
+			digest:      "sha256:../" + validSHA256Hex[3:],
+			wantErr:     true,
+			errContains: "invalid hex checksum",
+		},
+		{
 			name:        "sha512 with too-short hex",
 			digest:      "sha512:abc123",
 			wantErr:     true,

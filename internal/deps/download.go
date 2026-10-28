@@ -304,7 +304,7 @@ func (m *Manager) Download(kind, arch string, opts DownloadOptions) error {
 		}
 
 		dest := m.VMConfigArtifactCachePath(it.Name, it.Dep)
-		exists, err := filecache.Exists(dest, algo, hex)
+		exists, err := m.reuseVMConfigArtifact(dest, algo, hex, opts.DryRun)
 		if err != nil {
 			return fmt.Errorf("failed to check cache for %s: %w", it.Name, err)
 		}
@@ -652,6 +652,9 @@ func (m *Manager) downloadPending(pending []pendingDownload, concurrency int, cl
 						emit(DownloadEvent{Type: DownloadEventProgress, Name: job.Item.Name, Path: job.Dest, Current: current, Total: total})
 					},
 				})
+				if err == nil {
+					err = filecache.Copy(job.Dest, m.vmconfigDownloadCachePath(job.Algo, job.Checksum))
+				}
 				if err != nil {
 					wrapped := fmt.Errorf("failed to download %s: %w", job.Item.Name, err)
 					if setErr(wrapped) {

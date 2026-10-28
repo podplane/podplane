@@ -268,8 +268,21 @@ func (b tools) metadata(ctx context.Context, url string) ([]byte, error) {
 // download keeps artifacts independently of staging. For older upstream assets
 // without a published digest, the first download establishes a local checksum;
 // that detects later cache damage, but is not upstream authentication.
-func (b tools) download(ctx context.Context, url, digest string) (string, error) {
+func (b tools) download(ctx context.Context, url, digest string) (_ string, err error) {
 	filename := filepath.Join(b.cacheDir, "tools", fmt.Sprintf("%x", sha256.Sum256([]byte(url))), path.Base(url))
+	state := deps.DownloadEventDone
+	if b.progress != nil {
+		b.progress(deps.DownloadEvent{Type: deps.DownloadEventChecking, Name: path.Base(url)})
+		defer func() {
+			event := deps.DownloadEvent{Type: state, Name: path.Base(url), Err: err}
+			if err != nil {
+				event.Type = deps.DownloadEventFailed
+			} else if info, statErr := os.Stat(filename); statErr == nil {
+				event.Current, event.Total = info.Size(), info.Size()
+			}
+			b.progress(event)
+		}()
+	}
 	algo, sum := "sha256", ""
 	if digest != "" {
 		var ok bool
@@ -281,6 +294,7 @@ func (b tools) download(ctx context.Context, url, digest string) (string, error)
 		sum = strings.TrimSpace(string(raw))
 	}
 	if cached, _ := filecache.Exists(filename, algo, sum); cached {
+		state = deps.DownloadEventCached
 		return filename, nil
 	}
 	// A mismatching local checksum means cache damage, not a reason to trust a

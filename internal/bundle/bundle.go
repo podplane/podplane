@@ -24,23 +24,6 @@ import (
 	"github.com/podplane/podplane/internal/filecache"
 )
 
-const format = 1
-const manifestFilename = "podplane-bundle.json"
-
-// Manifest is the generated bundle inventory, not a dependency manifest.
-type Manifest struct {
-	Format          int               `json:"format"`
-	CreatedAt       time.Time         `json:"createdAt"`
-	Platform        string            `json:"platform"`
-	PodplaneVersion string            `json:"podplaneVersion"`
-	Kind            string            `json:"kind"`
-	Arch            string            `json:"arch"`
-	Providers       []string          `json:"providers"`
-	Addons          []string          `json:"addons"`
-	Tools           map[string]string `json:"tools"`
-	Files           []filecache.File  `json:"files"`
-}
-
 // Options selects released host tools and guest dependencies.
 type Options struct {
 	Platforms []string
@@ -183,14 +166,19 @@ func prepare(ctx context.Context, cache *deps.Manager, stage, kind string, archs
 			if _, err := selected.VerifyOffline(kind, arch, opts.Providers, opts.Addons); err != nil {
 				return fmt.Errorf("verify %s: %w", platform, err)
 			}
-			files, err := filecache.Inventory(directory)
+			root, err := os.OpenRoot(directory)
+			if err != nil {
+				return err
+			}
+			files, err := contentsInventory(root)
+			_ = root.Close()
 			if err != nil {
 				return err
 			}
 			manifest := Manifest{
 				Format: format, Platform: platform, PodplaneVersion: versions[platform]["podplane"], CreatedAt: time.Now().UTC(),
 				Kind: kind, Arch: arch, Providers: opts.Providers, Addons: opts.Addons,
-				Tools: versions[platform], Files: files,
+				Tools: versions[platform], ContentsSHA256: contentsChecksum(files),
 			}
 			if err := filecache.WriteJSON(filepath.Join(directory, manifestFilename), manifest); err != nil {
 				return err

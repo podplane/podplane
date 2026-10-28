@@ -20,7 +20,7 @@ Each bundle contains, for example:
 
 ```text
 podplane-macos-arm64/
-  podplane-bundle.json # creation time, platform, versions, selection and file checksums
+  podplane-bundle.json # creation time, platform, versions, selection and contents checksum
   bin/              # podplane, kubectl, helm, mkcert, qemu-img, native qemu-system
   lib/              # QEMU's non-system libraries, where needed
   share/            # QEMU firmware and bundled licenses
@@ -28,13 +28,13 @@ podplane-macos-arm64/
   registry/         # Podplane OCI images for the selected architecture
 ```
 
-The existing vmconfig, components, templates and seeds manifests remain under `deps/`, in the normal cache layout. `podplane-bundle.json` records the assembled bundle; it does not replace those manifests or require a separate publication process.
+Keep the bundle directory intact: adding, removing, renaming or editing files will cause `deps import` to reject it. Permission changes from USB filesystems and macOS bookkeeping files (`.DS_Store`, `._*`) are ignored.
 
 Preparation reuses verified files from your existing dependency cache and downloads missing artifacts there. Host tools come directly from published upstream releases, defaulting to the latest stable releases, and are cached separately under `tools/`. QEMU comes from `jzombie/lab-qemu-portable` on Apple Silicon and `hermeticbuild/qemu-prebuilt` on Linux. The selection matches `deps download`, including agentic addons.
 
 Bundles are assembled directly in a single `bundles/` staging directory in Podplane's XDG-aware cache (`~/.podplane/cache/bundles` on macOS, `$XDG_CACHE_HOME/podplane/bundles` or `~/.cache/podplane/bundles` on Linux), without versioned or hashed subdirectories. Only after preparation succeeds are the assembled directories copied to the destination. Staging is not stored on the thumbdrive.
 
-Staging is retained on failure and, by default, after success. Repeat the command to resume an interrupted copy, or change only the destination to write another drive with the same prepared versions. Matching destination files are skipped, incomplete or damaged files are replaced, and `podplane-bundle.json` is published last. A different bundle or an unrelated nonempty directory is not overwritten.
+The staging directory is retained on failure and, by default, after success. Repeat the command to resume an interrupted copy, or change only the destination to write another drive with the same prepared versions. Matching destination files are skipped, incomplete or damaged files are replaced, and `podplane-bundle.json` is published last. A different bundle or an unrelated nonempty directory is not overwritten.
 
 Use `--cleanup` to remove staging after a successful copy; dependency and host-tool downloads remain cached. Use `--refresh` to replace the staged selection or resolve current releases again, reusing cached downloads. Changing platforms, providers, addons, or the CLI release requires `--refresh` when staging is already complete. Copy refreshed bundles to a fresh destination. After a failed `--refresh` run, omit that flag to resume the prepared copy.
 

@@ -5,6 +5,7 @@
 package deps
 
 import (
+	"encoding/hex"
 	"fmt"
 	"path"
 	"slices"
@@ -292,7 +293,7 @@ var digestHexLengths = map[string]int{
 // ParseDigest returns the algorithm name and hex checksum from the Digest
 // field. It returns an error if the digest is missing, malformed, or uses
 // an unsupported algorithm. Supported algorithms: sha256, sha512.
-func (d Dependency) ParseDigest() (algo string, hex string, err error) {
+func (d Dependency) ParseDigest() (algo string, checksum string, err error) {
 	if d.Digest == "" {
 		return "", "", fmt.Errorf("missing digest")
 	}
@@ -306,6 +307,9 @@ func (d Dependency) ParseDigest() (algo string, hex string, err error) {
 	}
 	if len(parts[1]) != expectedLen {
 		return "", "", fmt.Errorf("invalid %s hex length in digest %q", parts[0], d.Digest)
+	}
+	if _, err := hex.DecodeString(parts[1]); err != nil {
+		return "", "", fmt.Errorf("invalid hex checksum in digest %q: %w", d.Digest, err)
 	}
 	return parts[0], parts[1], nil
 }

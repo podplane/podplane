@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/podplane/podplane/internal/filecache"
 )
 
 // manifestFilename returns the canonical vmconfig manifest filename, e.g.
@@ -62,6 +64,35 @@ func (m *Manager) VMConfigHistoricalManifestCachePath(kind, arch string, raw []b
 // Download and Verify use it.
 func (m *Manager) VMConfigArtifactCachePath(name string, dep Dependency) string {
 	return filepath.Join(m.VMConfigArtifactsCacheDir(), name, dep.Version, path.Base(dep.URL))
+}
+
+// vmconfigDownloadCachePath retains each validated digest independently of the
+// active artifact's architecture-dependent contents and stable serving path.
+func (m *Manager) vmconfigDownloadCachePath(algo, checksum string) string {
+	return filepath.Join(m.VMConfigCacheDir(), "downloads", algo, checksum)
+}
+
+// reuseVMConfigArtifact restores a retained download or retains an existing
+// artifact before another architecture can replace it. Dry runs only inspect.
+func (m *Manager) reuseVMConfigArtifact(dest, algo, checksum string, dryRun bool) (bool, error) {
+	stored := m.vmconfigDownloadCachePath(algo, checksum)
+	retained, err := filecache.Exists(stored, algo, checksum)
+	if err != nil {
+		return false, err
+	}
+	active, err := filecache.Exists(dest, algo, checksum)
+	if err != nil {
+		return false, err
+	}
+	if dryRun || retained == active {
+		return retained || active, nil
+	}
+	if retained {
+		err = filecache.Copy(stored, dest)
+	} else {
+		err = filecache.Copy(dest, stored)
+	}
+	return err == nil, err
 }
 
 // ReadCachedManifest reads and parses the cached manifest JSON. It returns

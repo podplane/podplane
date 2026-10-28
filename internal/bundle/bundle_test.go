@@ -103,7 +103,7 @@ func TestBundleImportRoundTrip(t *testing.T) {
 			write(deps.Manifest{VMConfig: deps.VMConfig{
 				Kind: "knc", OS: deps.OSInfo{Arch: arch, Image: deps.Dependency{URL: base + "/image-" + arch, Version: "1", Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(body)), Size: int64(len(body))}},
 				// Both architectures have the same version and URL basename.
-				Dependencies: map[string]deps.Dependency{"kube-apiserver": {URL: base + "/bin/" + arch + "/kube-apiserver", Version: "1", Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(binary)), Size: int64(len(binary))}},
+				Dependencies: map[string]deps.Dependency{"kube-apiserver": {URL: base + "/bin/" + arch + "/kube-apiserver", Version: "1", Digest: fmt.Sprintf("sha512:%x", sha512.Sum512(binary)), Size: int64(len(binary))}},
 			}})
 		case name == "kube-apiserver":
 			_, _ = w.Write([]byte("kube-apiserver-" + filepath.Base(filepath.Dir(r.URL.Path))))
@@ -151,14 +151,30 @@ func TestBundleImportRoundTrip(t *testing.T) {
 	opts := Options{Platforms: platforms, CacheDir: t.TempDir(), Client: client, Cleanup: true}
 	copyCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	states := map[string]deps.DownloadEvent{}
+	var statesMu sync.Mutex
 	opts.Progress = func(event deps.DownloadEvent) {
-		if event.Name == "bin/mkcert" && event.Type == deps.DownloadEventChecking {
+		statesMu.Lock()
+		defer statesMu.Unlock()
+		if event.Name != "" {
+			states[event.Name] = event
+		}
+		if event.Name == "Copy podplane-linux-amd64" && event.Type == deps.DownloadEventProgress {
 			cancel() // Interrupt copying, not downloads or preparation.
 		}
 	}
 	stage, err := Create(copyCtx, m, output, "knc", opts)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("interrupted copy = %v; want cancellation after preparation", err)
+	}
+	for name, event := range states {
+		if name == "Copy podplane-linux-amd64" {
+			if event.Type != deps.DownloadEventFailed || !errors.Is(event.Err, context.Canceled) {
+				t.Fatalf("cancelled copy left stale progress: %+v", event)
+			}
+		} else if event.Type != deps.DownloadEventDone && event.Type != deps.DownloadEventCached {
+			t.Fatalf("completed download left stale progress: %+v", event)
+		}
 	}
 	if stage != filepath.Join(opts.CacheDir, "bundles") {
 		t.Fatalf("staging is not the single local bundles directory: %s", stage)
@@ -179,9 +195,26 @@ func TestBundleImportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	offline = true
-	opts.Progress, opts.Cleanup = nil, false
+	opts.Cleanup = false
+	states = map[string]deps.DownloadEvent{}
+	opts.Progress = func(event deps.DownloadEvent) {
+		statesMu.Lock()
+		defer statesMu.Unlock()
+		if event.Name != "" {
+			states[event.Name] = event
+		}
+	}
 	if _, err := Create(ctx, m, output, "knc", opts); err != nil {
 		t.Fatalf("offline copy resume failed: %v", err)
+	}
+	if len(states) != len(platforms) {
+		t.Fatalf("copy should report one row per platform, got %d", len(states))
+	}
+	for _, platform := range platforms {
+		event := states["Copy podplane-"+platform]
+		if event.Type != deps.DownloadEventDone || event.Total <= 0 || event.Current != event.Total {
+			t.Fatalf("copy did not complete its byte progress: %+v", event)
+		}
 	}
 	after, err := os.Stat(helmPath)
 	if err != nil || !after.ModTime().Equal(before.ModTime()) {
@@ -235,6 +268,15 @@ func TestBundleImportRoundTrip(t *testing.T) {
 			t.Fatalf("cached host artifact redownloaded after staging cleanup: %s", url)
 		}
 	}
+	opts.Refresh = true
+	if _, err := Create(ctx, m, t.TempDir(), "knc", opts); err != nil {
+		t.Fatal(err)
+	}
+	for _, arch := range []string{"arm64", "amd64"} {
+		if got := requests["/bin/"+arch+"/kube-apiserver"]; got != 1 {
+			t.Fatalf("%s artifact downloaded %d times across rebuilds, want 1", arch, got)
+		}
+	}
 	server.Close() // Import must work after every source is unavailable.
 	registryServer.Close()
 	if requests["/agentic.netsy"] != 1 || requests["/image-arm64"] != 1 || requests["/image-amd64"] != 1 {
@@ -253,6 +295,9 @@ func TestBundleImportRoundTrip(t *testing.T) {
 		}
 		if inventory.CreatedAt.IsZero() || inventory.Platform != platform || inventory.Tools["podplane"] != "v1.2.3" || inventory.Tools["mkcert"] != "v1.4.4" {
 			t.Fatalf("incorrect bundle metadata: %+v", inventory)
+		}
+		if inventory.Format != 2 || len(inventory.ContentsSHA256) != 64 || bytes.Contains(raw, []byte(`"files"`)) {
+			t.Fatalf("bundle should contain one checksum, not a file listing: %s", raw)
 		}
 		if platform == "macos-amd64" {
 			if _, bundled := inventory.Tools["qemu"]; bundled {
@@ -290,8 +335,13 @@ func TestBundleImportRoundTrip(t *testing.T) {
 		}
 		dest := deps.NewManager("http://127.0.0.1:1", filepath.Join(t.TempDir(), "deps"))
 		for range 2 {
-			if err := Import(ctx, dest, copied, "knc", arch, nil); err != nil {
+			states = map[string]deps.DownloadEvent{}
+			if err := Import(ctx, dest, copied, "knc", arch, opts.Progress); err != nil {
 				t.Fatal(err)
+			}
+			event := states["Import podplane-"+platform]
+			if len(states) != 1 || event.Type != deps.DownloadEventDone || event.Current != event.Total || event.Total <= 0 {
+				t.Fatalf("import should complete one aggregate row: %+v", states)
 			}
 		}
 		manifest, err := dest.VerifyOffline("knc", arch, nil, nil)
@@ -495,18 +545,23 @@ func testImportKit(t *testing.T, arch string) (string, deps.ComponentImage) {
 			t.Fatal(err)
 		}
 	}
-	files, err := filecache.Inventory(kit)
+	root, err := os.OpenRoot(kit)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := filecache.WriteJSON(filepath.Join(kit, "podplane-bundle.json"), Manifest{Format: 1, Platform: "linux-" + arch, PodplaneVersion: "v1.2.3", Kind: "knc", Arch: arch, Files: files}); err != nil {
+	defer func() { _ = root.Close() }()
+	files, err := contentsInventory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := filecache.WriteJSON(filepath.Join(kit, "podplane-bundle.json"), Manifest{Format: format, Platform: "linux-" + arch, PodplaneVersion: "v1.2.3", Kind: "knc", Arch: arch, ContentsSHA256: contentsChecksum(files)}); err != nil {
 		t.Fatal(err)
 	}
 	return kit, image
 }
 
 // TestImportPreservesOtherArchitecturesAndRejectsCorruption checks that imports
-// retain existing images and reject damaged files before publishing manifests.
+// retain images and reject damage before publishing manifests.
 func TestImportPreservesOtherArchitecturesAndRejectsCorruption(t *testing.T) {
 	ctx := context.Background()
 	armKit, arm := testImportKit(t, "arm64")
@@ -539,10 +594,106 @@ func TestImportPreservesOtherArchitecturesAndRejectsCorruption(t *testing.T) {
 	}
 }
 
-// TestImportRejectsUnsafeOrIncompatibleInventory checks that invalid paths,
-// files and bundle metadata cannot publish a cache manifest.
-func TestImportRejectsUnsafeOrIncompatibleInventory(t *testing.T) {
-	for _, scenario := range []string{"escape", "duplicate", "symlink", "arch", "format", "missing"} {
+// TestCompactBundleIntegrity checks format 2's whole-tree integrity and stable
+// executable requirements across filesystems with different permission bits.
+func TestCompactBundleIntegrity(t *testing.T) {
+	for _, scenario := range []string{"valid", "permissions", "finder-metadata", "changed", "missing", "extra", "renamed", "symlink", "directory-symlink", "bad-checksum"} {
+		t.Run(scenario, func(t *testing.T) {
+			directory, _ := testImportKit(t, "arm64")
+			binary := filepath.Join(directory, "bin/tool")
+			if err := os.MkdirAll(filepath.Dir(binary), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(binary, []byte("tool"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = root.Close() }()
+			files, err := contentsInventory(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			manifest := Manifest{Format: 2, Platform: "linux-arm64", Kind: "knc", Arch: "arm64", ContentsSHA256: contentsChecksum(files)}
+			switch scenario {
+			case "finder-metadata":
+				for _, name := range []string{".DS_Store", "bin/.DS_Store", "bin/._tool"} {
+					if err := os.WriteFile(filepath.Join(directory, name), []byte("Finder metadata"), 0644); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case "permissions":
+				for _, file := range files {
+					mode := os.FileMode(0755)
+					if file.Executable {
+						mode = 0644
+					}
+					if err := os.Chmod(filepath.Join(directory, file.Path), mode); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case "changed":
+				err = os.WriteFile(binary, []byte("evil"), 0755) // Same size, different bytes.
+			case "missing":
+				err = os.Remove(binary)
+			case "extra":
+				err = os.WriteFile(filepath.Join(directory, "bin/extra"), []byte("tool"), 0755)
+			case "renamed":
+				err = os.Rename(binary, filepath.Join(directory, "bin/renamed"))
+			case "symlink":
+				if err = os.Remove(binary); err == nil {
+					err = os.Symlink("/etc/hosts", binary)
+				}
+			case "directory-symlink":
+				err = os.Symlink(t.TempDir(), filepath.Join(directory, "share"))
+			case "bad-checksum":
+				manifest.ContentsSHA256 = "not a SHA-256 digest"
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := filecache.WriteJSON(filepath.Join(directory, manifestFilename), manifest); err != nil {
+				t.Fatal(err)
+			}
+			dest := deps.NewManager("http://127.0.0.1:1", filepath.Join(t.TempDir(), "deps"))
+			err = Import(context.Background(), dest, directory, "knc", "arm64", nil)
+			if scenario == "valid" || scenario == "permissions" || scenario == "finder-metadata" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				copy := t.TempDir()
+				if err := copyPrepared(context.Background(), directory, copy, nil); err != nil {
+					t.Fatal(err)
+				}
+				for _, file := range files {
+					info, err := os.Stat(filepath.Join(copy, file.Path))
+					if err != nil || (info.Mode()&0111 != 0) != file.Executable {
+						t.Fatalf("incorrect copied permissions for %s: %v", file.Path, err)
+					}
+				}
+				for _, name := range []string{".DS_Store", "bin/.DS_Store", "bin/._tool"} {
+					if _, err := os.Stat(filepath.Join(copy, name)); !os.IsNotExist(err) {
+						t.Fatalf("copied Finder metadata: %s", name)
+					}
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("damaged compact bundle accepted")
+			}
+			if _, err := os.Stat(dest.CacheDir()); !os.IsNotExist(err) {
+				t.Fatal("invalid bundle modified the destination cache")
+			}
+		})
+	}
+}
+
+// TestImportRejectsIncompatibleMetadata checks that incompatible bundles and
+// missing checksums cannot publish a cache manifest.
+func TestImportRejectsIncompatibleMetadata(t *testing.T) {
+	for _, scenario := range []string{"arch", "format", "old-format", "missing-checksum"} {
 		t.Run(scenario, func(t *testing.T) {
 			kit, _ := testImportKit(t, "arm64")
 			raw, _ := os.ReadFile(filepath.Join(kit, "podplane-bundle.json"))
@@ -551,24 +702,14 @@ func TestImportRejectsUnsafeOrIncompatibleInventory(t *testing.T) {
 				t.Fatal(err)
 			}
 			switch scenario {
-			case "escape":
-				manifest.Files[0].Path = "deps/../../../escape"
-			case "duplicate":
-				manifest.Files = append(manifest.Files, manifest.Files[0])
 			case "arch":
 				manifest.Arch = "amd64"
 			case "format":
 				manifest.Format = 999
-			case "missing":
-				manifest.Files = manifest.Files[1:]
-			case "symlink":
-				name := filepath.Join(kit, filepath.FromSlash(manifest.Files[0].Path))
-				if err := os.Remove(name); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Symlink("/etc/hosts", name); err != nil {
-					t.Fatal(err)
-				}
+			case "old-format":
+				manifest.Format = 1
+			case "missing-checksum":
+				manifest.ContentsSHA256 = ""
 			}
 			if err := filecache.WriteJSON(filepath.Join(kit, "podplane-bundle.json"), manifest); err != nil {
 				t.Fatal(err)
@@ -702,13 +843,16 @@ func TestImportValidatesDependencyPaths(t *testing.T) {
 			if err := json.Unmarshal(raw, &manifest); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Remove(filename); err != nil {
-				t.Fatal(err)
-			}
-			manifest.Files, err = filecache.Inventory(directory)
+			root, err := os.OpenRoot(directory)
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer func() { _ = root.Close() }()
+			files, err := contentsInventory(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			manifest.ContentsSHA256 = contentsChecksum(files)
 			if err := filecache.WriteJSON(filename, manifest); err != nil {
 				t.Fatal(err)
 			}

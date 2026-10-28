@@ -45,8 +45,19 @@ func (file File) Matches(root *os.Root) bool {
 // Inventory records paths, sizes, digests and executable bits for a tree,
 // rejecting symlinks and other non-regular files.
 func Inventory(dir string) ([]File, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	return InventoryFS(root.FS())
+}
+
+// InventoryFS inventories regular files through the supplied filesystem. Use
+// os.Root.FS to confine reads when the tree comes from an untrusted bundle.
+func InventoryFS(root fs.FS) ([]File, error) {
 	var files []File
-	err := filepath.WalkDir(dir, func(filename string, entry fs.DirEntry, err error) error {
+	err := fs.WalkDir(root, ".", func(filename string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
@@ -57,11 +68,7 @@ func Inventory(dir string) ([]File, error) {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("bundle contains non-regular file %s", filename)
 		}
-		rel, err := filepath.Rel(dir, filename)
-		if err != nil {
-			return err
-		}
-		f, err := os.Open(filename)
+		f, err := root.Open(filename)
 		if err != nil {
 			return err
 		}
@@ -71,7 +78,7 @@ func Inventory(dir string) ([]File, error) {
 		if err != nil {
 			return err
 		}
-		files = append(files, File{Path: filepath.ToSlash(rel), Size: n, SHA256: hex.EncodeToString(h.Sum(nil)), Executable: info.Mode()&0111 != 0})
+		files = append(files, File{Path: filename, Size: n, SHA256: hex.EncodeToString(h.Sum(nil)), Executable: info.Mode()&0111 != 0})
 		return nil
 	})
 	return files, err

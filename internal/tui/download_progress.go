@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/podplane/podplane/internal/deps"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -28,11 +29,14 @@ func RunDownloadProgress(title string, run func(func(deps.DownloadEvent)) error)
 	}
 
 	events := make(chan deps.DownloadEvent, 256)
+	stopped := make(chan struct{})
+	defer close(stopped)
 	m := downloadProgressModel{
-		title:  title,
-		run:    run,
-		events: events,
-		items:  map[string]downloadProgressItem{},
+		title:   title,
+		run:     run,
+		events:  events,
+		stopped: stopped,
+		items:   map[string]downloadProgressItem{},
 	}
 	finalModel, err := tea.NewProgram(m).Run()
 	if err != nil {
@@ -61,6 +65,7 @@ type downloadProgressModel struct {
 	title        string
 	run          func(func(deps.DownloadEvent)) error
 	events       chan deps.DownloadEvent
+	stopped      chan struct{}
 	items        map[string]downloadProgressItem
 	order        []string
 	message      string
@@ -68,6 +73,7 @@ type downloadProgressModel struct {
 	doneReceived bool
 	closed       bool
 	height       int
+	width        int
 }
 
 // downloadProgressEventMsg delivers a dependency download event to the update loop.
@@ -86,13 +92,21 @@ func (m downloadProgressModel) Init() tea.Cmd {
 	return tea.Batch(m.runCommand(), m.waitForEvent())
 }
 
-// runCommand runs downloads, forwards events without blocking, and closes the event stream.
+// runCommand drops excess progress updates but always delivers lifecycle
+// events, unless the UI has exited, then closes the event stream.
 func (m downloadProgressModel) runCommand() tea.Cmd {
 	return func() tea.Msg {
 		err := m.run(func(event deps.DownloadEvent) {
+			if event.Type == deps.DownloadEventProgress {
+				select {
+				case m.events <- event:
+				default:
+				}
+				return
+			}
 			select {
 			case m.events <- event:
-			default:
+			case <-m.stopped:
 			}
 		})
 		close(m.events)
@@ -121,6 +135,7 @@ func (m downloadProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		m.height = msg.Height
+		m.width = msg.Width
 		return m, nil
 	case downloadProgressEventMsg:
 		m.applyEvent(deps.DownloadEvent(msg))
@@ -175,9 +190,7 @@ func (m *downloadProgressModel) applyEvent(event deps.DownloadEvent) {
 		if item.Total == 0 {
 			item.Total = item.Current
 		}
-		if item.Current == 0 {
-			item.Current = item.Total
-		}
+		item.Current = item.Total
 	}
 	m.items[event.Name] = item
 }
@@ -193,7 +206,7 @@ func (m downloadProgressModel) View() string {
 	b.WriteString(titleStyle.Render(m.title))
 	b.WriteString("\n\n")
 	if m.message != "" {
-		b.WriteString(m.message)
+		b.WriteString(ansi.Truncate(m.message, m.terminalWidth(), "…"))
 		b.WriteString("\n\n")
 	}
 
@@ -220,7 +233,7 @@ func (m downloadProgressModel) View() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(faintStyle.Render(m.summary()))
+	b.WriteString(faintStyle.Width(m.terminalWidth()).Render(m.summary()))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -285,7 +298,7 @@ func (m downloadProgressModel) maxVisibleItems() int {
 	if m.height <= 0 {
 		return defaultDownloadProgressVisibleItems
 	}
-	reservedRows := 9
+	reservedRows := 10
 	if m.message != "" {
 		reservedRows += 2
 	}
@@ -303,16 +316,27 @@ func (m downloadProgressModel) renderItem(item downloadProgressItem) string {
 		name = filepath.Base(item.Path)
 	}
 	status := itemStatusLabel(item)
+	var detail string
 	if item.Status == deps.DownloadEventProgress || item.Status == deps.DownloadEventStarted {
-		return fmt.Sprintf("%s %-24s %s %s", status, name, renderBar(item.Current, item.Total, 14), renderBytesProgress(item.Current, item.Total))
+		detail = fmt.Sprintf("%s %s", renderBar(item.Current, item.Total, 14), renderBytesProgress(item.Current, item.Total))
+	} else if item.Err != nil {
+		detail = item.Err.Error()
+	} else if item.Total > 0 {
+		detail = formatBytes(item.Total)
+	} else {
+		detail = itemStateText(item.Status)
 	}
-	if item.Err != nil {
-		return fmt.Sprintf("%s %-24s %v", status, name, item.Err)
+	nameWidth := max(1, m.terminalWidth()-ansi.StringWidth(detail)-3)
+	name = ansi.Truncate(name, nameWidth, "…")
+	return ansi.Truncate(fmt.Sprintf("%s %-*s %s", status, min(24, nameWidth), name, detail), m.terminalWidth(), "…")
+}
+
+// terminalWidth uses the terminal's columns, defaulting to the supported minimum.
+func (m downloadProgressModel) terminalWidth() int {
+	if m.width > 0 {
+		return m.width
 	}
-	if item.Total > 0 {
-		return fmt.Sprintf("%s %-24s %s", status, name, formatBytes(item.Total))
-	}
-	return fmt.Sprintf("%s %-24s %s", status, name, itemStateText(item.Status))
+	return 80
 }
 
 // overallProgress sums known artifact sizes and transferred bytes capped at each artifact's total.
@@ -443,9 +467,17 @@ func runTextDownloadProgress(run func(func(deps.DownloadEvent)) error) error {
 			}
 			_, _ = fmt.Fprintf(os.Stdout, "Found %s in cache.\n", name)
 		case deps.DownloadEventStarted:
-			_, _ = fmt.Fprintf(os.Stdout, "Downloading %s...\n", event.Name)
+			if event.Message != "" {
+				_, _ = fmt.Fprintln(os.Stdout, event.Message)
+			} else {
+				_, _ = fmt.Fprintf(os.Stdout, "Downloading %s...\n", event.Name)
+			}
 		case deps.DownloadEventDone:
-			_, _ = fmt.Fprintf(os.Stdout, "Downloaded %s.\n", event.Name)
+			if event.Message != "" {
+				_, _ = fmt.Fprintln(os.Stdout, event.Message)
+			} else {
+				_, _ = fmt.Fprintf(os.Stdout, "Downloaded %s.\n", event.Name)
+			}
 		case deps.DownloadEventFailed:
 			_, _ = fmt.Fprintf(os.Stdout, "Failed %s: %v\n", event.Name, event.Err)
 		}

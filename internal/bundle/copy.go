@@ -18,7 +18,7 @@ import (
 
 // copyPrepared resumes only copies of this exact inventory. The partial
 // inventory identifies our destination; the public inventory is published last.
-func copyPrepared(ctx context.Context, source, destination string, progress func(deps.DownloadEvent)) error {
+func copyPrepared(ctx context.Context, source, destination string, progress func(deps.DownloadEvent)) (err error) {
 	src, err := os.OpenRoot(source)
 	if err != nil {
 		return err
@@ -31,6 +31,30 @@ func copyPrepared(ctx context.Context, source, destination string, progress func
 	var manifest Manifest
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return err
+	}
+	if progress != nil {
+		progress(deps.DownloadEvent{Type: deps.DownloadEventStatus, Message: "Verifying staged podplane-" + manifest.Platform})
+	}
+	files, err := manifest.inventory(src)
+	if err != nil {
+		return err
+	}
+	event := deps.DownloadEvent{Name: "Copy podplane-" + manifest.Platform, Message: "Copying podplane-" + manifest.Platform + "..."}
+	for _, file := range files {
+		event.Total += file.Size
+	}
+	if progress != nil {
+		progress(deps.DownloadEvent{Type: deps.DownloadEventStatus, Message: "Copying verified bundles to " + destination})
+		event.Type = deps.DownloadEventStarted
+		progress(event)
+		defer func() {
+			event.Type, event.Err = deps.DownloadEventDone, err
+			event.Message = "Copied podplane-" + manifest.Platform + "."
+			if err != nil {
+				event.Type = deps.DownloadEventFailed
+			}
+			progress(event)
+		}()
 	}
 	if err := os.MkdirAll(destination, 0755); err != nil {
 		return err
@@ -77,25 +101,29 @@ func copyPrepared(ctx context.Context, source, destination string, progress func
 	if err := dst.Remove(manifestFilename); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	for _, file := range manifest.Files {
+	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if progress != nil {
-			progress(deps.DownloadEvent{Type: deps.DownloadEventChecking, Name: file.Path, Total: file.Size})
-		}
-		if file.Matches(dst) {
-			continue
-		}
-		if err := file.Copy(src, dst, file.Path); err != nil {
-			return err
-		}
 		if !file.Matches(dst) {
-			return fmt.Errorf("destination verification failed: %s", file.Path)
+			if err := file.Copy(src, dst, file.Path); err != nil {
+				return err
+			}
+			if !file.Matches(dst) {
+				return fmt.Errorf("destination verification failed: %s", file.Path)
+			}
+		}
+		event.Current += file.Size
+		if progress != nil {
+			event.Type = deps.DownloadEventProgress
+			progress(event)
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if _, err := manifest.inventory(dst); err != nil {
+		return fmt.Errorf("destination verification failed: %w", err)
 	}
 	return dst.Rename(partial, manifestFilename)
 }

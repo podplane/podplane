@@ -6,19 +6,16 @@ package bundle
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/podplane/podplane/internal/deps"
-	"github.com/podplane/podplane/internal/filecache"
 )
 
 // Import verifies and stages a copied bundle before merging its dependencies
 // into the cache. It never downloads, executes tools, or changes the source bundle.
-func Import(ctx context.Context, cache *deps.Manager, directory, kind, arch string, progress func(deps.DownloadEvent)) error {
+func Import(ctx context.Context, cache *deps.Manager, directory, kind, arch string, progress func(deps.DownloadEvent)) (err error) {
 	src, err := os.OpenRoot(directory)
 	if err != nil {
 		return err
@@ -36,21 +33,32 @@ func Import(ctx context.Context, cache *deps.Manager, directory, kind, arch stri
 	if err != nil {
 		return err
 	}
-	if manifest.Format != format || manifest.Kind != kind || manifest.Arch != arch || guestArch != arch {
-		return fmt.Errorf("incompatible bundle: format=%d kind=%s arch=%s; need format=%d kind=%s arch=%s", manifest.Format, manifest.Kind, manifest.Arch, format, kind, arch)
+	if manifest.Kind != kind || manifest.Arch != arch || guestArch != arch {
+		return fmt.Errorf("incompatible bundle: kind=%s arch=%s; need kind=%s arch=%s", manifest.Kind, manifest.Arch, kind, arch)
 	}
-	seen := map[string]bool{}
-	for _, file := range manifest.Files {
-		top := strings.SplitN(file.Path, "/", 2)[0]
-		digest, err := hex.DecodeString(file.SHA256)
-		if !filecache.ValidPath(file.Path) || seen[file.Path] || file.Size < 0 || err != nil || len(digest) != 32 ||
-			(top != "deps" && top != "registry" && top != "bin" && top != "lib" && top != "libexec" && top != "share") {
-			return fmt.Errorf("invalid bundle inventory entry %q", file.Path)
-		}
-		seen[file.Path] = true
+	if progress != nil {
+		progress(deps.DownloadEvent{Type: deps.DownloadEventStatus, Message: "Verifying bundle contents"})
 	}
-	if len(seen) == 0 {
-		return fmt.Errorf("bundle inventory is empty")
+	files, err := manifest.inventory(src)
+	if err != nil {
+		return err
+	}
+	event := deps.DownloadEvent{Name: "Import podplane-" + manifest.Platform, Message: "Importing podplane-" + manifest.Platform + "..."}
+	for _, file := range files {
+		event.Total += file.Size
+	}
+	if progress != nil {
+		progress(deps.DownloadEvent{Type: deps.DownloadEventStatus, Message: "Verifying and staging bundle contents"})
+		event.Type = deps.DownloadEventStarted
+		progress(event)
+		defer func() {
+			event.Type, event.Err = deps.DownloadEventDone, err
+			event.Message = "Imported podplane-" + manifest.Platform + "."
+			if err != nil {
+				event.Type = deps.DownloadEventFailed
+			}
+			progress(event)
+		}()
 	}
 	// Stage every inventoried file before changing the active cache. This also
 	// isolates cache verification from unlisted files and source symlinks.
@@ -64,16 +72,21 @@ func Import(ctx context.Context, cache *deps.Manager, directory, kind, arch stri
 		return err
 	}
 	defer func() { _ = staged.Close() }()
-	for _, file := range manifest.Files {
+	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return err
-		}
-		if progress != nil {
-			progress(deps.DownloadEvent{Type: deps.DownloadEventChecking, Name: file.Path, Total: file.Size})
 		}
 		if err := file.Copy(src, staged, file.Path); err != nil {
 			return err
 		}
+		event.Current += file.Size
+		if progress != nil {
+			event.Type = deps.DownloadEventProgress
+			progress(event)
+		}
 	}
-	return cache.Import(ctx, stage, manifest.Files, kind, arch, manifest.Providers, manifest.Addons)
+	if progress != nil {
+		progress(deps.DownloadEvent{Type: deps.DownloadEventStatus, Message: "Verifying dependencies and merging into the local cache"})
+	}
+	return cache.Import(ctx, stage, files, kind, arch, manifest.Providers, manifest.Addons)
 }

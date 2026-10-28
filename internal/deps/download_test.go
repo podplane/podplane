@@ -260,6 +260,39 @@ func TestDownloadUsesLocalManifestFile(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cacheDir, "vmconfig", "artifacts", VMConfigDepName, "dev")); !os.IsNotExist(err) {
 		t.Fatalf("vmconfig stub should not be cached, stat err = %v", err)
 	}
+
+	// Existing caches seed retained downloads without fetching artifact bytes.
+	server.Close()
+	if err := os.RemoveAll(filepath.Join(manager.VMConfigCacheDir(), "downloads")); err != nil {
+		t.Fatal(err)
+	}
+	opts := DownloadOptions{VMConfigManifestPath: manifestPath, SkipCrossArchDependencies: true}
+	if err := manager.Download(DefaultKind, "arm64", opts); err != nil {
+		t.Fatal(err)
+	}
+	active := manager.VMConfigArtifactCachePath("dep", manifest.VMConfig.Dependencies["dep"])
+	if err := os.WriteFile(active, []byte("another architecture"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// A dry run recognizes the retained bytes but does not install them.
+	var output bytes.Buffer
+	opts.DryRun, opts.Output = true, &output
+	if err := manager.Download(DefaultKind, "arm64", opts); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "All dependencies already cached") {
+		t.Fatalf("dry run missed retained download: %s", output.String())
+	}
+	if body, err := os.ReadFile(active); err != nil || string(body) != "another architecture" {
+		t.Fatalf("dry run changed active artifact: %q, %v", body, err)
+	}
+	opts.DryRun = false
+	if err := manager.Download(DefaultKind, "arm64", opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Verify(DefaultKind, "arm64", nil); err != nil {
+		t.Fatalf("restored cache is incomplete: %v", err)
+	}
 }
 
 // TestFetchTemplatesManifestRetriesTransientFailures verifies template metadata fetches recover after gateway errors.
