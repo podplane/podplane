@@ -15,7 +15,8 @@ concurrency:
 
 jobs:
   release:
-    runs-on: ubuntu-24.04
+    # Native Apple frameworks are needed for the CLI's macOS Keychain backend.
+    runs-on: macos-15
     environment: release
     defaults:
       run:

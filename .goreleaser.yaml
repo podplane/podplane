@@ -15,7 +15,8 @@ before:
 builds:
   - main: .
     env:
-      - CGO_ENABLED=0
+      # The macOS Keychain backend requires CGO; Linux stays portable.
+      - 'CGO_ENABLED={{ if eq .Os "darwin" }}1{{ else }}0{{ end }}'
     goos:
       - linux
       - darwin
