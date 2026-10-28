@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/99designs/keyring"
 	"github.com/spf13/viper"
 )
 
@@ -18,7 +17,7 @@ import (
 type Config struct {
 	viperFile *viper.Viper
 	keyringMu sync.Mutex
-	keyring   keyring.Keyring
+	keyring   credentialStore
 }
 
 // Init initializes the Config struct

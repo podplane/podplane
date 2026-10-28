@@ -22,6 +22,13 @@ const (
 	LocalKeyringPass = "podplane-local"
 )
 
+// credentialStore is the credential storage required by Config.
+type credentialStore interface {
+	Get(string) (keyring.Item, error)
+	Set(keyring.Item) error
+	Remove(string) error
+}
+
 // keyringPasswordFunc is a custom password function for file-based keyring
 // that uses the PODPLANE_KEYRING_PASS environment variable.
 func keyringPasswordFunc(prompt string) (string, error) {
@@ -75,14 +82,18 @@ func (c *Config) initKeyring() error {
 		FilePasswordFunc: keyringPasswordFunc,
 	}
 
+	var ring credentialStore
+	var err error
 	// If PODPLANE_KEYRING_PASS is set, force file-based backend
 	// This allows users to bypass OS keychain on any platform
 	if os.Getenv(KeyringPassEnv) != "" {
 		keyringConfig.AllowedBackends = []keyring.BackendType{keyring.FileBackend}
+		ring, err = keyring.Open(keyringConfig)
+	} else {
+		// OS may prompt the user for permission.
+		ring, err = openSystemKeyring(keyringConfig)
 	}
 
-	// note: OS may prompt the user for permission
-	ring, err := keyring.Open(keyringConfig)
 	if err != nil {
 		return fmt.Errorf("open keyring: %w", err)
 	}
