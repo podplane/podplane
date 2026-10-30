@@ -132,6 +132,7 @@ func newLocalStartCmd(c *config.Config) *cobra.Command {
 			// see also: internal/health/local.go LocalStartChecks
 			items := []tui.TaskProgressItem{
 				{Key: "server", Name: "local server", Expected: 2 * time.Second, Timeout: 10 * time.Second},
+				{Key: "vault-unlock", Name: "local Vault", Success: "unlocked", Expected: time.Second},
 				{Key: "vm-image", Name: "VM image", Group: "VM", Exclude: vmExists, Success: "created", Expected: time.Second, Timeout: 30 * time.Second},
 				{Key: "vm", Name: "VM boot", Group: "VM", Success: "started", Expected: 2 * time.Second, Timeout: 30 * time.Second},
 				{Key: "cloud-init", Name: "cloud-init user-data", Group: "VM", Exclude: vmExists, Success: "completed", Expected: 12 * time.Second, Timeout: 10 * time.Minute},

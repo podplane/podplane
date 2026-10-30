@@ -86,6 +86,10 @@ func (h *handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		h.serveClusterDelete(rw, r, clusterID)
 		return
 	}
+	if apiPath == "/sys/podplane/unlock" {
+		h.serveUnlock(rw, r, clusterID)
+		return
+	}
 	// Validate exactly the same normalized path the store will use, before
 	// dispatching any read, list, or lifecycle mutation.
 	_, cleanPath, err := cleanClusterPath(clusterID, apiPath)
@@ -352,6 +356,25 @@ func (h *handler) serveClusterDelete(rw http.ResponseWriter, r *http.Request, cl
 		return
 	}
 	if err := h.store.DeleteCluster(clusterID); err != nil {
+		errorResponse(rw, http.StatusInternalServerError, err.Error())
+		return
+	}
+	jsonResponse(rw, http.StatusNoContent, nil)
+}
+
+// serveUnlock loads a cluster's vault key on the trusted transport, so the
+// host can wait for any keychain prompt before VMs need secrets.
+func (h *handler) serveUnlock(rw http.ResponseWriter, r *http.Request, clusterID string) {
+	if !h.trusted {
+		errorResponse(rw, http.StatusNotFound, "not found")
+		return
+	}
+	if r.Method != http.MethodPost {
+		rw.Header().Set("Allow", http.MethodPost)
+		errorResponse(rw, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if err := h.store.Unlock(clusterID); err != nil {
 		errorResponse(rw, http.StatusInternalServerError, err.Error())
 		return
 	}

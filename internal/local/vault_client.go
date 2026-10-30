@@ -107,6 +107,24 @@ func (c *localVaultClient) CreateSecret(clusterID, path string, values map[strin
 	return false, responseErr
 }
 
+// Unlock asks the local server to load clusterID's vault key. It has no
+// timeout because loading may wait for the user to answer a keychain prompt.
+func (c *localVaultClient) Unlock(clusterID string) error {
+	request, err := http.NewRequest(http.MethodPost, localVaultURL+"/vault/"+clusterID+"/v1/sys/podplane/unlock", nil)
+	if err != nil {
+		return err
+	}
+	response, err := (&http.Client{Transport: c.http.Transport}).Do(request)
+	if err != nil {
+		return fmt.Errorf("send unlock request: %w", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusNoContent {
+		return vaultResponseError(response)
+	}
+	return nil
+}
+
 // DeleteCluster removes all fake Vault state for clusterID.
 func (c *localVaultClient) DeleteCluster(clusterID string) error {
 	request, err := http.NewRequest(http.MethodDelete, localVaultURL+"/vault/"+clusterID+"/v1/sys/podplane/cluster", nil)

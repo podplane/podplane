@@ -210,7 +210,15 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 		progress.Omitted("vm-image", "VM image")
 		progress.Omitted("cloud-init", "cloud-init user-data")
 	}
+	// Load the vault key before anything reads secrets, so a keychain prompt
+	// gets its own step and as long as the user needs to answer it.
 	vault := newLocalVaultClient(filepath.Join(m.runtimeDir, localVaultSocketName))
+	progress.Started("vault-unlock", "Local Vault", "approve the keychain prompt if asked")
+	if err := vault.Unlock(clusterID); err != nil {
+		progress.Failed("vault-unlock", "Local Vault", err)
+		return "", fmt.Errorf("unlock local Vault: %w", err)
+	}
+	progress.Done("vault-unlock", "Local Vault", "")
 	if err := ensureWorkloadCAKey(vault, clusterID, !vmExisted); err != nil {
 		return "", fmt.Errorf("prepare local workload CA key: %w", err)
 	}

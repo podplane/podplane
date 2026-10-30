@@ -47,6 +47,7 @@ type Store interface {
 	DeleteSecret(clusterID, path string) error
 	ListSecrets(clusterID string) ([]Secret, error)
 	DeleteCluster(clusterID string) error
+	Unlock(clusterID string) error
 }
 
 // KeyringBackend is the subset of Podplane config used by FileStore.
@@ -250,6 +251,15 @@ func (s *FileStore) DeleteCluster(clusterID string) error {
 	}
 	delete(s.keys, clusterID)
 	return nil
+}
+
+// Unlock loads clusterID's vault key into memory, creating it when absent.
+// Reading an existing key may block on an OS keychain prompt.
+func (s *FileStore) Unlock(clusterID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.vaultKey(clusterID)
+	return err
 }
 
 // ListSecrets lists fakevault secrets for clusterID.

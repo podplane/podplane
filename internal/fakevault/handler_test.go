@@ -137,6 +137,9 @@ func (s *memoryStore) DeleteCluster(clusterID string) error {
 	return nil
 }
 
+// Unlock is a no-op because memory stores have no vault key.
+func (s *memoryStore) Unlock(string) error { return nil }
+
 // ListSecrets lists fakevault secrets from memory for handler tests.
 func (s *memoryStore) ListSecrets(clusterID string) ([]Secret, error) {
 	var secrets []Secret
@@ -627,6 +630,11 @@ func TestClusterDeleteRequiresTrustedHandler(t *testing.T) {
 	NewHandler(store, nil).ServeHTTP(untrustedRec, httptest.NewRequest(http.MethodDelete, path, nil))
 	if untrustedRec.Code != http.StatusNotFound {
 		t.Fatalf("untrusted delete status = %d, want %d", untrustedRec.Code, http.StatusNotFound)
+	}
+	unlockRec := httptest.NewRecorder()
+	NewHandler(store, nil).ServeHTTP(unlockRec, httptest.NewRequest(http.MethodPost, "/vault/dev/v1/sys/podplane/unlock", nil))
+	if unlockRec.Code != http.StatusNotFound {
+		t.Fatalf("untrusted unlock status = %d, want %d", unlockRec.Code, http.StatusNotFound)
 	}
 
 	trustedRec := httptest.NewRecorder()

@@ -41,7 +41,8 @@ func TestLocalVaultClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("localVaultListener: %v", err)
 	}
-	store := fakevault.NewFileStore(localVaultTestKeyring{}, t.TempDir())
+	keyring := localVaultTestKeyring{}
+	store := fakevault.NewFileStore(keyring, t.TempDir())
 	server := &http.Server{Handler: fakevault.NewTrustedHandler(store)}
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() {
@@ -50,6 +51,12 @@ func TestLocalVaultClient(t *testing.T) {
 	})
 
 	client := newLocalVaultClient(path)
+	if err := client.Unlock("dev"); err != nil {
+		t.Fatalf("Unlock: %v", err)
+	}
+	if len(keyring) != 1 {
+		t.Fatalf("keyring after Unlock has %d keys, want 1", len(keyring))
+	}
 	for _, values := range []map[string]string{{"value": "private\xffvalue"}, {"private\xffkey": "text"}} {
 		if created, err := client.CreateSecret("dev", "secret/data/dev/invalid", values); err == nil || created {
 			t.Fatalf("invalid text CreateSecret = %v, %v", created, err)

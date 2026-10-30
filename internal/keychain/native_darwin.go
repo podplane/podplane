@@ -175,6 +175,9 @@ func (n *native) statusError(operation string, status int32) error {
 	if status == -25300 { // errSecItemNotFound
 		return keyring.ErrKeyNotFound
 	}
+	if status == -128 { // errSecUserCanceled: the user denied the prompt.
+		return fmt.Errorf("%s: Keychain access denied (Keychain status %d)", operation, status)
+	}
 	message := n.errorMessage(status, 0)
 	if message == 0 {
 		return fmt.Errorf("%s: Keychain status %d", operation, status)
