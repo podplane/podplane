@@ -37,9 +37,10 @@ type Options struct {
 	Progress  func(deps.DownloadEvent)
 }
 
-// Create prepares reusable local staging from the download caches, then copies
-// it to a destination. It returns the staging path even when preparation or copy
-// fails. Cleanup is explicit and only happens after every copy succeeds.
+// Create prepares reusable local staging from the download caches, then writes
+// one compressed archive per platform to a destination directory. It returns the
+// staging path even when preparation or archiving fails. Cleanup is explicit and
+// only happens after every archive succeeds.
 func Create(ctx context.Context, cache *deps.Manager, directory, kind string, opts Options) (string, error) {
 	if opts.Version != "" && !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$`).MatchString(opts.Version) {
 		return "", fmt.Errorf("invalid CLI release version %q", opts.Version)
@@ -74,6 +75,14 @@ func Create(ctx context.Context, cache *deps.Manager, directory, kind string, op
 	// replaces artifacts that share a version and filename.
 	if i := slices.Index(archs, runtime.GOARCH); i > 0 {
 		archs[0], archs[i] = archs[i], archs[0]
+	}
+	// Fail before preparation rather than after minutes of downloads.
+	for _, archive := range ArchivePaths(directory, opts.Platforms) {
+		if _, err := os.Lstat(archive); err == nil {
+			return "", fmt.Errorf("%s already exists; delete it or choose another destination", archive)
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
 	}
 	if opts.CacheDir == "" {
 		opts.CacheDir = filepath.Dir(cache.CacheDir())
@@ -114,8 +123,8 @@ func Create(ctx context.Context, cache *deps.Manager, directory, kind string, op
 	}
 	for _, platform := range opts.Platforms {
 		name := "podplane-" + platform
-		if err := copyPrepared(ctx, filepath.Join(stage, name), filepath.Join(directory, name), opts.Progress); err != nil {
-			return stage, fmt.Errorf("copy %s (staging retained at %s): %w", name, stage, err)
+		if err := archivePrepared(ctx, filepath.Join(stage, name), directory, opts.Progress); err != nil {
+			return stage, fmt.Errorf("archive %s (staging retained at %s): %w", name, stage, err)
 		}
 	}
 	if opts.Cleanup {

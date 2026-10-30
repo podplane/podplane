@@ -56,7 +56,7 @@ func (m Manifest) inventory(root *os.Root) ([]filecache.File, error) {
 }
 
 // contentsInventory sorts all regular payload files by slash-separated path,
-// excluding bundle metadata, its copy marker and Finder/AppleDouble metadata. Executable
+// excluding bundle metadata and Finder/AppleDouble metadata. Executable
 // requirements come from bin/ and libexec/, not filesystem permission bits, so
 // moving a bundle through exFAT does not change its checksum or installed modes.
 func contentsInventory(root *os.Root) ([]filecache.File, error) {
@@ -66,8 +66,7 @@ func contentsInventory(root *os.Root) ([]filecache.File, error) {
 	}
 	files = slices.DeleteFunc(files, func(file filecache.File) bool {
 		name := path.Base(file.Path)
-		return file.Path == manifestFilename || file.Path == "."+manifestFilename+".partial" ||
-			name == ".DS_Store" || strings.HasPrefix(name, "._")
+		return file.Path == manifestFilename || name == ".DS_Store" || strings.HasPrefix(name, "._")
 	})
 	if len(files) == 0 {
 		return nil, fmt.Errorf("bundle inventory is empty")

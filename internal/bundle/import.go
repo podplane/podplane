@@ -23,7 +23,7 @@ func Import(ctx context.Context, cache *deps.Manager, directory, kind, arch stri
 	defer func() { _ = src.Close() }()
 	raw, err := src.ReadFile(manifestFilename)
 	if err != nil {
-		return fmt.Errorf("read %s (pass the copied podplane-<platform> directory): %w", manifestFilename, err)
+		return fmt.Errorf("read %s (pass the extracted podplane-<platform> directory): %w", manifestFilename, err)
 	}
 	var manifest Manifest
 	if err := json.Unmarshal(raw, &manifest); err != nil {

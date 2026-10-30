@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -159,18 +160,18 @@ func TestBundleImportRoundTrip(t *testing.T) {
 		if event.Name != "" {
 			states[event.Name] = event
 		}
-		if event.Name == "Copy podplane-linux-amd64" && event.Type == deps.DownloadEventProgress {
-			cancel() // Interrupt copying, not downloads or preparation.
+		if event.Name == "Archive podplane-linux-amd64" && event.Type == deps.DownloadEventProgress {
+			cancel() // Interrupt archiving, not downloads or preparation.
 		}
 	}
 	stage, err := Create(copyCtx, m, output, "knc", opts)
 	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("interrupted copy = %v; want cancellation after preparation", err)
+		t.Fatalf("interrupted archive = %v; want cancellation after preparation", err)
 	}
 	for name, event := range states {
-		if name == "Copy podplane-linux-amd64" {
+		if name == "Archive podplane-linux-amd64" {
 			if event.Type != deps.DownloadEventFailed || !errors.Is(event.Err, context.Canceled) {
-				t.Fatalf("cancelled copy left stale progress: %+v", event)
+				t.Fatalf("cancelled archive left stale progress: %+v", event)
 			}
 		} else if event.Type != deps.DownloadEventDone && event.Type != deps.DownloadEventCached {
 			t.Fatalf("completed download left stale progress: %+v", event)
@@ -180,19 +181,10 @@ func TestBundleImportRoundTrip(t *testing.T) {
 		t.Fatalf("staging is not the single local bundles directory: %s", stage)
 	}
 	if _, err := os.Stat(filepath.Join(stage, "ready")); err != nil {
-		t.Fatalf("failed copy deleted prepared staging: %v", err)
+		t.Fatalf("failed archive deleted prepared staging: %v", err)
 	}
-	first := filepath.Join(output, "podplane-linux-amd64")
-	if _, err := os.Stat(filepath.Join(first, "podplane-bundle.json")); !os.IsNotExist(err) {
-		t.Fatal("partial copy was published as complete")
-	}
-	helmPath := filepath.Join(first, "bin/helm")
-	before, err := os.Stat(helmPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(first, "bin/kubectl"), []byte("damaged"), 0755); err != nil {
-		t.Fatal(err)
+	if entries, err := os.ReadDir(output); err != nil || len(entries) != 0 {
+		t.Fatalf("interrupted archive left files in the destination: %v, %v", entries, err)
 	}
 	offline = true
 	opts.Cleanup = false
@@ -205,24 +197,28 @@ func TestBundleImportRoundTrip(t *testing.T) {
 		}
 	}
 	if _, err := Create(ctx, m, output, "knc", opts); err != nil {
-		t.Fatalf("offline copy resume failed: %v", err)
+		t.Fatalf("offline archive resume failed: %v", err)
 	}
 	if len(states) != len(platforms) {
-		t.Fatalf("copy should report one row per platform, got %d", len(states))
+		t.Fatalf("archiving should report one row per platform, got %d", len(states))
 	}
 	for _, platform := range platforms {
-		event := states["Copy podplane-"+platform]
+		event := states["Archive podplane-"+platform]
 		if event.Type != deps.DownloadEventDone || event.Total <= 0 || event.Current != event.Total {
-			t.Fatalf("copy did not complete its byte progress: %+v", event)
+			t.Fatalf("archive did not complete its byte progress: %+v", event)
 		}
 	}
-	after, err := os.Stat(helmPath)
-	if err != nil || !after.ModTime().Equal(before.ModTime()) {
-		t.Fatal("resume rewrote an intact destination file")
+	// Rerunning against the same destination never replaces an archive.
+	first := filepath.Join(output, "podplane-linux-amd64.tar.gz")
+	before, err := os.ReadFile(first)
+	if err != nil {
+		t.Fatal(err)
 	}
-	body, _ := os.ReadFile(filepath.Join(first, "bin/kubectl"))
-	if string(body) != "linux-amd64:kubectl" {
-		t.Fatalf("damaged destination was not repaired: %q", body)
+	if _, err := Create(ctx, m, output, "knc", opts); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("rerun accepted an existing archive: %v", err)
+	}
+	if after, err := os.ReadFile(first); err != nil || !bytes.Equal(before, after) {
+		t.Fatal("rerun changed an existing archive")
 	}
 	changed := opts
 	changed.Platforms = []string{"macos-arm64"}
@@ -231,10 +227,7 @@ func TestBundleImportRoundTrip(t *testing.T) {
 	}
 	// Never overwrite an unrelated directory just because its name matches.
 	unrelated := t.TempDir()
-	sentinel := filepath.Join(unrelated, "podplane-linux-amd64", "keep")
-	if err := os.MkdirAll(filepath.Dir(sentinel), 0755); err != nil {
-		t.Fatal(err)
-	}
+	sentinel := filepath.Join(unrelated, "podplane-linux-amd64.tar.gz")
 	if err := os.WriteFile(sentinel, []byte("untouched"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +277,11 @@ func TestBundleImportRoundTrip(t *testing.T) {
 	}
 	for _, platform := range platforms {
 		arch, _ := platformArch(platform)
-		kit := filepath.Join(output, "podplane-"+platform)
+		archive := filepath.Join(output, "podplane-"+platform+".tar.gz")
+		kit := testUntar(t, archive)
+		if err := os.Remove(archive); err != nil { // Model ejecting the original drive.
+			t.Fatal(err)
+		}
 		raw, err := os.ReadFile(filepath.Join(kit, "podplane-bundle.json"))
 		if err != nil {
 			t.Fatal(err)
@@ -326,17 +323,10 @@ func TestBundleImportRoundTrip(t *testing.T) {
 				t.Fatalf("wrong %s binary in %s: %q, %v", binary, platform, body, err)
 			}
 		}
-		copied := filepath.Join(t.TempDir(), "copied kit")
-		if err := filecache.CopyTree(kit, copied); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.RemoveAll(kit); err != nil { // Model ejecting the original drive.
-			t.Fatal(err)
-		}
 		dest := deps.NewManager("http://127.0.0.1:1", filepath.Join(t.TempDir(), "deps"))
 		for range 2 {
 			states = map[string]deps.DownloadEvent{}
-			if err := Import(ctx, dest, copied, "knc", arch, opts.Progress); err != nil {
+			if err := Import(ctx, dest, kit, "knc", arch, opts.Progress); err != nil {
 				t.Fatal(err)
 			}
 			event := states["Import podplane-"+platform]
@@ -369,10 +359,25 @@ func TestBundleImportRoundTrip(t *testing.T) {
 		if arch == other {
 			other = "arm64"
 		}
-		if _, err := os.Stat(filepath.Join(copied, "deps/vmconfig/artifacts/os-image/1/image-"+other)); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(kit, "deps/vmconfig/artifacts/os-image/1/image-"+other)); !os.IsNotExist(err) {
 			t.Fatal("kit includes the other guest architecture")
 		}
 	}
+}
+
+// testUntar extracts a bundle archive with the system tar, as recipients do,
+// and returns its podplane-<platform> directory.
+func testUntar(t *testing.T, archive string) string {
+	t.Helper()
+	directory := t.TempDir()
+	if out, err := exec.Command("tar", "-xzf", archive, "-C", directory).CombinedOutput(); err != nil {
+		t.Fatalf("tar -xzf %s: %v: %s", archive, err, out)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil || len(entries) != 1 || entries[0].Name()+".tar.gz" != filepath.Base(archive) {
+		t.Fatalf("archive should contain one top-level directory named after it: %v, %v", entries, err)
+	}
+	return filepath.Join(directory, entries[0].Name())
 }
 
 // bundleTestTransport serves fixture responses through an HTTP client.
@@ -663,10 +668,11 @@ func TestCompactBundleIntegrity(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				copy := t.TempDir()
-				if err := copyPrepared(context.Background(), directory, copy, nil); err != nil {
+				archives := t.TempDir()
+				if err := archivePrepared(context.Background(), directory, archives, nil); err != nil {
 					t.Fatal(err)
 				}
+				copy := testUntar(t, filepath.Join(archives, "podplane-linux-arm64.tar.gz"))
 				for _, file := range files {
 					info, err := os.Stat(filepath.Join(copy, file.Path))
 					if err != nil || (info.Mode()&0111 != 0) != file.Executable {
