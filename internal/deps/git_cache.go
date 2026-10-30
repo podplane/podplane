@@ -17,6 +17,7 @@ import (
 	git "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/config"
 	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/storer"
 )
 
 // GitCacheDir returns the generic Git dependency cache directory.
@@ -87,6 +88,9 @@ func (m *Manager) EnsureComponentsGitCached(ctx context.Context, source *Compone
 		}); err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 			return fmt.Errorf("fetch cached components git repository: %w", err)
 		}
+		if err := repackComponentsGit(repo); err != nil {
+			return fmt.Errorf("repack cached components git repository: %w", err)
+		}
 		return verifyCachedComponentsGitRef(repo, source)
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("stat cached components git repository: %w", err)
@@ -104,6 +108,21 @@ func (m *Manager) EnsureComponentsGitCached(ctx context.Context, source *Compone
 		return fmt.Errorf("clone components git repository: %w", err)
 	}
 	return verifyCachedComponentsGitRef(repo, source)
+}
+
+// repackComponentsGit consolidates the packfiles that each fetch adds. Objects
+// stored as deltas of each other across packs can form cycles that break
+// packfile encoding when the local Git server serves the cache.
+func repackComponentsGit(repo *git.Repository) error {
+	packed, ok := repo.Storer.(storer.PackedObjectStorer)
+	if !ok {
+		return nil
+	}
+	packs, err := packed.ObjectPacks()
+	if err != nil || len(packs) <= 1 {
+		return err
+	}
+	return repo.RepackObjects(&git.RepackConfig{})
 }
 
 // cleanGitRepoPath normalizes a repository cache path and prevents path escape.
