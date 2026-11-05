@@ -78,8 +78,7 @@ func newDepsDownloadCmd(manager *deps.Manager, kind, arch string) *cobra.Command
 		if err != nil {
 			return err
 		}
-		addons := components.AgenticAddons()
-		addons = append(addons, depsDownloadAddons)
+		addons := append(components.DefaultAddons(providers), depsDownloadAddons)
 
 		if depsDownloadDryRun {
 			fmt.Println("Fetching latest dependency manifest...")

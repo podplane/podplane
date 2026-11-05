@@ -53,7 +53,7 @@ func newDepsBundleCmd(manager *deps.Manager, kind, cacheDir string) *cobra.Comma
 			var stage string
 			if err := tui.RunDownloadProgress("Preparing offline Podplane bundles", func(progress func(deps.DownloadEvent)) error {
 				selected := opts
-				selected.Addons = append(components.AgenticAddons(), opts.Addons...)
+				selected.Addons = append(components.DefaultAddons(opts.Providers), opts.Addons...)
 				selected.Progress = progress
 				stage, err = bundle.Create(cmd.Context(), manager, args[0], kind, selected)
 				return err

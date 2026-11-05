@@ -51,6 +51,38 @@ func TestDownloadAgenticBaseline(t *testing.T) {
 	}
 }
 
+// TestDepsDownloadSelectsSecretsCSIProviders checks that provider selection,
+// not manifest tags, pulls in each secrets provider's CSI images. Published
+// manifests mark these images as addons.
+func TestDepsDownloadSelectsSecretsCSIProviders(t *testing.T) {
+	manifest := deps.ComponentsManifest{Components: deps.Components{Images: []deps.ComponentImage{
+		{Components: []string{"secrets-store-csi-provider-openbao"}, Image: "openbao", Addon: true},
+		{Components: []string{"secrets-store-csi-provider-vault"}, Image: "vault", Addon: true},
+	}}}
+	for _, tc := range []struct {
+		providers string
+		want      []string
+	}{
+		{"", []string{"openbao"}},
+		{"vault,aws", []string{"vault"}},
+		{"none", nil},
+	} {
+		t.Run(tc.providers, func(t *testing.T) {
+			providers, err := depsDownloadProviderList(tc.providers, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, i := range manifest.DownloadImageIndexes(deps.ComponentImageFilter{Providers: providers, Addons: components.DefaultAddons(providers)}) {
+				got = append(got, manifest.Components.Images[i].Image)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("--providers %q selected %v, want %v", tc.providers, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestDepsDownloadProviderDefault verifies a bare download prepares local VMs
 // while explicit providers (including none) and cluster configs replace that
 // default.

@@ -95,10 +95,12 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	arch := m.arch
 
 	providers := []string{deps.LocalProviders}
+	// Match deps download, which includes the addons local seeds enable.
+	addons := components.DefaultAddons(providers)
 	var manifest *deps.Manifest
 	var err error
 	if opts.Offline {
-		manifest, err = depsManager.VerifyOffline(kind, arch, providers, components.AgenticAddons())
+		manifest, err = depsManager.VerifyOffline(kind, arch, providers, addons)
 		if err != nil {
 			return "", fmt.Errorf("offline dependencies unavailable; run `podplane deps import <bundle-directory>` or `podplane deps download` while online: %w", err)
 		}
@@ -107,7 +109,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 	}
 	if errors.Is(err, deps.ErrNotCached) || errors.Is(err, deps.ErrIncomplete) {
 		download := func(progress func(deps.DownloadEvent)) error {
-			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: providers})
+			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: providers, Addons: addons})
 		}
 		if opts.RunDownloadProgress != nil {
 			err = opts.RunDownloadProgress(download)
@@ -132,7 +134,7 @@ func (m *Local) Start(opts StartOptions) (string, error) {
 			return "", fmt.Errorf("offline registry cache is missing or empty; run `podplane deps import <bundle-directory>` or `podplane deps download` while online")
 		}
 		download := func(progress func(deps.DownloadEvent)) error {
-			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: providers})
+			return depsManager.Download(kind, arch, deps.DownloadOptions{Progress: progress, Providers: providers, Addons: addons})
 		}
 		if opts.RunDownloadProgress != nil {
 			err = opts.RunDownloadProgress(download)
