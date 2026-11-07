@@ -141,7 +141,7 @@ func WriteCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts Clus
 // An empty moduleVersion uses the normal version constraint.
 func TerraformDependencyRoot(moduleVersion string) string {
 	var doc hclDocument
-	addClusterTerraformRequirements(&doc, "aws", "google")
+	addClusterTerraformRequirements(&doc, "", "aws", "google")
 	if moduleVersion == "" {
 		moduleVersion = NstanceModuleVersion
 	}
@@ -159,10 +159,12 @@ func TerraformDependencyRoot(moduleVersion string) string {
 	return doc.String()
 }
 
-// addClusterTerraformRequirements adds engine, cloud provider, and Podplane constraints.
-func addClusterTerraformRequirements(doc *hclDocument, cloudProviders ...string) {
+// addClusterTerraformRequirements adds engine, cloud provider, and Podplane
+// constraints, and declares the remote-state backend kind unless it is empty.
+// The CLI supplies the backend's non-secret settings at init time.
+func addClusterTerraformRequirements(doc *hclDocument, backend string, cloudProviders ...string) {
 	terraform := block("terraform")
-	terraform.Body.Attr("required_version", str(">= 1.6.0"))
+	terraform.Body.Attr("required_version", str(">= 1.10.0"))
 	requiredProviders := block("required_providers")
 	if slices.Contains(cloudProviders, "aws") {
 		requiredProviders.Body.Attr("aws", object(
@@ -181,6 +183,9 @@ func addClusterTerraformRequirements(doc *hclDocument, cloudProviders ...string)
 		identField("version", str(PodplaneProviderVersion())),
 	))
 	terraform.Body.Block(requiredProviders)
+	if backend != "" {
+		terraform.Body.Block(block("backend", backend))
+	}
 	doc.AddBlock(terraform)
 }
 
@@ -231,7 +236,11 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		"Cluster infrastructure inputs. Changes may add, replace, or remove provider resources.",
 	}
 
-	addClusterTerraformRequirements(&mainDoc, provider.Kind)
+	backend := "s3"
+	if provider.Kind == "google" {
+		backend = "gcs"
+	}
+	addClusterTerraformRequirements(&mainDoc, backend, provider.Kind)
 
 	if provider.Kind == "aws" {
 		awsProvider := block("provider", "aws")

@@ -10,7 +10,13 @@ import (
 	"strings"
 )
 
-// Validate checks a Podplane Truster deployment configuration.
+// deploymentOwnedTrusterSettings are the Truster settings Podplane sets from
+// the deployment, so a config must not set them in oidc.truster.
+var deploymentOwnedTrusterSettings = []string{"issuer_url", "http_listen_addr", "serving_certificate"}
+
+// Validate checks the deployment settings Podplane owns. The Truster
+// configuration in oidc.truster is validated by the JSON Schema and by the
+// Truster module, not here.
 func Validate(cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("config is required")
@@ -21,9 +27,13 @@ func Validate(cfg *Config) error {
 		if o.Provider.Region == "" {
 			return fmt.Errorf("oidc.provider.region is required for aws")
 		}
-	case "google", "gcp":
-		// TODO: implement GCP support
-		return fmt.Errorf("oidc.provider.kind google is not supported until the Truster Google module is integrated")
+	case "google":
+		if o.Provider.Project == "" || o.Provider.Region == "" || o.Provider.Zone == "" {
+			return fmt.Errorf("oidc.provider.project, region, and zone are required for google")
+		}
+		if !strings.HasPrefix(o.Provider.Zone, o.Provider.Region+"-") {
+			return fmt.Errorf("oidc.provider.zone %q is not in region %q", o.Provider.Zone, o.Provider.Region)
+		}
 	case "":
 		return fmt.Errorf("oidc.provider.kind is required")
 	default:
@@ -38,39 +48,26 @@ func Validate(cfg *Config) error {
 			return fmt.Errorf("oidc.hostname must be a hostname, not a URL")
 		}
 	}
-	if o.Domain.Provider.Kind != "" && o.Domain.Provider.Kind != "aws" {
-		return fmt.Errorf("oidc.domain.provider.kind %q is not supported for managed DNS yet", o.Domain.Provider.Kind)
-	}
-	switch o.Connector.Kind {
-	case "google", "github":
+	switch o.Domain.Provider.Kind {
 	case "":
-		return fmt.Errorf("oidc.connector.kind is required")
+	case o.Provider.Kind:
+		if o.Domain.Provider.Kind == "google" && o.Domain.Zone != "" && o.Domain.Provider.HostedZoneName == "" {
+			return fmt.Errorf("oidc.domain.provider.hosted_zone_name is required for google managed DNS")
+		}
 	default:
-		return fmt.Errorf("oidc.connector.kind %q is not supported", o.Connector.Kind)
+		return fmt.Errorf("oidc.domain.provider.kind %q must match oidc.provider.kind %q for managed DNS", o.Domain.Provider.Kind, o.Provider.Kind)
 	}
-	if o.Connector.ClientSecretARN == "" {
-		return fmt.Errorf("oidc.connector.client_secret_arn is required")
+	if o.Truster == nil {
+		return fmt.Errorf("oidc.truster is required")
 	}
-	if o.SigningKeySecretARN == "" {
-		return fmt.Errorf("oidc.signing_key_secret_arn is required")
-	}
-	if o.Connector.Kind == "github" && o.EncryptionKeySecretARN == "" {
-		return fmt.Errorf("oidc.encryption_key_secret_arn is required for a github connector")
-	}
-	if len(o.Clients) == 0 {
-		return fmt.Errorf("oidc.clients must contain at least one client")
-	}
-	for name, client := range o.Clients {
-		if name == "" {
-			return fmt.Errorf("oidc.clients contains an empty client name")
+	for _, name := range deploymentOwnedTrusterSettings {
+		if _, ok := o.Truster[name]; ok {
+			return fmt.Errorf("oidc.truster.%s is set by Podplane from the deployment; remove it", name)
 		}
-		if len(client.RedirectURIs) == 0 && len(o.DefaultRedirectURIs) == 0 {
-			return fmt.Errorf("oidc.clients.%s requires redirect_uris or oidc.default_redirect_uris", name)
-		}
-		if client.GroupsOverride != "" {
-			if _, ok := o.GroupsOverrides[client.GroupsOverride]; !ok {
-				return fmt.Errorf("oidc.clients.%s.groups_override references unknown groups override %q", name, client.GroupsOverride)
-			}
+	}
+	if secrets, ok := o.Truster["secrets"].(map[string]any); ok {
+		if _, ok := secrets["provider"]; ok {
+			return fmt.Errorf("oidc.truster.secrets.provider is set by Podplane from oidc.provider; remove it")
 		}
 	}
 	return nil

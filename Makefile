@@ -46,7 +46,7 @@ else ifeq ($(GOOS),darwin)
 	endif
 endif
 
-.PHONY: help setup fmt lint precommit test build build-cli build-provider clean
+.PHONY: help setup fmt lint precommit test build build-cli build-provider clean truster-schema check-truster-schema
 
 help: ## Show available targets
 	@echo "Usage: make <target>"
@@ -82,7 +82,14 @@ precommit: ## Check formatting and run linters (read-only)
 		exit 1; \
 	fi
 	@bash -n scripts/tf-provider-release.sh
+	@bash -n scripts/truster-schema.sh
 	@$(MAKE) lint
+
+truster-schema: ## Update the pinned Truster config schema copy
+	@scripts/truster-schema.sh update
+
+check-truster-schema: ## Check the Truster config schema copy matches the pinned release (needs network)
+	@scripts/truster-schema.sh check
 
 test: ## Run tests with race detector
 	go test -v -race ./...

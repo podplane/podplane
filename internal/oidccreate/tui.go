@@ -6,36 +6,76 @@ package oidccreate
 
 import (
 	"fmt"
+	"net/mail"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/podplane/podplane/internal/clusterconfig"
+	"github.com/podplane/podplane/internal/infrafiles"
 	"github.com/podplane/podplane/internal/oidcconfig"
 	"github.com/podplane/podplane/internal/tui"
 )
 
 // configField stores one OIDC wizard prompt, answer, and validation rule.
 type configField struct {
-	label    string
-	value    string
-	validate func(string) error
+	label       string
+	value       string
+	description string
+	validate    func(string) error
 }
 
 // configForm tracks OIDC wizard answers, the active input, and completion or cancellation.
 type configForm struct {
-	fields   []configField
-	index    int
-	input    textinput.Model
-	err      error
-	cancel   bool
-	complete bool
+	kind      string
+	provider  *oidcconfig.Provider
+	connector string
+	clientID  string
+	fields    []configField
+	index     int
+	input     textinput.Model
+	width     int
+	err       error
+	cancel    bool
+	complete  bool
 }
 
-// RunConfigWizard runs an interactive form for a Truster config.
-func RunConfigWizard() (*oidcconfig.Config, error) {
-	m := newConfigForm()
+// RunConfigWizard collects Truster settings, reusing a supplied cluster
+// provider or asking for cloud settings when nil. An empty clientID prompts
+// for the first cluster ID. Login connector selection is always explicit.
+func RunConfigWizard(provider *oidcconfig.Provider, clientID string) (*oidcconfig.Config, error) {
+	providerKind := ""
+	if provider != nil {
+		providerKind = provider.Kind
+	} else {
+		kind, cancelled, err := infrafiles.SelectCloudProvider("Which cloud provider should host the OIDC server?")
+		if err != nil {
+			return nil, err
+		}
+		if cancelled {
+			return nil, fmt.Errorf("OIDC config creation cancelled")
+		}
+		providerKind = kind
+	}
+	connector, cancelled, err := tui.SelectList("Select login connector", "Which login provider should users sign in with?", []list.Item{
+		tui.Item{Key: "google", Label: "Google"},
+		tui.Item{Key: "github", Label: "GitHub"},
+		tui.Item{Label: "Cancel", Cancel: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if cancelled {
+		return nil, fmt.Errorf("OIDC config creation cancelled")
+	}
+	m, err := newConfigForm(providerKind, connector, clientID, provider)
+	if err != nil {
+		return nil, err
+	}
 	got, err := tea.NewProgram(m).Run()
 	if err != nil {
 		return nil, fmt.Errorf("run OIDC config form: %w", err)
@@ -53,26 +93,76 @@ func RunConfigWizard() (*oidcconfig.Config, error) {
 	return form.config()
 }
 
-// newConfigForm creates the initial model for the Truster config form.
-func newConfigForm() configForm {
-	draft := oidcconfig.NewDraftConfig("aws")
-	fields := []configField{
-		{label: "OIDC hostname", value: draft.OIDC.Hostname, validate: tui.Required("OIDC hostname")},
-		{label: "DNS zone", value: draft.OIDC.Domain.Zone, validate: tui.Required("DNS zone")},
-		{label: "AWS region", value: draft.OIDC.Provider.Region, validate: tui.Required("AWS region")},
-		{label: "AWS account ID", value: draft.OIDC.Provider.Account, validate: tui.Required("AWS account ID")},
-		{label: "AWS profile", value: draft.OIDC.Provider.Profile, validate: tui.Required("AWS profile")},
-		{label: "Connector kind", value: draft.OIDC.Connector.Kind, validate: validateConnector},
-		{label: "Connector client secret ARN", value: draft.OIDC.Connector.ClientSecretARN, validate: tui.Required("connector client secret ARN")},
-		{label: "Signing key secret ARN", value: draft.OIDC.SigningKeySecretARN, validate: tui.Required("signing key secret ARN")},
-		{label: "Encryption key secret ARN", value: draft.OIDC.EncryptionKeySecretARN, validate: tui.Required("encryption key secret ARN")},
+// newConfigForm creates the initial model for the Truster config form for
+// providerKind and connector, asking for the first cluster ID only when the
+// caller has not supplied its client ID.
+func newConfigForm(providerKind, connector, clientID string, provider *oidcconfig.Provider) (configForm, error) {
+	draft, err := oidcconfig.NewDraftConfig(providerKind, connector)
+	if err != nil {
+		return configForm{}, err
 	}
+	o := draft.OIDC
+	if provider != nil {
+		o.Provider = *provider
+		prefix, suffix := fmt.Sprintf("arn:aws:secretsmanager:%s:%s:secret:", provider.Region, provider.Account), ""
+		if providerKind == "google" {
+			prefix, suffix = "projects/"+provider.Project+"/secrets/", "/versions/latest"
+		}
+		secrets := o.Truster["secrets"].(map[string]any)
+		secrets["signing_key_name"] = prefix + "truster-signing-key" + suffix
+		secrets["encryption_key_name"] = prefix + "truster-encryption-key" + suffix
+		o.Truster["user_login_connectors"].(map[string]any)[connector].(map[string]any)["credentials_secret"] = prefix + "truster-" + connector + suffix
+	}
+	fields := []configField{
+		{label: "OIDC hostname", value: o.Hostname, validate: tui.Required("OIDC hostname")},
+		{label: "DNS zone", value: o.Domain.Zone, validate: tui.Required("DNS zone")},
+	}
+	if clientID == "" {
+		fields = append(fields, configField{label: "First cluster ID", validate: clusterconfig.ValidateClusterID})
+	}
+	fields = append(fields, configField{
+		label: "Initial administrator email",
+		description: "Use the verified email you sign in with at Google or GitHub.\n" +
+			"Saved in this server's policy to grant podplane:admins access\n" +
+			"to the first cluster. Other users remain denied.",
+		validate: validateAdminEmail,
+	})
+	secret := "secret ARN"
+	switch providerKind {
+	case "google":
+		secret = "Secret Manager version"
+		fields = append(fields,
+			configField{label: "Cloud DNS managed zone name", value: o.Domain.Provider.HostedZoneName, validate: tui.Required("Cloud DNS managed zone name")},
+		)
+		if provider == nil {
+			fields = append(fields,
+				configField{label: "Google Cloud project ID", value: o.Provider.Project, validate: tui.Required("Google Cloud project ID")},
+				configField{label: "Google Cloud region", value: o.Provider.Region, validate: tui.Required("Google Cloud region")},
+				configField{label: "Google Cloud zone", value: o.Provider.Zone, validate: tui.Required("Google Cloud zone")},
+			)
+		}
+	case "aws":
+		if provider == nil {
+			fields = append(fields,
+				configField{label: "AWS region", value: o.Provider.Region, validate: tui.Required("AWS region")},
+				configField{label: "AWS account ID", value: o.Provider.Account, validate: tui.Required("AWS account ID")},
+				configField{label: "AWS profile", value: o.Provider.Profile, validate: tui.Required("AWS profile")},
+			)
+		}
+	}
+	secrets := o.Truster["secrets"].(map[string]any)
+	login := o.Truster["user_login_connectors"].(map[string]any)[connector].(map[string]any)
+	fields = append(fields,
+		configField{label: credentialsLabel(login, secret), value: login["credentials_secret"].(string), validate: tui.Required("OAuth client credentials " + secret)},
+		configField{label: "Signing key " + secret, value: secrets["signing_key_name"].(string), validate: tui.Required("signing key " + secret)},
+		configField{label: "Encryption key " + secret, value: secrets["encryption_key_name"].(string), validate: tui.Required("encryption key " + secret)},
+	)
 	input := textinput.New()
 	input.Focus()
 	input.CharLimit = 512
 	input.SetValue(fields[0].value)
 	input.CursorEnd()
-	return configForm{fields: fields, input: input}
+	return configForm{kind: providerKind, provider: provider, connector: connector, clientID: clientID, fields: fields, input: input, width: 80}, nil
 }
 
 // Init starts cursor blinking for the Truster config form.
@@ -84,6 +174,9 @@ func (m configForm) Init() tea.Cmd {
 // OIDC config form.
 func (m configForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "esc":
@@ -108,6 +201,9 @@ func (m configForm) View() string {
 	title := lipgloss.NewStyle().Foreground(tui.ColorWhite).Background(tui.ColorPrimary).Padding(0, 1).Render("New Truster config")
 	progress := fmt.Sprintf("%d/%d", m.index+1, len(m.fields))
 	label := lipgloss.NewStyle().Bold(true).Render(m.fields[m.index].label)
+	if description := m.fields[m.index].description; description != "" {
+		label += "\n" + description + "\n"
+	}
 	var errText string
 	if m.err != nil {
 		errText = "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("#d20f39")).Render(m.err.Error())
@@ -116,7 +212,10 @@ func (m configForm) View() string {
 	if m.index > 0 {
 		help = "enter/tab: next  shift+tab: back  esc: cancel"
 	}
-	return fmt.Sprintf("\n%s %s\n\n%s\n%s%s\n\n%s\n", title, progress, label, m.input.View(), errText, help)
+	// Keep the input unbounded so textinput never scrolls it horizontally.
+	// Wrap the rendered text (including its cursor), not the stored value.
+	view := fmt.Sprintf("\n%s %s\n\n%s\n%s%s\n\n%s\n", title, progress, label, m.input.View(), errText, help)
+	return ansi.Hardwrap(view, max(1, m.width-1), true)
 }
 
 // moveNext validates and stores the active field, advancing to the next field
@@ -156,31 +255,77 @@ func (m configForm) movePrevious() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// config converts completed form answers into an OIDC configuration.
+// config converts completed form answers into an OIDC configuration and
+// validates it.
 func (m configForm) config() (*oidcconfig.Config, error) {
 	values := map[string]string{}
 	for _, field := range m.fields {
 		values[field.label] = field.value
 	}
-	cfg := oidcconfig.NewDraftConfig("aws")
-	cfg.OIDC.Hostname = values["OIDC hostname"]
-	cfg.OIDC.Domain.Zone = values["DNS zone"]
-	cfg.OIDC.Provider.Region = values["AWS region"]
-	cfg.OIDC.Provider.Account = values["AWS account ID"]
-	cfg.OIDC.Provider.Profile = values["AWS profile"]
-	cfg.OIDC.Connector.Kind = values["Connector kind"]
-	cfg.OIDC.Connector.ClientSecretARN = values["Connector client secret ARN"]
-	cfg.OIDC.SigningKeySecretARN = values["Signing key secret ARN"]
-	cfg.OIDC.EncryptionKeySecretARN = values["Encryption key secret ARN"]
+	cfg, err := oidcconfig.NewDraftConfig(m.kind, m.connector)
+	if err != nil {
+		return nil, err
+	}
+	o := &cfg.OIDC
+	o.Hostname = values["OIDC hostname"]
+	o.Domain.Zone = values["DNS zone"]
+	secret := "secret ARN"
+	switch m.kind {
+	case "google":
+		secret = "Secret Manager version"
+		o.Domain.Provider.HostedZoneName = values["Cloud DNS managed zone name"]
+		o.Provider.Project = values["Google Cloud project ID"]
+		o.Provider.Region = values["Google Cloud region"]
+		o.Provider.Zone = values["Google Cloud zone"]
+	case "aws":
+		o.Provider.Region = values["AWS region"]
+		o.Provider.Account = values["AWS account ID"]
+		o.Provider.Profile = values["AWS profile"]
+	}
+	if m.provider != nil {
+		o.Provider = *m.provider
+	}
+	o.Truster["secrets"] = map[string]any{
+		"signing_key_name":    values["Signing key "+secret],
+		"encryption_key_name": values["Encryption key "+secret],
+	}
+	login := o.Truster["user_login_connectors"].(map[string]any)[m.connector].(map[string]any)
+	login["credentials_secret"] = values[credentialsLabel(login, secret)]
+	clientID := m.clientID
+	if clientID == "" {
+		clientID = values["First cluster ID"]
+		if err := clusterconfig.ValidateClusterID(clientID); err != nil {
+			return nil, fmt.Errorf("first cluster ID: %w", err)
+		}
+	}
+	email := strings.ToLower(strings.TrimSpace(values["Initial administrator email"]))
+	if err := validateAdminEmail(email); err != nil {
+		return nil, err
+	}
+	policy := o.Truster["static_policy"].(map[string]any)
+	policy["user_group_mappings"] = map[string]any{
+		"initial-admin": map[string]any{email: []any{"podplane:admins"}},
+	}
+	policy["clients"].(map[string]any)[clientID] = map[string]any{
+		"user_group_mapping": "initial-admin",
+	}
+	if err := oidcconfig.Validate(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
-// validateConnector validates supported Truster connector kinds.
-func validateConnector(value string) error {
-	switch value {
-	case "google", "github":
-		return nil
-	default:
-		return fmt.Errorf("connector kind must be google or github")
+// credentialsLabel returns the form label for a draft login connector's OAuth
+// client credentials, naming the connector and the form of secret reference.
+func credentialsLabel(login map[string]any, secret string) string {
+	return login["display_name"].(string) + " OAuth client credentials " + secret
+}
+
+// validateAdminEmail accepts a single mailbox, not a display name or wildcard.
+func validateAdminEmail(value string) error {
+	address, err := mail.ParseAddress(value)
+	if err != nil || address.Address != value || strings.ContainsAny(value, "*?") {
+		return fmt.Errorf("enter your sign-in email address, without a display name")
 	}
+	return nil
 }

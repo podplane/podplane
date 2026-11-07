@@ -16,6 +16,7 @@ import (
 	"github.com/podplane/podplane/internal/tfdeps"
 	"github.com/podplane/podplane/internal/tfexec"
 	"github.com/podplane/podplane/internal/tfgen"
+	"github.com/podplane/podplane/internal/tfstate"
 	"github.com/podplane/podplane/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -58,18 +59,19 @@ func newClusterUpgradeCmd(c *config.Config) *cobra.Command {
 				return err
 			}
 			clusterOptions.NstanceModuleDir = configuration.NstanceModuleDir
+			stateBackend, err := tfstate.ForCluster(cfg)
+			if err != nil {
+				return err
+			}
 			if err := tfgen.WriteCluster(path, cfg, clusterOptions); err != nil {
+				return err
+			}
+			if err := stateBackend.WriteConfig(dir); err != nil {
 				return err
 			}
 			fmt.Printf("Upgraded Podplane OpenTofu/Terraform dependencies in %s\n", dir)
 			if noApply {
 				return nil
-			}
-			executor = executor.WithCLIConfig(configuration.CLIConfigPath)
-			applyCtx, applyCancel := context.WithTimeout(context.Background(), 2*time.Hour)
-			defer applyCancel()
-			if err := executor.Init(applyCtx, dir); err != nil {
-				return err
 			}
 			ok, err := tui.Confirm("Apply upgraded OpenTofu/Terraform dependencies?", autoApprove, 0)
 			if err != nil {
@@ -78,7 +80,9 @@ func newClusterUpgradeCmd(c *config.Config) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("apply cancelled")
 			}
-			return executor.Apply(applyCtx, dir, autoApprove)
+			applyCtx, applyCancel := context.WithTimeout(cmd.Context(), 2*time.Hour)
+			defer applyCancel()
+			return executor.WithCLIConfig(configuration.CLIConfigPath).InitApply(applyCtx, dir, stateBackend.ConfigFile(), autoApprove)
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "cluster-config", "f", defaultClusterConfigName, "Path to the cluster config file")

@@ -17,19 +17,7 @@
     "oidc": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider", "hostname", "connector", "signing_key_secret_arn", "clients"],
-      "allOf": [{
-        "if": {
-          "properties": {
-            "connector": {
-              "properties": { "kind": { "const": "github" } },
-              "required": ["kind"]
-            }
-          },
-          "required": ["connector"]
-        },
-        "then": { "required": ["encryption_key_secret_arn"] }
-      }],
+      "required": ["provider", "hostname", "truster"],
       "properties": {
         "provider": { "$ref": "#/$defs/provider" },
         "hostname": {
@@ -37,31 +25,36 @@
           "description": "Hostname for the OIDC issuer. Podplane serves the issuer at https://<hostname>."
         },
         "domain": { "$ref": "#/$defs/domain" },
-        "connector": { "$ref": "#/$defs/connector" },
-        "signing_key_secret_arn": {
-          "type": "string",
-          "description": "AWS Secrets Manager ARN containing the OIDC signing key."
-        },
-        "encryption_key_secret_arn": {
-          "type": "string",
-          "description": "AWS Secrets Manager ARN containing Truster's encryption key. Required for GitHub connectors and recommended for refresh-token support."
-        },
-        "default_redirect_uris": {
-          "type": "array",
-          "description": "Default redirect URIs applied to clients that do not specify their own redirect_uris.",
-          "items": { "type": "string" }
-        },
-        "clients": {
+        "truster": { "$ref": "#/$defs/truster" }
+      }
+    },
+    "truster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["secrets", "user_login_connectors"],
+      "description": "Truster configuration, passed unchanged to the Truster module as truster_config. The creation wizard registers the first cluster's client and defaults its redirect URI to http://localhost:8000/callback. Podplane sets issuer_url, http_listen_addr, serving_certificate, and secrets.provider from the deployment. See https://truster.dev/docs/config/ for every option.",
+      "properties": {
+        "signing_algorithm": { "$ref": "podplane.oidc.truster.schema.json#/properties/signing_algorithm" },
+        "jwks_kid": { "$ref": "podplane.oidc.truster.schema.json#/properties/jwks_kid" },
+        "access_token_ttl": { "$ref": "podplane.oidc.truster.schema.json#/properties/access_token_ttl" },
+        "id_token_ttl": { "$ref": "podplane.oidc.truster.schema.json#/properties/id_token_ttl" },
+        "templates_dir": { "$ref": "podplane.oidc.truster.schema.json#/properties/templates_dir" },
+        "secrets": {
           "type": "object",
-          "description": "OIDC client definitions keyed by client name.",
-          "minProperties": 1,
-          "additionalProperties": { "$ref": "#/$defs/client" }
+          "additionalProperties": false,
+          "required": ["signing_key_name"],
+          "description": "Secrets Truster loads at startup. Podplane sets the secrets provider from oidc.provider: AWS Secrets Manager ARNs on aws, or Secret Manager versions such as projects/<project>/secrets/<secret>/versions/latest on google.",
+          "properties": {
+            "signing_key_name": { "$ref": "podplane.oidc.truster.schema.json#/$defs/secrets/properties/signing_key_name" },
+            "encryption_key_name": { "$ref": "podplane.oidc.truster.schema.json#/$defs/secrets/properties/encryption_key_name" }
+          }
         },
-        "groups_overrides": {
-          "type": "object",
-          "description": "Static group mappings keyed by override name. Clients reference these by groups_override.",
-          "additionalProperties": { "$ref": "#/$defs/groupsOverride" }
-        }
+        "user_login_connectors": { "$ref": "podplane.oidc.truster.schema.json#/properties/user_login_connectors" },
+        "email": { "$ref": "podplane.oidc.truster.schema.json#/properties/email" },
+        "service_token_issuers": { "$ref": "podplane.oidc.truster.schema.json#/properties/service_token_issuers" },
+        "static_policy": { "$ref": "podplane.oidc.truster.schema.json#/properties/static_policy" },
+        "state_database": { "$ref": "podplane.oidc.truster.schema.json#/properties/state_database" },
+        "policy_database": { "$ref": "podplane.oidc.truster.schema.json#/properties/policy_database" }
       }
     },
     "provider": {
@@ -71,12 +64,12 @@
       "properties": {
         "kind": {
           "type": "string",
-          "description": "Cloud provider used to deploy Truster. Podplane currently supports aws.",
-          "enum": ["aws", "google", "gcp"]
+          "description": "Cloud provider used to deploy Truster.",
+          "enum": ["aws", "google"]
         },
         "region": {
           "type": "string",
-          "description": "Provider region. Required for aws."
+          "description": "Provider region. Required."
         },
         "account": {
           "type": "string",
@@ -88,7 +81,11 @@
         },
         "project": {
           "type": "string",
-          "description": "Google Cloud project ID."
+          "description": "Google Cloud project ID. Required for google."
+        },
+        "zone": {
+          "type": "string",
+          "description": "Google Cloud zone for the Truster instance, within region. Required for google."
         }
       }
     },
@@ -109,52 +106,17 @@
       "properties": {
         "kind": {
           "type": "string",
-          "description": "DNS provider used for managed OIDC DNS records. Podplane currently supports aws.",
-          "enum": ["aws"]
+          "description": "DNS provider used for managed OIDC DNS records: aws for Route 53 or google for Cloud DNS. Must match the OIDC provider kind.",
+          "enum": ["aws", "google"]
         },
         "hosted_zone_id": {
           "type": "string",
-          "description": "Provider-specific hosted zone ID. For AWS, this is the Route 53 hosted zone ID."
-        }
-      }
-    },
-    "connector": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "client_secret_arn"],
-      "properties": {
-        "kind": {
-          "type": "string",
-          "description": "Upstream OAuth connector used by Truster.",
-          "enum": ["google", "github"]
+          "description": "Route 53 hosted zone ID for aws. Optional; the zone is looked up by name when omitted."
         },
-        "client_secret_arn": {
+        "hosted_zone_name": {
           "type": "string",
-          "description": "AWS Secrets Manager ARN containing the upstream OAuth client ID and client secret."
+          "description": "Cloud DNS managed zone name for google. Required for google managed DNS."
         }
-      }
-    },
-    "client": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "groups_override": {
-          "type": "string",
-          "description": "Name of a groups_overrides entry to apply to this client."
-        },
-        "redirect_uris": {
-          "type": "array",
-          "description": "Redirect URIs allowed for this client. Overrides default_redirect_uris when set.",
-          "items": { "type": "string" }
-        }
-      }
-    },
-    "groupsOverride": {
-      "type": "object",
-      "description": "Mapping from user email or subject to static group names.",
-      "additionalProperties": {
-        "type": "array",
-        "items": { "type": "string" }
       }
     }
   }

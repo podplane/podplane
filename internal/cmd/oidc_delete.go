@@ -13,6 +13,7 @@ import (
 	"github.com/podplane/podplane/internal/oidcconfig"
 	"github.com/podplane/podplane/internal/oidcdelete"
 	"github.com/podplane/podplane/internal/tfexec"
+	"github.com/podplane/podplane/internal/tfstate"
 	"github.com/podplane/podplane/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -34,16 +35,30 @@ func newOIDCDeleteCmd(c *config.Config) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if _, err := oidcconfig.Load(path); err != nil {
+			cfg, err := oidcconfig.Load(path)
+			if err != nil {
 				return err
 			}
 			if noApply {
 				fmt.Println("--no-apply set; OIDC config validated and no destroy was run.")
 				return nil
 			}
+			stateBackend, err := tfstate.ForOIDC(cfg)
+			if err != nil {
+				return err
+			}
+			if err := stateBackend.Check(cmd.Context(), cmd.ErrOrStderr()); err != nil {
+				return err
+			}
 			dir := filepath.Dir(path)
+			if err := stateBackend.WriteConfig(dir); err != nil {
+				return err
+			}
 			executor, err := tfexec.NewCLI()
 			if err != nil {
+				return err
+			}
+			if err := executor.Init(cmd.Context(), dir, stateBackend.ConfigFile()); err != nil {
 				return err
 			}
 			if err := oidcdelete.Delete(context.Background(), oidcdelete.DeleteOptions{

@@ -2,6 +2,6 @@
 // Copyright The Podplane Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package google will contain the Google Cloud cluster delete provider
-// implementation.
+// Package google implements Google Cloud cluster destroy cleanup for the
+// clusterdelete package.
 package google

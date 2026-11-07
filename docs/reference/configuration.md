@@ -365,22 +365,23 @@ New OIDC configs include a relative `$schema` reference to `./podplane.oidc.sche
         "kind": "aws"
       }
     },
-    "connector": {
-      "kind": "google",
-      "client_secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:truster-connector-secret"
-    },
-    "signing_key_secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:truster-signing-key",
-    "encryption_key_secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:truster-encryption-key",
-    "default_redirect_uris": ["http://localhost:8000"],
-    "clients": {
-      "kubelogin-prod": {
-        "groups_override": "prod-groups"
+    "truster": {
+      "secrets": {
+        "signing_key_name": "arn:aws:secretsmanager:us-east-1:123456789012:secret:truster-signing-key",
+        "encryption_key_name": "arn:aws:secretsmanager:us-east-1:123456789012:secret:truster-encryption-key"
       },
-      "kubelogin-dev": {}
-    },
-    "groups_overrides": {
-      "prod-groups": {
-        "demo@example.com": ["prod-admins", "devs"]
+      "user_login_connectors": {
+        "google": {
+          "type": "google",
+          "display_name": "Google",
+          "credentials_secret": "arn:aws:secretsmanager:us-east-1:123456789012:secret:truster-google"
+        }
+      },
+      "static_policy": {
+        "default_redirect_uris": ["http://localhost:8000/callback"],
+        "clients": {
+          "example-cluster": {}
+        }
       }
     }
   }
@@ -391,21 +392,37 @@ New OIDC configs include a relative `$schema` reference to `./podplane.oidc.sche
 
 | Field | Description |
 |---|---|
-| `oidc.provider.kind` | Infrastructure provider. Only `aws` is currently supported. |
+| `oidc.provider.kind` | Infrastructure provider - `aws` or `google` |
 | `oidc.provider.region` | Provider region to deploy into (e.g. `us-east-1`) |
-| `oidc.provider.account` | Provider account identifier (e.g. AWS account ID) |
-| `oidc.provider.profile` | Provider credentials profile (e.g. AWS CLI profile name) |
+| `oidc.provider.account` | AWS account ID (AWS only) |
+| `oidc.provider.profile` | AWS CLI profile name (AWS only) |
+| `oidc.provider.project` | Google Cloud project ID (Google Cloud only) |
+| `oidc.provider.zone` | Google Cloud zone for the Truster instance, within the region (e.g. `us-central1-a`; Google Cloud only) |
 | `oidc.hostname` | The hostname for the OIDC server (e.g. `auth.example.com`) |
 | `oidc.domain.zone` | Domain zone for the hostname (e.g. `example.com`) |
-| `oidc.domain.provider.kind` | Managed DNS provider. Only `aws` is currently supported. |
-| `oidc.connector.kind` | Upstream OAuth provider - `google` or `github` |
-| `oidc.connector.client_secret_arn` | ARN of the AWS Secrets Manager secret containing the OAuth client ID and secret |
-| `oidc.signing_key_secret_arn` | ARN of the AWS Secrets Manager secret containing the OIDC signing key |
-| `oidc.encryption_key_secret_arn` | ARN of the AWS Secrets Manager secret containing Truster's encryption key. Required for GitHub connectors and recommended when enabling refresh tokens. |
-| `oidc.default_redirect_uris` | Default redirect URIs applied to clients that don't specify their own |
-| `oidc.clients.<name>` | Map of OIDC client configurations |
-| `oidc.clients.<name>.groups_override` | Name of a groups override to apply to the specified client (optional) |
-| `oidc.groups_overrides.<name>` | Static group mappings, where each key is an email and the value is an array of group names |
+| `oidc.domain.provider.kind` | Managed DNS provider - `aws` (Route 53) or `google` (Cloud DNS); must match `oidc.provider.kind` |
+| `oidc.domain.provider.hosted_zone_id` | Route 53 hosted zone ID (AWS only, optional; looked up from `oidc.domain.zone` when omitted) |
+| `oidc.domain.provider.hosted_zone_name` | Cloud DNS managed zone name (Google Cloud only; required for managed DNS) |
+| `oidc.truster` | Truster server configuration, passed through to Truster unchanged (see below) |
+
+### Truster configuration
+
+`oidc.truster` is a [Truster configuration](https://truster.dev/docs/config/). Podplane passes it to the Truster deployment module unchanged, so every Truster setting is available: email and other login connectors, trust policies, refresh tokens, DPoP, databases, and so on. `podplane oidc create` writes a minimal starting point with one Google or GitHub login connector, chosen in the wizard, plus a client for the cluster when run from `podplane cluster create`; edit `oidc.truster` to go further.
+
+Each cluster logs in with its own OIDC client, whose ID is the cluster's `cluster.id` unless `cluster.oidc.client_id` overrides it. To share one Truster server between clusters, add a client per cluster under `oidc.truster.static_policy.clients`, keyed by that client ID, and run `podplane oidc create` again to apply it.
+
+Secret references such as `secrets.signing_key_name` and connector `credentials_secret` are AWS Secrets Manager ARNs on AWS, or Secret Manager versions such as `projects/<project>/secrets/<secret>/versions/latest` on Google Cloud.
+
+Podplane owns the deployment, so these Truster settings are derived from the rest of the file and must not be set in `oidc.truster`:
+
+| Truster setting | Derived from |
+|---|---|
+| `issuer_url` | `https://` + `oidc.hostname` |
+| `http_listen_addr` | The deployment module |
+| `serving_certificate` | The deployment module |
+| `secrets.provider` | The deployment module, for `oidc.provider.kind` |
+
+The generated `podplane.oidc.schema.json` references a pinned copy of Truster's schema, written next to it as `podplane.oidc.truster.schema.json`, so editors validate and complete `oidc.truster` too. Podplane deploys the Truster module at the same pinned version.
 
 ## File Location
 

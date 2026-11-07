@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -671,19 +672,118 @@ func TestGenerateAWSClusterTerraformUsesSecretsProviderRegionInGrant(t *testing.
 	}
 }
 
+// oidcTrusterConfig decodes a Truster configuration the way oidcconfig.Load
+// does, so numbers arrive as float64.
+func oidcTrusterConfig(t *testing.T, raw string) map[string]any {
+	t.Helper()
+	var config map[string]any
+	if err := json.Unmarshal([]byte(raw), &config); err != nil {
+		t.Fatal(err)
+	}
+	return config
+}
+
+// TestGenerateGoogleOIDCTerraform verifies the generated Google Cloud OIDC
+// Terraform deploys the pinned Truster module with a GCS backend and Cloud DNS
+// records.
+func TestGenerateGoogleOIDCTerraform(t *testing.T) {
+	cfg := &oidcconfig.Config{OIDC: oidcconfig.OIDC{
+		Provider: oidcconfig.Provider{Kind: "google", Project: "demo-project", Region: "australia-southeast1", Zone: "australia-southeast1-b"},
+		Hostname: "auth.example.com",
+		Domain:   oidcconfig.Domain{Zone: "example.com", Provider: oidcconfig.DomainProvider{Kind: "google", HostedZoneName: "example-com"}},
+		Truster: oidcTrusterConfig(t, `{
+			"secrets": {"signing_key_name": "projects/demo-project/secrets/signing/versions/latest", "encryption_key_name": "projects/demo-project/secrets/encryption/versions/latest"},
+			"user_login_connectors": {"github": {"type": "github", "display_name": "GitHub", "credentials_secret": "projects/demo-project/secrets/connector/versions/latest"}},
+			"static_policy": {"default_redirect_uris": ["http://localhost:8000"], "clients": {"example-cluster": {}}}
+		}`),
+	}}
+	files, err := GenerateOIDC(cfg)
+	if err != nil {
+		t.Fatalf("GenerateOIDC returned error: %v", err)
+	}
+	contents := fileContents(files)
+	assertExpectedTerraform(t, "podplane.oidc.google.main.expected.tf", contents["podplane.oidc.main.tf"])
+	if strings.Contains(contents["podplane.oidc.main.tf"], "aws") {
+		t.Fatalf("Google OIDC Terraform references AWS:\n%s", contents["podplane.oidc.main.tf"])
+	}
+	// Same project: include hostnames that alias after punctuation replacement
+	// or truncation, and a digit-leading hostname invalid as a bare SA ID.
+	seen := map[string]string{}
+	for _, hostname := range []string{"auth.example.com", "auth-example.com", "auth.example.net", "123.example.com", strings.Repeat("a", 63) + ".example.com"} {
+		cfg.OIDC.Hostname = hostname
+		files, err := GenerateOIDC(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		generated := fileContents(files)["podplane.oidc.main.tf"]
+		match := regexp.MustCompile(`name_prefix\s*=\s*"([^"]+)"`).FindStringSubmatch(generated)
+		if len(match) != 2 || !regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`).MatchString(match[1]) {
+			t.Fatalf("invalid Google service-account prefix for %s: %v", hostname, match)
+		}
+		name := match[1]
+		if other, exists := seen[name]; exists {
+			t.Fatalf("%s and %s share Google resource name %s", hostname, other, name)
+		}
+		seen[name] = hostname
+		if !regexp.MustCompile(`name\s*=\s*"` + name + `"`).MatchString(generated) {
+			t.Fatalf("network name does not match module prefix %s", name)
+		}
+		cfg.OIDC.Hostname = strings.ToUpper(hostname)
+		again, err := GenerateOIDC(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := regexp.MustCompile(`name_prefix\s*=\s*"([^"]+)"`).FindStringSubmatch(fileContents(again)["podplane.oidc.main.tf"]); len(got) != 2 || got[1] != name {
+			t.Fatalf("hostname case changed deployment identity: %v", got)
+		}
+		awsConfig := *cfg
+		awsConfig.OIDC.Provider = oidcconfig.Provider{Kind: "aws", Region: "us-east-1"}
+		awsConfig.OIDC.Domain = oidcconfig.Domain{}
+		awsFiles, err := GenerateOIDC(&awsConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
+		awsGenerated := fileContents(awsFiles)["podplane.oidc.main.tf"]
+		for _, want := range []string{
+			`name_prefix = "` + name + `"`,
+			`Name = "` + name + `-vpc"`,
+			`Name = "` + name + `-igw"`,
+			`Name = "` + name + `-rt"`,
+		} {
+			if !strings.Contains(awsGenerated, want) {
+				t.Fatalf("AWS names differ from Google for %s: missing %s", hostname, want)
+			}
+		}
+	}
+}
+
 // TestGenerateAWSOIDCTerraform verifies the generated AWS OIDC Terraform
-// contains the expected Truster settings.
+// passes the whole Truster configuration to the pinned module unchanged,
+// including settings Podplane does not model, numbers, and strings that look
+// like Terraform templates.
 func TestGenerateAWSOIDCTerraform(t *testing.T) {
 	cfg := &oidcconfig.Config{OIDC: oidcconfig.OIDC{
-		Provider:               oidcconfig.Provider{Kind: "aws", Region: "us-east-1", Account: "123456789012"},
-		Hostname:               "https://auth.example.com",
-		Domain:                 oidcconfig.Domain{Zone: "example.com", Provider: oidcconfig.DomainProvider{Kind: "aws"}},
-		Connector:              oidcconfig.Connector{Kind: "google", ClientSecretARN: "arn:connector"},
-		SigningKeySecretARN:    "arn:signing",
-		EncryptionKeySecretARN: "arn:encryption",
-		DefaultRedirectURIs:    []string{"http://localhost:8000"},
-		Clients:                map[string]oidcconfig.Client{"kubelogin": {GroupsOverride: "production"}},
-		GroupsOverrides:        map[string]oidcconfig.GroupsOverride{"production": {"ops@example.com": {"admins"}}},
+		Provider: oidcconfig.Provider{Kind: "aws", Region: "us-east-1", Account: "123456789012"},
+		Hostname: "https://auth.example.com",
+		Domain:   oidcconfig.Domain{Zone: "example.com", Provider: oidcconfig.DomainProvider{Kind: "aws"}},
+		Truster: oidcTrusterConfig(t, `{
+			"access_token_ttl": "10m",
+			"secrets": {"signing_key_name": "arn:signing", "encryption_key_name": "arn:encryption"},
+			"user_login_connectors": {
+				"google": {"type": "google", "display_name": "Google", "credentials_secret": "arn:connector"},
+				"email": {"type": "email", "display_name": "Email ${not-a-template}"}
+			},
+			"email": {
+				"otp_secret_name": "arn:otp",
+				"smtp": {"host": "smtp.example.com", "port": 587, "from_address": "auth@example.com"}
+			},
+			"static_policy": {
+				"default_redirect_uris": ["http://localhost:8000"],
+				"clients": {"example-cluster": {"user_group_mapping": "production"}},
+				"user_group_mappings": {"production": {"ops@example.com": ["admins"]}},
+				"trust_policies": {"ci": {"issuer": "https://token.actions.githubusercontent.com", "groups": ["deployers"]}}
+			}
+		}`),
 	}}
 	files, err := GenerateOIDC(cfg)
 	if err != nil {
@@ -705,16 +805,16 @@ func TestGenerateAWSOIDCTerraform(t *testing.T) {
 	assertExpectedTerraform(t, "podplane.oidc.main.expected.tf", contents["podplane.oidc.main.tf"])
 	assertExpectedTerraform(t, "podplane.oidc.variables.expected.tf", contents["podplane.oidc.variables.tf"])
 	assertExpectedTerraform(t, "podplane.oidc.outputs.expected.tf", contents["podplane.oidc.outputs.tf"])
-	got := contents["podplane.oidc.main.tf"] + contents["podplane.oidc.variables.tf"] + contents["podplane.oidc.outputs.tf"]
+	got := contents["podplane.oidc.main.tf"]
 	for _, want := range []string{
-		`source = "truster/truster/aws"`,
+		`source = "truster-dev/truster/aws"`,
+		`version = "` + TrusterModuleVersion + `"`,
 		`oidc_addr = "auth.example.com"`,
-		`credentials_secret = "arn:connector"`,
-		`signing_key_name = "arn:signing"`,
-		`user_group_mapping = "production"`,
+		`"port" = 587`,
+		`"display_name" = "Email $${not-a-template}"`,
+		`"issuer" = "https://token.actions.githubusercontent.com"`,
 		`"ops@example.com" = ["admins"]`,
 		`resource "aws_route53_record" "oidc_ipv4"`,
-		`value = module.oidc.issuer_url`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("generated OIDC tf missing %q:\n%s", want, got)

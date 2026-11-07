@@ -12,6 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 )
 
@@ -38,7 +39,7 @@ func Confirm(message string, autoApprove bool, selected int) (bool, error) {
 // confirmText asks for an explicit "yes" response using standard input and
 // output.
 func confirmText(message string) (bool, error) {
-	fmt.Printf("%s Type yes to continue: ", message)
+	fmt.Printf("%s Type yes to continue: ", ansi.Strip(message))
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
 		return false, err
@@ -132,37 +133,10 @@ func splitConfirmMessage(message string) (string, string) {
 	return title, strings.TrimSpace(body)
 }
 
-// wrapWords wraps text at word boundaries to fit width.
+// wrapWords wraps styled text while preserving explicit line breaks.
 func wrapWords(text string, width int) string {
 	if width <= 0 {
 		return text
 	}
-	words := strings.Fields(text)
-	if len(words) == 0 {
-		return text
-	}
-	var b strings.Builder
-	line := ""
-	for _, word := range words {
-		if line == "" {
-			line = word
-			continue
-		}
-		if len(line)+1+len(word) > width {
-			if b.Len() > 0 {
-				b.WriteByte('\n')
-			}
-			b.WriteString(line)
-			line = word
-			continue
-		}
-		line += " " + word
-	}
-	if line != "" {
-		if b.Len() > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(line)
-	}
-	return b.String()
+	return ansi.Wrap(text, width, "")
 }

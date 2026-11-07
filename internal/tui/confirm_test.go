@@ -23,4 +23,8 @@ func TestWrapWordsWrapsLongText(t *testing.T) {
 	if got != want {
 		t.Fatalf("wrapWords = %q, want %q", got, want)
 	}
+	styled := "\x1b[1mBucket Name: example-cluster\x1b[0m\n\nPrivate and encrypted"
+	if got := wrapWords(styled, 28); got != styled {
+		t.Fatalf("wrapping lost styling or paragraph breaks: %q", got)
+	}
 }

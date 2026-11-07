@@ -8,7 +8,7 @@ aliases:
 
 ## Overview
 
-Removes deployed infrastructure. For AWS and Google Cloud clusters, Podplane first scales Nstance-managed groups to zero in the shard configs, waits for managed VM instances to terminate, falls back to confirmed direct VM termination if managed instances remain, runs OpenTofu/Terraform destroy, then offers to terminate any remaining VM instances tagged/labelled for the cluster.
+Removes deployed infrastructure. For AWS and Google Cloud clusters, Podplane first scales Nstance-managed groups to zero in the shard configs, waits for managed VM instances to terminate, falls back to confirmed direct VM termination if managed instances remain, runs OpenTofu/Terraform destroy, then offers to terminate any Nstance-managed VM instances still tagged/labelled for the cluster. Instances tagged/labelled for the cluster that Nstance does not manage are left alone.
 
 The cluster config and generated `.tf` files are left in place.
 

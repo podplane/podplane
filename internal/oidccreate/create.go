@@ -14,43 +14,52 @@ import (
 	"github.com/podplane/podplane/internal/oidcconfig"
 	"github.com/podplane/podplane/internal/tfexec"
 	"github.com/podplane/podplane/internal/tfgen"
+	"github.com/podplane/podplane/internal/tfstate"
 	"github.com/podplane/podplane/internal/tui"
 )
 
 // Options controls the OIDC create workflow.
 type Options struct {
-	ConfigPath  string
-	NoApply     bool
+	// ConfigPath is the OIDC config file to load, or to create with the
+	// config wizard when it does not exist.
+	ConfigPath string
+	// Provider supplies the cluster's cloud settings for a new config, skipping
+	// duplicate provider questions. Nil lets the standalone wizard collect them.
+	// Existing OIDC configs keep their own provider settings.
+	Provider *oidcconfig.Provider
+	// ClientID is the OIDC client ID of the cluster being created alongside
+	// the server, if any. A new config registers a client for it; when an
+	// existing config has none, Run warns that the cluster cannot log in.
+	ClientID string
+	// NoApply writes the generated files without contacting the cloud.
+	NoApply bool
+	// AutoApprove skips confirmation prompts.
 	AutoApprove bool
 }
 
-// Run creates or loads an OIDC config, writes generated Terraform, and
-// optionally applies it.
+// Run loads or creates an OIDC config, writes its generated
+// OpenTofu/Terraform stack and remote-state backend config beside it, and
+// unless opts.NoApply is set, applies the stack. It returns the server's
+// issuer URL. podplane oidc create and podplane cluster create both use it.
 func Run(ctx context.Context, opts Options) (string, error) {
-	var cfg *oidcconfig.Config
-	if _, err := os.Stat(opts.ConfigPath); os.IsNotExist(err) {
-		fmt.Println("Podplane will deploy Truster.")
-		fmt.Println("Most organisations use one OIDC server across production, staging, development, observability, and CI/CD clusters.")
-		fmt.Println("Consider deploying it in a dedicated or production-grade account, not casually inside the cluster account you happen to be creating today.")
-		cfg, err = RunConfigWizard()
-		if err != nil {
-			return "", err
-		}
-		if err := oidcconfig.Write(opts.ConfigPath, cfg); err != nil {
-			return "", err
-		}
-		fmt.Printf("Created %s\n", opts.ConfigPath)
-	} else if err != nil {
+	cfg, err := loadOrCreate(opts)
+	if err != nil {
 		return "", err
-	} else {
-		var err error
-		cfg, err = oidcconfig.Load(opts.ConfigPath)
-		if err != nil {
+	}
+	backend, err := tfstate.ForOIDC(cfg)
+	if err != nil {
+		return "", err
+	}
+	if !opts.NoApply {
+		if err := backend.Preflight(ctx); err != nil {
 			return "", err
 		}
 	}
 	dir := filepath.Dir(opts.ConfigPath)
 	if err := tfgen.WriteOIDC(dir, cfg); err != nil {
+		return "", err
+	}
+	if err := backend.WriteConfig(dir); err != nil {
 		return "", err
 	}
 	fmt.Printf("Generated Podplane OpenTofu/Terraform files in %s\n", dir)
@@ -61,21 +70,57 @@ func Run(ctx context.Context, opts Options) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	applyCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
-	defer cancel()
-	if err := executor.Init(applyCtx, dir); err != nil {
+	confirm := func(question string) (bool, error) { return tui.Confirm(question, opts.AutoApprove, 0) }
+	if err := backend.Ensure(ctx, os.Stderr, confirm); err != nil {
 		return "", err
 	}
-	ok, err := tui.Confirm("Apply generated OpenTofu/Terraform changes?", opts.AutoApprove, 0)
+	ok, err := confirm("Apply generated OpenTofu/Terraform changes?")
 	if err != nil {
 		return "", err
 	}
 	if !ok {
 		return "", fmt.Errorf("apply cancelled")
 	}
-	executorErr := executor.Apply(applyCtx, dir, opts.AutoApprove)
-	if cfg.OIDC.Domain.Provider.Kind != "aws" || cfg.OIDC.Domain.Zone == "" {
+	applyCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
+	defer cancel()
+	if err := executor.InitApply(applyCtx, dir, backend.ConfigFile(), opts.AutoApprove); err != nil {
+		return "", err
+	}
+	if cfg.OIDC.Domain.Provider.Kind == "" || cfg.OIDC.Domain.Zone == "" {
 		fmt.Println("Manual DNS configuration may be required for the generated OIDC endpoint.")
 	}
-	return cfg.IssuerURL(), executorErr
+	return cfg.IssuerURL(), nil
+}
+
+// loadOrCreate loads the OIDC config at opts.ConfigPath, or creates it with
+// the config wizard when it does not exist.
+func loadOrCreate(opts Options) (*oidcconfig.Config, error) {
+	if _, err := os.Stat(opts.ConfigPath); err == nil {
+		cfg, err := oidcconfig.Load(opts.ConfigPath)
+		if err != nil {
+			return nil, err
+		}
+		if opts.ClientID != "" && !cfg.HasClient(opts.ClientID) {
+			fmt.Printf("Warning: %s has no Truster client %q. Add it under oidc.truster.static_policy.clients and run podplane oidc create again so the cluster can log in.\n", opts.ConfigPath, opts.ClientID)
+		}
+		return cfg, nil
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	fmt.Println("Podplane will deploy Truster.")
+	fmt.Println("Most organisations use one OIDC server across production, staging, development, observability, and CI/CD clusters.")
+	if opts.Provider != nil {
+		fmt.Println("Reusing the cluster's cloud settings for this Truster server.")
+	} else {
+		fmt.Println("Consider deploying it in a dedicated or production-grade account, not casually inside the cluster account you happen to be creating today.")
+	}
+	cfg, err := RunConfigWizard(opts.Provider, opts.ClientID)
+	if err != nil {
+		return nil, err
+	}
+	if err := oidcconfig.Write(opts.ConfigPath, cfg); err != nil {
+		return nil, err
+	}
+	fmt.Printf("Created %s\n", opts.ConfigPath)
+	return cfg, nil
 }

@@ -17,7 +17,7 @@ func NewDraftConfig(providerKind string) (*ClusterConfig, error) {
 	case "google":
 		provider.Region = "us-central1"
 		zone = "us-central1-a"
-		pool = Pool{Arch: "amd64", InstanceType: "e2-medium", Size: 3}
+		pool = Pool{Arch: "amd64", InstanceType: "e2-medium", Size: 1}
 		cfg.Cluster.Secrets = Secrets{
 			DefaultProvider: "gcp-secret-manager",
 			Providers: map[string]SecretsProvider{
@@ -28,7 +28,7 @@ func NewDraftConfig(providerKind string) (*ClusterConfig, error) {
 		provider.Region = "us-east-1"
 		provider.VPC.V6CIDR = "auto"
 		zone = "us-east-1a"
-		pool = Pool{Arch: "arm64", InstanceType: "t4g.medium", Size: 3}
+		pool = Pool{Arch: "arm64", InstanceType: "t4g.medium", Size: 1}
 		cfg.Cluster.Secrets = Secrets{
 			DefaultProvider: "aws-secrets-manager",
 			Providers: map[string]SecretsProvider{

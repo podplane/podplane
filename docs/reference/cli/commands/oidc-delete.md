@@ -8,7 +8,9 @@ aliases:
 
 ## Overview
 
-Removes deployed infrastructure. The OIDC config and generated `.tf` files are left in place.
+Removes deployed infrastructure, reading OpenTofu/Terraform state from the remote object storage bucket configured by `podplane oidc create`. The OIDC config, generated `.tf` files, and the state bucket are left in place.
+
+Before initializing OpenTofu/Terraform, the command verifies the bucket's account/project, security settings, and OIDC hostname ownership markers. Missing or mismatched markers stop deletion, even with `--auto-approve`; see [OIDC state ownership](../oidc-create/). `--no-apply` validates the config without contacting the cloud.
 
 ```
 podplane oidc delete [flags]

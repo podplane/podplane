@@ -36,6 +36,19 @@ func TestClusterSchemaJSONIsValidJSON(t *testing.T) {
 	}
 }
 
+// TestDraftControlPlaneSize checks the initial node count on both clouds.
+func TestDraftControlPlaneSize(t *testing.T) {
+	for _, provider := range []string{"aws", "google"} {
+		cfg, err := NewDraftConfig(provider)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if size := cfg.Cluster.Pools["control-plane"].Size; size != 1 {
+			t.Errorf("%s control plane size = %d, want 1", provider, size)
+		}
+	}
+}
+
 // TestWriteAddsDefaultLocalSchemaRef checks that writing adds the offline schema reference without mutating input.
 func TestWriteAddsDefaultLocalSchemaRef(t *testing.T) {
 	dir := t.TempDir()

@@ -103,7 +103,7 @@ See [CLI Storage](storage.md) for more details about these files and how they ar
 
 ### `oidc` commands
 
-- `create` generates or reads a Truster config file, generates infra-as-code files, and deploys it to AWS via OpenTofu/Terraform
+- `create` generates or reads a Truster config file, generates infra-as-code files, and deploys it to AWS or Google Cloud via OpenTofu/Terraform
 - `delete` removes deployed infrastructure and leaves config and generated `.tf` files in place.
 
 ### authentication commands

@@ -10,71 +10,60 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/podplane/podplane/internal/tui"
 	"github.com/podplane/podplane/pkg/seeds"
 )
 
-// TestCloudProviderItemsDefaultToAWSAndIncludeCancel checks provider ordering and cancellation.
-func TestCloudProviderItemsDefaultToAWSAndIncludeCancel(t *testing.T) {
-	items := cloudProviderItems()
-	if len(items) != 3 {
-		t.Fatalf("cloud provider item count = %d, want 3", len(items))
+// TestConfigFormDerivesClusterIDFromName checks that the cluster ID follows
+// the cluster name as a slug until the user edits it.
+func TestConfigFormDerivesClusterIDFromName(t *testing.T) {
+	form := testConfigForm(t, "aws", "v1.2.3-1")
+	idIndex := indexForField(t, form, "Cluster ID / slug")
+	enter := func(value string) {
+		t.Helper()
+		form.input.SetValue(value)
+		model, _ := form.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		form = model.(configForm)
 	}
 
-	aws, ok := items[0].(tui.Item)
-	if !ok {
-		t.Fatalf("first cloud provider item has type %T, want tui.Item", items[0])
+	enter("Prod EU 1")
+	if got := form.fields[idIndex].value; got != "prod-eu-1" {
+		t.Fatalf("cluster ID after name = %q, want prod-eu-1", got)
 	}
-	if aws.Key != "aws" || aws.Label != "Amazon Web Services (AWS)" || aws.Cancel {
-		t.Fatalf("first cloud provider item = %#v, want default AWS option", aws)
-	}
-
-	google := items[1].(tui.Item)
-	if google.Key != "google" || google.Label != "Google Cloud" || google.Cancel {
-		t.Fatalf("second cloud provider item = %#v, want Google Cloud option", google)
-	}
-
-	cancel := items[2].(tui.Item)
-	if cancel.Label != "Cancel" || !cancel.Cancel {
-		t.Fatalf("third cloud provider item = %#v, want cancel option", cancel)
+	enter("billing")
+	model, _ := form.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	form = model.(configForm)
+	model, _ = form.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	form = model.(configForm)
+	enter("Prod EU 2")
+	if got := form.fields[idIndex].value; got != "billing" {
+		t.Fatalf("edited cluster ID after renaming = %q, want billing kept", got)
 	}
 }
 
-// TestNewConfigFormSkipsOIDCIssuerFieldWhenProvided checks reuse of a resolved issuer URL.
-func TestNewConfigFormSkipsOIDCIssuerFieldWhenProvided(t *testing.T) {
-	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
-
-	for _, field := range form.fields {
-		if field.label == "OIDC issuer URL" {
-			t.Fatal("OIDC issuer URL field should be skipped when issuer URL is already resolved")
+// TestClusterIDFromName checks slugs of names that need hyphens collapsed,
+// trimmed, or truncated, and that the result passes cluster ID validation.
+func TestClusterIDFromName(t *testing.T) {
+	for name, want := range map[string]string{
+		"Example Cluster":  "example-cluster",
+		"  Prod -- EU/1! ": "prod-eu-1",
+		"Café Staging":     "caf-staging",
+		"An extremely long cluster name for production": "an-extremely-long-cluster-name-f",
+		"Thirty-one characters exactly-x a":             "thirty-one-characters-exactly-x",
+	} {
+		got := clusterIDFromName(name)
+		if got != want {
+			t.Errorf("clusterIDFromName(%q) = %q, want %q", name, got, want)
+		}
+		if err := validateClusterID(got); err != nil {
+			t.Errorf("clusterIDFromName(%q) = %q, which is invalid: %v", name, got, err)
 		}
 	}
-
-	cfg, err := form.config()
-	if err != nil {
-		t.Fatalf("config returned error: %v", err)
-	}
-	if got := cfg.Cluster.OIDC.IssuerURL; got != "https://auth.example.com" {
-		t.Fatalf("cluster OIDC issuer URL = %q, want %q", got, "https://auth.example.com")
-	}
-}
-
-// TestNewConfigFormPromptsOIDCIssuerFieldWhenMissing checks that an unresolved issuer is requested.
-func TestNewConfigFormPromptsOIDCIssuerFieldWhenMissing(t *testing.T) {
-	form := testConfigForm(t, "aws", "", "v1.2.3-1")
-
-	for _, field := range form.fields {
-		if field.label == "OIDC issuer URL" {
-			return
-		}
-	}
-	t.Fatal("OIDC issuer URL field should be shown when issuer URL is not resolved")
 }
 
 // TestNewConfigFormRequiresIntentionalDomainlessAPIHostname verifies the API
 // endpoint prompt has no inferred placeholder.
 func TestNewConfigFormRequiresIntentionalDomainlessAPIHostname(t *testing.T) {
-	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "v1.2.3-1")
 	field := form.fields[indexForField(t, form, "Kubernetes API hostname")]
 	if field.value != "" {
 		t.Fatalf("Kubernetes API hostname default = %q, want empty", field.value)
@@ -83,8 +72,8 @@ func TestNewConfigFormRequiresIntentionalDomainlessAPIHostname(t *testing.T) {
 
 // TestNewConfigFormDefaultsToAgenticSeed checks the default seed name and resolved version.
 func TestNewConfigFormDefaultsToAgenticSeed(t *testing.T) {
-	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
-	seedField := form.fields[indexForField(t, form, "Cluster seed (none, minimal, platform, agentic)")]
+	form := testConfigForm(t, "aws", "v1.2.3-1")
+	seedField := form.fields[indexForField(t, form, "Cluster seed")]
 	if seedField.value != seeds.Agentic {
 		t.Fatalf("seed field default = %q, want %q", seedField.value, seeds.Agentic)
 	}
@@ -103,8 +92,13 @@ func TestNewConfigFormDefaultsToAgenticSeed(t *testing.T) {
 
 // TestConfigFormCanSelectPlatformSeed checks the prompt-to-config mapping.
 func TestConfigFormCanSelectPlatformSeed(t *testing.T) {
-	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
-	form.fields[indexForField(t, form, "Cluster seed (none, minimal, platform, agentic)")].value = seeds.Platform
+	form := testConfigForm(t, "aws", "v1.2.3-1")
+	form.index = indexForField(t, form, "Cluster seed")
+	form.input.SetValue(form.fields[form.index].value)
+	model, _ := form.Update(tea.KeyMsg{Type: tea.KeyDown})
+	form = model.(configForm)
+	model, _ = form.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	form = model.(configForm)
 	cfg, err := form.config()
 	if err != nil {
 		t.Fatal(err)
@@ -112,17 +106,27 @@ func TestConfigFormCanSelectPlatformSeed(t *testing.T) {
 	if cfg.Cluster.Seed.Name != seeds.Platform || cfg.Cluster.Seed.Version != "v1.2.3-1" {
 		t.Fatalf("platform seed = %#v", cfg.Cluster.Seed)
 	}
-	for _, name := range []string{"recommended", "app", "invalid"} {
-		if err := validateSeedName(name); err == nil {
-			t.Fatalf("invalid seed %q accepted", name)
-		}
+	model, _ = form.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	form = model.(configForm)
+	if form.input.Value() != seeds.Platform {
+		t.Fatalf("restored seed = %q, want platform", form.input.Value())
 	}
 }
 
 // TestConfigFormCanSelectBareSeed checks that selecting none clears seed name and version.
 func TestConfigFormCanSelectBareSeed(t *testing.T) {
-	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
-	form.fields[indexForField(t, form, "Cluster seed (none, minimal, platform, agentic)")].value = seeds.None
+	form := testConfigForm(t, "aws", "v1.2.3-1")
+	form.index = indexForField(t, form, "Cluster seed")
+	form.input.SetValue(form.fields[form.index].value)
+	for _, want := range []string{seeds.Platform, seeds.Minimal, seeds.None} {
+		model, _ := form.Update(tea.KeyMsg{Type: tea.KeyDown})
+		form = model.(configForm)
+		if form.input.Value() != want {
+			t.Fatalf("selected seed = %q, want %q", form.input.Value(), want)
+		}
+	}
+	model, _ := form.Update(tea.KeyMsg{Type: tea.KeyTab})
+	form = model.(configForm)
 
 	cfg, err := form.config()
 	if err != nil {
@@ -136,11 +140,50 @@ func TestConfigFormCanSelectBareSeed(t *testing.T) {
 	}
 }
 
+// TestDNSSelection verifies manual defaults, managed selection and backtracking
+// produce the intended DNS configuration on both clouds.
+func TestDNSSelection(t *testing.T) {
+	for cloud, kind := range map[string]string{"aws": "aws-route53", "google": "google-cloud-dns"} {
+		form := testConfigForm(t, cloud, "v1.2.3-1")
+		form.fields[indexForField(t, form, "Cluster domain (optional)")].value = "example.com"
+		form.domain = "example.com"
+		if cloud == "google" {
+			form.fields[indexForField(t, form, "Google Cloud project ID")].value = "test-project"
+			form.fields[indexForField(t, form, "Google Cloud DNS managed-zone resource name")].value = "example-zone"
+		}
+		form.index = indexForField(t, form, "DNS provider")
+		form.input.SetValue(form.fields[form.index].value)
+		if form.input.Value() != "manual" {
+			t.Fatal("manual DNS should remain the default")
+		}
+		press := func(key tea.KeyType) {
+			model, _ := form.Update(tea.KeyMsg{Type: key})
+			form = model.(configForm)
+		}
+		press(tea.KeyDown)
+		press(tea.KeyEnter)
+		cfg, err := form.config()
+		if err != nil || cfg.Cluster.Domains[0].Provider == nil || cfg.Cluster.Domains[0].Provider.Kind != kind {
+			t.Fatalf("managed DNS selection: %v, %v", cfg, err)
+		}
+		press(tea.KeyShiftTab)
+		if form.input.Value() != kind {
+			t.Fatal("back navigation lost DNS selection")
+		}
+		press(tea.KeyUp)
+		press(tea.KeyEnter)
+		cfg, err = form.config()
+		if err != nil || cfg.Cluster.Domains[0].Provider != nil || cfg.Cluster.ACME != nil {
+			t.Fatalf("manual DNS kept managed settings: %v, %v", cfg, err)
+		}
+	}
+}
+
 // TestConfigFormBuildsManagedDomainDefaults verifies the concise domain flow.
 func TestConfigFormBuildsManagedDomainDefaults(t *testing.T) {
-	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "v1.2.3-1")
 	form.fields[indexForField(t, form, "Cluster domain (optional)")].value = "staging.example.com"
-	form.fields[indexForField(t, form, "DNS provider (aws-route53 or blank for manual)")].value = "aws-route53"
+	form.fields[indexForField(t, form, "DNS provider")].value = "aws-route53"
 	form.fields[indexForField(t, form, "ACME account email (optional)")].value = "ops@example.com"
 
 	cfg, err := form.config()
@@ -168,7 +211,7 @@ func TestConfigFormBuildsManagedDomainDefaults(t *testing.T) {
 // TestConfigFormOnlyShowsACMEEmailForSupportedDNS verifies that the ACME email
 // field is visible only after selecting a DNS provider with ACME support.
 func TestConfigFormOnlyShowsACMEEmailForSupportedDNS(t *testing.T) {
-	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "v1.2.3-1")
 	field := form.fields[indexForField(t, form, "ACME account email (optional)")]
 	form.domain = "example.com"
 	if form.fieldVisible(field) {
@@ -182,7 +225,7 @@ func TestConfigFormOnlyShowsACMEEmailForSupportedDNS(t *testing.T) {
 
 // TestConfigFormBuildsDomainlessCluster verifies explicit unmanaged API setup.
 func TestConfigFormBuildsDomainlessCluster(t *testing.T) {
-	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "v1.2.3-1")
 	form.fields[indexForField(t, form, "Cluster ID / slug")].value = "production"
 	form.fields[indexForField(t, form, "Kubernetes API hostname")].value = "api.example.net"
 
@@ -204,7 +247,7 @@ func TestConfigFormBuildsDomainlessCluster(t *testing.T) {
 // TestConfigFormAdaptsSubnetsToCustomVPCAndRegion verifies generated subnet
 // CIDRs and availability zones follow the wizard's networking inputs.
 func TestConfigFormAdaptsSubnetsToCustomVPCAndRegion(t *testing.T) {
-	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "v1.2.3-1")
 	form.showNetworking = true
 	form.fields[indexForField(t, form, "AWS region")].value = "us-west-2"
 	form.fields[indexForField(t, form, "VPC IPv4 CIDR")].value = "172.19.0.0/16"
@@ -228,7 +271,7 @@ func TestConfigFormAdaptsSubnetsToCustomVPCAndRegion(t *testing.T) {
 // TestConfigFormRejectsAvailabilityZoneOutsideRegion preserves final config
 // validation as a fallback for the immediate field validation.
 func TestConfigFormRejectsAvailabilityZoneOutsideRegion(t *testing.T) {
-	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "v1.2.3-1")
 	form.showNetworking = true
 	form.fields[indexForField(t, form, "AWS region")].value = "us-west-2"
 	form.fields[indexForField(t, form, "AWS availability zone")].value = "us-west-1a"
@@ -259,7 +302,7 @@ func TestConfigFormRejectsInvalidNetworkFieldsBeforeAdvancing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.field, func(t *testing.T) {
-			form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
+			form := testConfigForm(t, "aws", "v1.2.3-1")
 			form.showNetworking = true
 			if tt.prepare != nil {
 				tt.prepare(&form)
@@ -281,7 +324,7 @@ func TestConfigFormRejectsInvalidNetworkFieldsBeforeAdvancing(t *testing.T) {
 
 // TestConfigFormCanNavigateBackWithoutLosingAnswers checks saved answers and back-navigation hints.
 func TestConfigFormCanNavigateBackWithoutLosingAnswers(t *testing.T) {
-	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
+	form := testConfigForm(t, "aws", "v1.2.3-1")
 	form.input.SetValue("production")
 	if view := form.View(); strings.Contains(view, "shift+tab: back") {
 		t.Fatalf("first cluster step should not show back hint; view = %q", view)
@@ -318,8 +361,8 @@ func TestConfigFormCanNavigateBackWithoutLosingAnswers(t *testing.T) {
 
 // TestConfigFormBackNavigationSkipsHiddenNetworkingFields checks navigation past disabled network prompts.
 func TestConfigFormBackNavigationSkipsHiddenNetworkingFields(t *testing.T) {
-	form := testConfigForm(t, "aws", "https://auth.example.com", "v1.2.3-1")
-	form.index = form.nextIndex(indexForField(t, form, "Control-plane architecture") - 1)
+	form := testConfigForm(t, "aws", "v1.2.3-1")
+	form.index = form.nextIndex(indexForField(t, form, "Control plane architecture") - 1)
 	form.input.SetValue(form.fields[form.index].value)
 
 	model, _ := form.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
@@ -329,10 +372,96 @@ func TestConfigFormBackNavigationSkipsHiddenNetworkingFields(t *testing.T) {
 	}
 }
 
+// TestConfigFormArchitectureSelection checks default and alternate architectures,
+// matching machine suggestions, and preservation of a custom machine type.
+func TestConfigFormArchitectureSelection(t *testing.T) {
+	for _, tt := range []struct{ provider, arch, machine, alternateArch, alternateMachine string }{
+		{"aws", "arm64", "t4g.medium", "amd64", "t3.medium"},
+		{"google", "amd64", "e2-medium", "arm64", "t2a-standard-2"},
+	} {
+		t.Run(tt.provider, func(t *testing.T) {
+			form := testConfigForm(t, tt.provider, "v1.2.3-1")
+			if tt.provider == "google" {
+				form.fields[indexForField(t, form, "Google Cloud project ID")].value = "test-project"
+			}
+			cfg, err := form.config()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pool := cfg.Cluster.Pools["control-plane"]; pool.Arch != tt.arch || pool.InstanceType != tt.machine {
+				t.Fatalf("default pool = %#v", pool)
+			}
+			form.index = indexForField(t, form, "Control plane architecture")
+			form.input.SetValue(form.fields[form.index].value)
+			press := func(key tea.KeyMsg) {
+				model, _ := form.Update(key)
+				form = model.(configForm)
+			}
+			press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("invalid")})
+			if form.input.Value() != tt.arch {
+				t.Fatal("selector accepted free text")
+			}
+			press(tea.KeyMsg{Type: tea.KeyDown})
+			press(tea.KeyMsg{Type: tea.KeyEnter})
+			cfg, err = form.config()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pool := cfg.Cluster.Pools["control-plane"]; pool.Arch != tt.alternateArch || pool.InstanceType != tt.alternateMachine {
+				t.Fatalf("selected pool = %#v", pool)
+			}
+			form.input.SetValue("custom-machine")
+			press(tea.KeyMsg{Type: tea.KeyShiftTab})
+			press(tea.KeyMsg{Type: tea.KeyUp})
+			press(tea.KeyMsg{Type: tea.KeyEnter})
+			if form.input.Value() != "custom-machine" {
+				t.Fatalf("custom instance type overwritten: %q", form.input.Value())
+			}
+		})
+	}
+}
+
+// TestConfigFormNetworkingSelection checks both yes/no branches and backtracking.
+func TestConfigFormNetworkingSelection(t *testing.T) {
+	form := testConfigForm(t, "aws", "v1.2.3-1")
+	form.index = indexForField(t, form, "Configure networking options?")
+	form.input.SetValue(form.fields[form.index].value)
+	press := func(key tea.KeyType) {
+		model, _ := form.Update(tea.KeyMsg{Type: key})
+		form = model.(configForm)
+	}
+	press(tea.KeyEnter)
+	if form.fields[form.index].label != "Control plane architecture" {
+		t.Fatal("networking defaults should skip advanced fields")
+	}
+	press(tea.KeyShiftTab)
+	press(tea.KeyUp)
+	press(tea.KeyEnter)
+	if form.fields[form.index].label != "VPC IPv4 CIDR" {
+		t.Fatal("yes should show advanced networking")
+	}
+	form.input.SetValue("172.20.0.0/16")
+	press(tea.KeyShiftTab)
+	if form.input.Value() != "yes" {
+		t.Fatal("back navigation lost yes selection")
+	}
+	press(tea.KeyDown)
+	press(tea.KeyEnter)
+	if form.fields[form.index].label != "Control plane architecture" {
+		t.Fatal("no should hide advanced networking again")
+	}
+	press(tea.KeyShiftTab)
+	press(tea.KeyUp)
+	press(tea.KeyEnter)
+	if form.input.Value() != "172.20.0.0/16" {
+		t.Fatal("hidden networking answer was lost")
+	}
+}
+
 // testConfigForm constructs a wizard form or fails the calling test.
-func testConfigForm(t *testing.T, providerKind, issuerURL, seedVersion string) configForm {
+func testConfigForm(t *testing.T, providerKind, seedVersion string) configForm {
 	t.Helper()
-	form, err := newConfigForm(providerKind, issuerURL, seedVersion)
+	form, err := newConfigForm(providerKind, seedVersion)
 	if err != nil {
 		t.Fatal(err)
 	}

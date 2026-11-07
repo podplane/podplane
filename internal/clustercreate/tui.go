@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -21,25 +21,11 @@ import (
 	"github.com/podplane/podplane/pkg/seeds"
 )
 
-// SelectCloudProvider asks which cloud provider should host the new cluster.
-// AWS is selected initially because it is the first list item.
-func SelectCloudProvider() (string, bool, error) {
-	return tui.SelectList("Select cloud provider", "Which cloud provider?", cloudProviderItems())
-}
-
-// cloudProviderItems returns the supported cloud provider choices.
-func cloudProviderItems() []list.Item {
-	return []list.Item{
-		tui.Item{Key: "aws", Label: "Amazon Web Services (AWS)"},
-		tui.Item{Key: "google", Label: "Google Cloud"},
-		tui.Item{Label: "Cancel", Cancel: true},
-	}
-}
-
 // configField describes one field in the cluster configuration wizard.
 type configField struct {
 	label    string
 	value    string
+	choices  []string
 	validate func(string) error
 	visible  func(configForm) bool
 }
@@ -50,7 +36,6 @@ type configForm struct {
 	providerKind   string
 	index          int
 	input          textinput.Model
-	oidcIssuerURL  string
 	seedVersion    string
 	err            error
 	showNetworking bool
@@ -60,9 +45,11 @@ type configForm struct {
 	complete       bool
 }
 
-// RunConfigWizard runs the AWS or Google Cloud form and returns a cluster configuration.
-func RunConfigWizard(providerKind, oidcIssuerURL, seedVersion string) (*clusterconfig.ClusterConfig, error) {
-	m, err := newConfigForm(providerKind, oidcIssuerURL, seedVersion)
+// RunConfigWizard runs the AWS or Google Cloud form and returns a cluster
+// configuration without an OIDC issuer URL, which the caller sets once it has
+// chosen or created an issuer for the cluster.
+func RunConfigWizard(providerKind, seedVersion string) (*clusterconfig.ClusterConfig, error) {
+	m, err := newConfigForm(providerKind, seedVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -84,13 +71,10 @@ func RunConfigWizard(providerKind, oidcIssuerURL, seedVersion string) (*clusterc
 }
 
 // newConfigForm creates the initial model for the cluster config form.
-func newConfigForm(providerKind, oidcIssuerURL, seedVersion string) (configForm, error) {
+func newConfigForm(providerKind, seedVersion string) (configForm, error) {
 	draft, err := clusterconfig.NewDraftConfig(providerKind)
 	if err != nil {
 		return configForm{}, err
-	}
-	if oidcIssuerURL != "" {
-		draft.Cluster.OIDC.IssuerURL = oidcIssuerURL
 	}
 	provider := draft.Cluster.Providers[0]
 	zone := ""
@@ -102,12 +86,12 @@ func newConfigForm(providerKind, oidcIssuerURL, seedVersion string) (configForm,
 	regionField := configField{label: "AWS region", value: provider.Region, validate: clusterconfig.ValidateAWSRegion}
 	credentialsField := configField{label: "AWS profile (optional)", value: provider.Profile}
 	zoneField := configField{label: "AWS availability zone", value: zone, validate: tui.Required("AWS availability zone")}
-	dnsField := configField{label: "DNS provider (aws-route53 or blank for manual)", validate: validateDNSProvider}
+	dnsField := configField{label: "DNS provider", value: "manual", choices: []string{"manual", "aws-route53"}}
 	if providerKind == "google" {
 		regionField = configField{label: "Google Cloud region", value: provider.Region, validate: validateGoogleRegion}
 		credentialsField = configField{label: "Google Cloud project ID", value: provider.Project, validate: tui.Required("Google Cloud project ID")}
 		zoneField = configField{label: "Google Cloud zone", value: zone, validate: tui.Required("Google Cloud zone")}
-		dnsField = configField{label: "DNS provider (google-cloud-dns or blank for manual)", validate: validateGoogleDNSProvider}
+		dnsField.choices = []string{"manual", "google-cloud-dns"}
 	}
 	zoneField.visible = func(m configForm) bool { return m.showNetworking }
 	dnsField.visible = func(m configForm) bool { return m.domain != "" }
@@ -125,24 +109,20 @@ func newConfigForm(providerKind, oidcIssuerURL, seedVersion string) (configForm,
 		{label: "Kubernetes API hostname", validate: validateDomain, visible: func(m configForm) bool { return m.domain == "" }},
 		regionField,
 		credentialsField,
-		{label: "Cluster seed (none, minimal, platform, agentic)", value: seeds.Agentic, validate: validateSeedName},
-		{label: "Configure networking options?", value: "no", validate: validateYesNo},
+		{label: "Cluster seed", value: seeds.Agentic, choices: []string{seeds.Agentic, seeds.Platform, seeds.Minimal, seeds.None}},
+		{label: "Configure networking options?", value: "no", choices: []string{"yes", "no"}},
 		{label: "VPC IPv4 CIDR", value: provider.VPC.V4CIDR, validate: validateVPCCIDR, visible: func(m configForm) bool { return m.showNetworking }},
 		zoneField,
-		{label: "Control-plane architecture", value: pool.Arch, validate: validateArch},
-		{label: "Control-plane instance type", value: pool.InstanceType, validate: tui.Required("instance type")},
-		{label: "Control-plane size", value: strconv.Itoa(pool.Size), validate: validatePositiveInt},
-	}
-	if oidcIssuerURL == "" {
-		oidcField := configField{label: "OIDC issuer URL", value: draft.Cluster.OIDC.IssuerURL, validate: tui.Required("OIDC issuer URL")}
-		fields = append(fields[:2], append([]configField{oidcField}, fields[2:]...)...)
+		{label: "Control plane architecture", value: pool.Arch, choices: []string{"arm64", "amd64"}},
+		{label: "Control plane instance type", value: pool.InstanceType, validate: tui.Required("instance type")},
+		{label: "Control plane size", value: strconv.Itoa(pool.Size), validate: validatePositiveInt},
 	}
 	input := textinput.New()
 	input.Focus()
 	input.CharLimit = 256
 	input.SetValue(fields[0].value)
 	input.CursorEnd()
-	return configForm{fields: fields, input: input, providerKind: providerKind, oidcIssuerURL: oidcIssuerURL, seedVersion: seedVersion}, nil
+	return configForm{fields: fields, input: input, providerKind: providerKind, seedVersion: seedVersion}, nil
 }
 
 // Init starts cursor blinking for the cluster config form.
@@ -165,6 +145,19 @@ func (m configForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.movePrevious()
 		}
 	}
+	if choices := m.fields[m.index].choices; len(choices) > 0 {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			selected := slices.Index(choices, m.input.Value())
+			switch key.String() {
+			case "up", "left", "k", "h":
+				selected = (selected + len(choices) - 1) % len(choices)
+			case "down", "right", "j", "l":
+				selected = (selected + 1) % len(choices)
+			}
+			m.input.SetValue(choices[selected])
+		}
+		return m, nil
+	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
@@ -186,7 +179,20 @@ func (m configForm) View() string {
 	if m.canMovePrevious() {
 		help = "enter/tab: next  shift+tab: back  esc: cancel"
 	}
-	return fmt.Sprintf("\n%s %s\n\n%s\n%s%s\n\n%s\n", title, progress, label, m.input.View(), errText, help)
+	input := m.input.View()
+	if choices := m.fields[m.index].choices; len(choices) > 0 {
+		rows := make([]string, 0, len(choices))
+		for _, choice := range choices {
+			row := "  " + choice
+			if choice == m.input.Value() {
+				row = lipgloss.NewStyle().Foreground(tui.ColorSecondary).Render("> " + choice)
+			}
+			rows = append(rows, row)
+		}
+		input = strings.Join(rows, "\n")
+		help = "↑/↓: select  " + help
+	}
+	return fmt.Sprintf("\n%s %s\n\n%s\n%s%s\n\n%s\n", title, progress, label, input, errText, help)
 }
 
 // moveNext validates and stores the active field, advancing to the next field
@@ -214,16 +220,10 @@ func (m configForm) moveNext() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	m.fields[m.index].value = value
-	if field.label == "Configure networking options?" {
-		m.showNetworking = strings.EqualFold(value, "yes") || strings.EqualFold(value, "y")
+	if field.label == "Cluster name" {
+		m.suggestClusterID(m.fields[m.index].value, value)
 	}
-	if field.label == "Cluster domain (optional)" {
-		m.domain = value
-	}
-	if strings.HasPrefix(field.label, "DNS provider (") {
-		m.dnsProvider = value
-	}
+	m.storeCurrentValue()
 	m.err = nil
 	m.index = m.nextIndex(m.index + 1)
 	if m.index >= len(m.fields) {
@@ -233,6 +233,16 @@ func (m configForm) moveNext() (tea.Model, tea.Cmd) {
 	m.input.SetValue(m.fields[m.index].value)
 	m.input.CursorEnd()
 	return m, nil
+}
+
+// suggestClusterID updates the cluster ID field to a slug of the new cluster
+// name, unless the user changed it from the slug of the old name. The draft's
+// name and ID follow the same rule.
+func (m *configForm) suggestClusterID(oldName, newName string) {
+	id := &m.fields[indexForLabel(m.fields, "Cluster ID / slug")].value
+	if *id == clusterIDFromName(oldName) {
+		*id = clusterIDFromName(newName)
+	}
 }
 
 // movePrevious stores the active field and returns to the previous visible
@@ -259,14 +269,20 @@ func (m configForm) canMovePrevious() bool {
 // never discards partially edited answers.
 func (m *configForm) storeCurrentValue() {
 	value := strings.TrimSpace(m.input.Value())
+	if m.fields[m.index].label == "Control plane architecture" {
+		instance := &m.fields[indexForLabel(m.fields, "Control plane instance type")].value
+		if *instance == controlPlaneInstanceType(m.providerKind, m.fields[m.index].value) {
+			*instance = controlPlaneInstanceType(m.providerKind, value)
+		}
+	}
 	m.fields[m.index].value = value
 	if m.fields[m.index].label == "Configure networking options?" {
-		m.showNetworking = strings.EqualFold(value, "yes") || strings.EqualFold(value, "y")
+		m.showNetworking = value == "yes"
 	}
 	if m.fields[m.index].label == "Cluster domain (optional)" {
 		m.domain = value
 	}
-	if strings.HasPrefix(m.fields[m.index].label, "DNS provider (") {
+	if m.fields[m.index].label == "DNS provider" {
 		m.dnsProvider = value
 	}
 }
@@ -300,7 +316,7 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 	for _, field := range m.fields {
 		values[field.label] = field.value
 	}
-	size, err := strconv.Atoi(values["Control-plane size"])
+	size, err := strconv.Atoi(values["Control plane size"])
 	if err != nil {
 		return nil, fmt.Errorf("parse control-plane size: %w", err)
 	}
@@ -310,11 +326,8 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 	}
 	cfg.Cluster.Name = values["Cluster name"]
 	cfg.Cluster.ID = values["Cluster ID / slug"]
-	cfg.Cluster.OIDC.IssuerURL = m.oidcIssuerURL
-	if cfg.Cluster.OIDC.IssuerURL == "" {
-		cfg.Cluster.OIDC.IssuerURL = values["OIDC issuer URL"]
-	}
-	seedName, err := seeds.ParseName(values["Cluster seed (none, minimal, platform, agentic)"])
+	cfg.Cluster.OIDC.IssuerURL = ""
+	seedName, err := seeds.ParseName(values["Cluster seed"])
 	if err != nil {
 		return nil, err
 	}
@@ -326,8 +339,8 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 		cfg.Cluster.Seed.Version = m.seedVersion
 	}
 	cfg.Cluster.Pools["control-plane"] = clusterconfig.Pool{
-		Arch:         values["Control-plane architecture"],
-		InstanceType: values["Control-plane instance type"],
+		Arch:         values["Control plane architecture"],
+		InstanceType: values["Control plane instance type"],
 		Size:         size,
 	}
 	provider := cfg.Cluster.Providers[0]
@@ -394,13 +407,13 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 		provider.LoadBalancers = nil
 	} else {
 		configuredDomain := clusterconfig.Domain{Zone: domain}
-		if values["DNS provider (aws-route53 or blank for manual)"] == "aws-route53" {
+		if values["DNS provider"] == "aws-route53" {
 			configuredDomain.Provider = &clusterconfig.DomainProvider{Kind: "aws-route53"}
 			if email := values["ACME account email (optional)"]; email != "" {
 				cfg.Cluster.ACME = &clusterconfig.ACME{Email: email}
 			}
 		}
-		if m.providerKind == "google" && values["DNS provider (google-cloud-dns or blank for manual)"] == "google-cloud-dns" {
+		if m.providerKind == "google" && values["DNS provider"] == "google-cloud-dns" {
 			zoneName := values["Google Cloud DNS managed-zone resource name"]
 			if err := tui.Required("managed-zone resource name")(zoneName); err != nil {
 				return nil, err
@@ -453,22 +466,6 @@ func validateDomain(value string) error {
 	return nil
 }
 
-// validateDNSProvider validates the DNS providers supported by cluster create.
-func validateDNSProvider(value string) error {
-	if value == "" || value == "aws-route53" {
-		return nil
-	}
-	return fmt.Errorf("DNS provider must be aws-route53 or blank for manual DNS")
-}
-
-// validateGoogleDNSProvider accepts managed Google DNS or manual DNS.
-func validateGoogleDNSProvider(value string) error {
-	if value == "" || value == "google-cloud-dns" {
-		return nil
-	}
-	return fmt.Errorf("DNS provider must be google-cloud-dns or blank for manual DNS")
-}
-
 // validateGoogleRegion validates Google Cloud region syntax without a cloud lookup.
 func validateGoogleRegion(value string) error {
 	if matched, _ := regexp.MatchString(`^[a-z]+(-[a-z]+)+[0-9]+$`, value); !matched {
@@ -509,30 +506,19 @@ func indexForLabel(fields []configField, label string) int {
 	return -1
 }
 
-// validateArch validates the supported control-plane CPU architectures.
-func validateArch(value string) error {
-	if value != "amd64" && value != "arm64" {
-		return fmt.Errorf("architecture must be amd64 or arm64")
+// controlPlaneInstanceType suggests a machine type matching the selected
+// architecture. Explicitly edited instance types are kept when navigating.
+func controlPlaneInstanceType(provider, arch string) string {
+	if provider == "google" {
+		if arch == "arm64" {
+			return "t2a-standard-2"
+		}
+		return "e2-medium"
 	}
-	return nil
-}
-
-// validateSeedName validates the supported initial platform component seeds.
-func validateSeedName(value string) error {
-	if _, err := seeds.ParseName(value); err != nil {
-		return err
+	if arch == "arm64" {
+		return "t4g.medium"
 	}
-	return nil
-}
-
-// validateYesNo validates a yes/no form response.
-func validateYesNo(value string) error {
-	switch strings.ToLower(value) {
-	case "yes", "y", "no", "n":
-		return nil
-	default:
-		return fmt.Errorf("must be yes or no")
-	}
+	return "t3.medium"
 }
 
 // validatePositiveInt validates positive integer form values.
@@ -545,4 +531,28 @@ func validatePositiveInt(value string) error {
 		return fmt.Errorf("must be at least 1")
 	}
 	return nil
+}
+
+// clusterIDFromName derives a cluster ID from a cluster name: lowercase
+// letters and digits, with each run of other characters replaced by one
+// hyphen, trimmed to the 32-character cluster ID limit.
+func clusterIDFromName(name string) string {
+	var b strings.Builder
+	hyphen := false
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			if hyphen && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			b.WriteRune(r)
+			hyphen = false
+		} else {
+			hyphen = true
+		}
+	}
+	id := b.String()
+	if len(id) > 32 {
+		id = strings.TrimRight(id[:32], "-")
+	}
+	return id
 }

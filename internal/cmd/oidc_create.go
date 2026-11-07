@@ -5,7 +5,6 @@
 package cmd
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 
@@ -44,7 +43,7 @@ func newOIDCCreateCmd(c *config.Config) *cobra.Command {
 			} else if err != nil {
 				return err
 			}
-			_, err = oidccreate.Run(context.Background(), oidccreate.Options{
+			_, err = oidccreate.Run(cmd.Context(), oidccreate.Options{
 				ConfigPath:  path,
 				NoApply:     noApply,
 				AutoApprove: autoApprove,

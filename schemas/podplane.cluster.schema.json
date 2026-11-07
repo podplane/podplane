@@ -260,7 +260,7 @@
           "enum": ["aws", "google", "proxmox"]
         },
         "region": { "type": "string", "description": "Provider region." },
-        "account": { "type": "string", "description": "Provider account identifier, such as an AWS account ID." },
+        "account": { "type": "string", "description": "Provider account identifier, such as an AWS account ID. For AWS, cluster create resolves and saves a missing account from the selected credentials before generating remote-state configuration." },
         "profile": { "type": "string", "description": "Local provider credentials profile name." },
         "project": { "type": "string", "description": "Google Cloud project ID." },
         "tags": {

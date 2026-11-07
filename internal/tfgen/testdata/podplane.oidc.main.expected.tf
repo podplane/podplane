@@ -1,13 +1,16 @@
 # OIDC server infrastructure, networking, and optional managed DNS records.
 
 terraform {
-  required_version = ">= 1.6.0"
+  required_version = ">= 1.10.0"
 
   required_providers {
     aws = {
       source = "hashicorp/aws"
       version = ">= 6.0"
     }
+  }
+
+  backend "s3" {
   }
 }
 
@@ -25,14 +28,14 @@ resource "aws_vpc" "oidc" {
   enable_dns_hostnames = true
   enable_dns_support = true
   tags = {
-    Name = "truster-vpc"
+    Name = "oidc-auth-exa-c204c854ffe5f35a-vpc"
   }
 }
 
 resource "aws_internet_gateway" "oidc" {
   vpc_id = aws_vpc.oidc.id
   tags = {
-    Name = "truster-igw"
+    Name = "oidc-auth-exa-c204c854ffe5f35a-igw"
   }
 }
 
@@ -49,38 +52,59 @@ resource "aws_route_table" "oidc" {
     gateway_id = aws_internet_gateway.oidc.id
   }
   tags = {
-    Name = "truster-rt"
+    Name = "oidc-auth-exa-c204c854ffe5f35a-rt"
   }
 }
 
 module "oidc" {
-  source = "truster/truster/aws"
+  source = "truster-dev/truster/aws"
+  version = "3.1.0"
+  name_prefix = "oidc-auth-exa-c204c854ffe5f35a"
   vpc_id = aws_vpc.oidc.id
   oidc_addr = "auth.example.com"
   secrets_provider = "aws-secrets-manager"
   truster_config = {
-    secrets = {
-      signing_key_name = "arn:signing"
-      encryption_key_name = "arn:encryption"
-    }
-    user_login_connectors = {
-      "google" = {
-        type = "google"
-        display_name = "Google"
-        credentials_secret = "arn:connector"
+    "access_token_ttl" = "10m"
+    "email" = {
+      "otp_secret_name" = "arn:otp"
+      "smtp" = {
+        "from_address" = "auth@example.com"
+        "host" = "smtp.example.com"
+        "port" = 587
       }
     }
-    static_policy = {
-      default_redirect_uris = ["http://localhost:8000"]
-      clients = {
-        "kubelogin" = {
-          user_group_mapping = "production"
+    "secrets" = {
+      "encryption_key_name" = "arn:encryption"
+      "signing_key_name" = "arn:signing"
+    }
+    "static_policy" = {
+      "clients" = {
+        "example-cluster" = {
+          "user_group_mapping" = "production"
         }
       }
-      user_group_mappings = {
+      "default_redirect_uris" = ["http://localhost:8000"]
+      "trust_policies" = {
+        "ci" = {
+          "groups" = ["deployers"]
+          "issuer" = "https://token.actions.githubusercontent.com"
+        }
+      }
+      "user_group_mappings" = {
         "production" = {
           "ops@example.com" = ["admins"]
         }
+      }
+    }
+    "user_login_connectors" = {
+      "email" = {
+        "display_name" = "Email $${not-a-template}"
+        "type" = "email"
+      }
+      "google" = {
+        "credentials_secret" = "arn:connector"
+        "display_name" = "Google"
+        "type" = "google"
       }
     }
   }

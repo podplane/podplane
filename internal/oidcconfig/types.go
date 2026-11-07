@@ -15,17 +15,17 @@ type Config struct {
 	OIDC   OIDC   `json:"oidc"`
 }
 
-// OIDC configures server infrastructure, upstream identity, signing secrets, and client access.
+// OIDC configures where Podplane deploys a Truster server and how Truster
+// runs there.
 type OIDC struct {
-	Provider               Provider                  `json:"provider"`
-	Hostname               string                    `json:"hostname"`
-	Domain                 Domain                    `json:"domain"`
-	Connector              Connector                 `json:"connector"`
-	SigningKeySecretARN    string                    `json:"signing_key_secret_arn"`
-	EncryptionKeySecretARN string                    `json:"encryption_key_secret_arn,omitempty"`
-	DefaultRedirectURIs    []string                  `json:"default_redirect_uris,omitempty"`
-	Clients                map[string]Client         `json:"clients,omitempty"`
-	GroupsOverrides        map[string]GroupsOverride `json:"groups_overrides,omitempty"`
+	Provider Provider `json:"provider"`
+	Hostname string   `json:"hostname"`
+	Domain   Domain   `json:"domain"`
+	// Truster is Truster's configuration, passed unchanged to the Truster
+	// module as truster_config. Podplane sets the deployment-owned settings
+	// (issuer_url, http_listen_addr, serving_certificate, secrets.provider)
+	// itself, so they must not appear here.
+	Truster map[string]any `json:"truster"`
 }
 
 // Provider identifies the cloud and account settings used to provision the OIDC server.
@@ -35,6 +35,7 @@ type Provider struct {
 	Account string `json:"account,omitempty"`
 	Profile string `json:"profile,omitempty"`
 	Project string `json:"project,omitempty"`
+	Zone    string `json:"zone,omitempty"`
 }
 
 // Domain specifies the DNS zone and provider for the server hostname.
@@ -43,26 +44,14 @@ type Domain struct {
 	Provider DomainProvider `json:"provider,omitempty"`
 }
 
-// DomainProvider selects the DNS backend and optional hosted zone ID.
+// DomainProvider selects the DNS backend and the hosted zone holding the
+// OIDC records: an optional Route 53 hosted zone ID for AWS, or the Cloud DNS
+// managed zone name for Google Cloud.
 type DomainProvider struct {
-	Kind         string `json:"kind,omitempty"`
-	HostedZoneID string `json:"hosted_zone_id,omitempty"`
+	Kind           string `json:"kind,omitempty"`
+	HostedZoneID   string `json:"hosted_zone_id,omitempty"`
+	HostedZoneName string `json:"hosted_zone_name,omitempty"`
 }
-
-// Connector selects the upstream identity provider and its client secret.
-type Connector struct {
-	Kind            string `json:"kind"`
-	ClientSecretARN string `json:"client_secret_arn"`
-}
-
-// Client configures redirect URIs and a named group override for an OIDC client.
-type Client struct {
-	GroupsOverride string   `json:"groups_override,omitempty"`
-	RedirectURIs   []string `json:"redirect_uris,omitempty"`
-}
-
-// GroupsOverride maps user identities to replacement group memberships.
-type GroupsOverride map[string][]string
 
 // IssuerURL returns the HTTPS issuer URL for the configured OIDC hostname.
 func (c *Config) IssuerURL() string {
@@ -76,4 +65,13 @@ func (c *Config) IssuerURL() string {
 		}
 	}
 	return "https://" + c.OIDC.Hostname
+}
+
+// HasClient reports whether the Truster static policy has a client with
+// clientID. Clients from a database policy are not visible here.
+func (c *Config) HasClient(clientID string) bool {
+	policy, _ := c.OIDC.Truster["static_policy"].(map[string]any)
+	clients, _ := policy["clients"].(map[string]any)
+	_, ok := clients[clientID]
+	return ok
 }

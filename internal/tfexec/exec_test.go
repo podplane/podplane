@@ -6,10 +6,16 @@ package tfexec
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // TestCLIInvokesTofuWithExpectedArguments verifies the CLI executor uses a tofu
@@ -30,11 +36,8 @@ func TestCLIInvokesTofuWithExpectedArguments(t *testing.T) {
 		t.Fatalf("NewCLI returned error: %v", err)
 	}
 	ctx := context.Background()
-	if err := cli.Init(ctx, dir); err != nil {
-		t.Fatalf("Init returned error: %v", err)
-	}
-	if err := cli.Apply(ctx, dir, true); err != nil {
-		t.Fatalf("Apply returned error: %v", err)
+	if err := cli.InitApply(ctx, dir, "backend.tfbackend", true); err != nil {
+		t.Fatalf("InitApply returned error: %v", err)
 	}
 	if err := cli.Destroy(ctx, dir, true); err != nil {
 		t.Fatalf("Destroy returned error: %v", err)
@@ -47,7 +50,7 @@ func TestCLIInvokesTofuWithExpectedArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(raw)
-	for _, want := range []string{"init\n", "apply -auto-approve\n", "destroy -auto-approve\n", "output -json\n"} {
+	for _, want := range []string{"init -backend-config=backend.tfbackend\napply -auto-approve\n", "destroy -auto-approve\n", "output -json\n"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("fake tofu log missing %q:\n%s", want, got)
 		}
@@ -101,7 +104,7 @@ func TestCLIPlatformAndConfigFile(t *testing.T) {
 		t.Fatalf("Platform = %q", platform)
 	}
 	configPath := filepath.Join(dir, "terraform.tfrc")
-	if err := cli.WithCLIConfig(configPath).Init(context.Background(), dir); err != nil {
+	if err := cli.WithCLIConfig(configPath).Init(context.Background(), dir, "backend.tfbackend"); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(logPath)
@@ -179,4 +182,115 @@ provider_installation {
 	if _, err := cli.OutputJSON(context.Background(), dir); err == nil || !strings.Contains(err.Error(), "make build") {
 		t.Fatalf("missing provider silently fell back to registry: %v", err)
 	}
+}
+
+// TestCLIWaitsForShutdown sends real signals to a separate CLI process, checking
+// graceful cleanup, repeated Ctrl-C, and forced cleanup of an unresponsive tree.
+func TestCLIWaitsForShutdown(t *testing.T) {
+	for _, mode := range []string{"interrupt", "terminate", "forced"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			engine := filepath.Join(dir, "tofu")
+			trap := `trap 'echo stopping > "$TEST_PROCESS_DIR/stopping"; /bin/sleep 0.2; kill "$child"; wait "$child"; echo cleaned > "$TEST_PROCESS_DIR/cleaned"; exit 0' INT TERM`
+			if mode == "forced" {
+				trap = `trap '' INT TERM`
+			}
+			script := "#!/bin/sh\n" + trap + `
+/bin/sleep 120 &
+child=$!
+echo "$$ $child" > "$TEST_PROCESS_DIR/ready"
+while :; do wait "$child"; done
+`
+			if err := os.WriteFile(engine, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			supervisor := exec.Command(os.Args[0], "-test.run=^TestCLIProcessHelper$")
+			supervisor.Env = append(os.Environ(), "TEST_PROCESS_HELPER=1", "TEST_PROCESS_DIR="+dir, CommandEnvVar+"="+engine)
+			if mode == "interrupt" {
+				supervisor.Env = append(supervisor.Env, "TEST_PROCESS_STREAM=1")
+			}
+			supervisor.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			if err := supervisor.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = syscall.Kill(-supervisor.Process.Pid, syscall.SIGKILL) })
+			done := make(chan error, 1)
+			go func() { done <- supervisor.Wait() }()
+			ready := waitForProcessFile(t, filepath.Join(dir, "ready"))
+			pids := strings.Fields(ready)
+			if len(pids) != 2 {
+				t.Fatalf("engine PIDs = %q", ready)
+			}
+			enginePID, _ := strconv.Atoi(pids[0])
+			t.Cleanup(func() { _ = syscall.Kill(-enginePID, syscall.SIGKILL) })
+			sig := syscall.SIGINT
+			if mode == "terminate" {
+				sig = syscall.SIGTERM
+			}
+			if err := syscall.Kill(-supervisor.Process.Pid, sig); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "interrupt" {
+				waitForProcessFile(t, filepath.Join(dir, "stopping"))
+				// A second Ctrl-C must not kill the supervisor before cleanup.
+				_ = syscall.Kill(-supervisor.Process.Pid, sig)
+			}
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("CLI exited before orderly shutdown: %v", err)
+				}
+			case <-time.After(40 * time.Second):
+				t.Fatal("CLI failed to finish shutdown")
+			}
+			if mode != "forced" {
+				if _, err := os.Stat(filepath.Join(dir, "cleaned")); err != nil {
+					t.Fatalf("CLI returned before engine cleanup: %v", err)
+				}
+			}
+			for _, value := range pids {
+				// An orphan zombie may await init's reap on Linux, but must not
+				// be running. The direct engine is reaped by the CLI itself.
+				out, _ := exec.Command("ps", "-o", "stat=", "-p", value).Output()
+				if state := strings.TrimSpace(string(out)); state != "" && !strings.HasPrefix(state, "Z") {
+					t.Errorf("process %s still alive after CLI exit: %s", value, state)
+				}
+			}
+		})
+	}
+}
+
+// TestCLIProcessHelper is the isolated parent receiving the test's OS signals.
+func TestCLIProcessHelper(t *testing.T) {
+	if os.Getenv("TEST_PROCESS_HELPER") != "1" {
+		return
+	}
+	cli, err := NewCLI()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if os.Getenv("TEST_PROCESS_STREAM") == "1" {
+		err = cli.InitApply(context.Background(), os.Getenv("TEST_PROCESS_DIR"), "backend.tfbackend", false)
+	} else {
+		_, err = cli.OutputJSON(context.Background(), os.Getenv("TEST_PROCESS_DIR"))
+	}
+	if !errors.Is(err, context.Canceled) {
+		fmt.Fprintln(os.Stderr, "expected cancellation, got", err)
+		os.Exit(2)
+	}
+}
+
+// waitForProcessFile waits for a child readiness marker, bounded on failures.
+func waitForProcessFile(t *testing.T, path string) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if raw, err := os.ReadFile(path); err == nil && len(raw) > 0 {
+			return string(raw)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("child did not create %s", path)
+	return ""
 }

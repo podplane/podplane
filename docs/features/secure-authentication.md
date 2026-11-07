@@ -30,7 +30,7 @@ If you do not already have a suitable OIDC issuer/server, Podplane can deploy [T
 
 Truster connects user identities from Google or GitHub and uses trust policies to map CI identities to narrowly scoped groups. Most organisations can share one carefully managed issuer across several clusters.
 
-`podplane oidc create` currently deploys Truster infrastructure to AWS, with Google Cloud support coming soon.
+`podplane oidc create` deploys Truster infrastructure to AWS or Google Cloud.
 
 Using an existing issuer is independent of the cluster's infrastructure provider.
 

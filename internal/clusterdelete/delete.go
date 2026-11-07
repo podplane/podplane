@@ -6,7 +6,11 @@ package clusterdelete
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,25 +23,31 @@ type Executor interface {
 	Destroy(ctx context.Context, dir string, autoApprove bool) error
 }
 
-// Provider performs provider-specific cleanup before and after destroy.
+// Provider performs provider-specific cleanup before and after destroy. Delete
+// runs the cleanup workflow, which is the same on every cloud, and calls
+// Provider for the cloud operations it needs.
 type Provider interface {
-	Prepare(ctx context.Context, cfg *clusterconfig.ClusterConfig, outputs []byte) error
-	ScaleManagedGroupsToZero(ctx context.Context) error
-	WaitForManagedInstancesGone(ctx context.Context) error
-	RemainingManagedInstances(ctx context.Context) ([]Instance, error)
-	TerminateInstances(ctx context.Context, instances []Instance) error
-	ListTaggedInstances(ctx context.Context, managedOnly bool) ([]Instance, error)
-	ClusterID() string
+	// UpdateObject replaces the object at key in bucket with the result of
+	// update unless update reports no change. It must not overwrite a
+	// concurrent change to the object.
+	UpdateObject(ctx context.Context, bucket, key string, update func([]byte) ([]byte, bool, error)) error
+
+	// ManagedInstances lists the Nstance-managed VM instances labelled for
+	// clusterID that have not terminated.
+	ManagedInstances(ctx context.Context, clusterID string) ([]Instance, error)
+
+	// Terminate deletes instances.
+	Terminate(ctx context.Context, instances []Instance) error
 }
 
 // Instance describes a provider VM instance that may need cleanup.
 type Instance struct {
-	ID     string
-	Name   string
-	Shard  string
-	Group  string
-	State  string
-	Reason string
+	ID    string
+	Name  string
+	Zone  string
+	Shard string
+	Group string
+	State string
 }
 
 // ConfirmFunc asks the user to confirm a destructive action.
@@ -46,21 +56,33 @@ type ConfirmFunc func(message string) (bool, error)
 // StatusFunc reports delete workflow status to the caller.
 type StatusFunc func(message string)
 
-// DeleteOptions controls the cluster delete workflow.
+const (
+	// outputTimeout bounds reading OpenTofu/Terraform outputs.
+	outputTimeout = 30 * time.Minute
+	// destroyTimeout bounds OpenTofu/Terraform destroy.
+	destroyTimeout = 2 * time.Hour
+)
+
+// DeleteOptions controls the cluster delete workflow. Status may be nil; every
+// other field is required.
 type DeleteOptions struct {
-	ClusterConfig  *clusterconfig.ClusterConfig
-	StackDir       string
-	Executor       Executor
-	Provider       Provider
-	AutoApprove    bool
-	Confirm        ConfirmFunc
-	Status         StatusFunc
-	OutputTimeout  time.Duration
-	DestroyTimeout time.Duration
+	ClusterConfig *clusterconfig.ClusterConfig
+	StackDir      string
+	Executor      Executor
+	Provider      Provider
+	AutoApprove   bool
+	Confirm       ConfirmFunc
+	Status        StatusFunc
+	// WaitTimeout is how long to wait for Nstance-managed instances to
+	// terminate after scale-down, and again after direct termination.
+	WaitTimeout time.Duration
+	// PollInterval is how often to list instances while waiting.
+	PollInterval time.Duration
 }
 
-// Delete runs the provider cleanup workflow and then destroys managed
-// OpenTofu/Terraform resources.
+// Delete scales Nstance-managed groups to zero, waits for their instances to
+// terminate, destroys OpenTofu/Terraform-managed resources, and offers to
+// terminate any Nstance-managed instances that appeared meanwhile.
 func Delete(ctx context.Context, opts DeleteOptions) error {
 	if opts.ClusterConfig == nil {
 		return fmt.Errorf("cluster config is required")
@@ -71,57 +93,60 @@ func Delete(ctx context.Context, opts DeleteOptions) error {
 	if opts.Provider == nil {
 		return fmt.Errorf("cluster delete provider is required")
 	}
-	confirm := opts.Confirm
-	if confirm == nil {
-		confirm = func(string) (bool, error) {
-			return false, fmt.Errorf("confirmation callback is required")
-		}
+	if opts.Confirm == nil {
+		return fmt.Errorf("confirmation callback is required")
 	}
+	confirm := opts.Confirm
 	status := opts.Status
 	if status == nil {
 		status = func(string) {}
 	}
+	clusterID := opts.ClusterConfig.Cluster.ID
 
-	outputTimeout := opts.OutputTimeout
-	if outputTimeout == 0 {
-		outputTimeout = 30 * time.Minute
-	}
 	outputCtx, outputCancel := context.WithTimeout(ctx, outputTimeout)
 	defer outputCancel()
-	outputs, err := opts.Executor.OutputJSON(outputCtx, opts.StackDir)
+	raw, err := opts.Executor.OutputJSON(outputCtx, opts.StackDir)
 	if err != nil {
 		return err
 	}
-	if err := opts.Provider.Prepare(ctx, opts.ClusterConfig, outputs); err != nil {
+	bucket, shards, err := parseOutputs(raw)
+	if err != nil {
 		return err
 	}
 
 	status("Scaling Nstance-managed groups to zero in shard configs.")
-	if err := opts.Provider.ScaleManagedGroupsToZero(ctx); err != nil {
+	for _, shard := range slices.Sorted(maps.Keys(shards)) {
+		if err := opts.Provider.UpdateObject(ctx, bucket, shards[shard], zeroShardConfig); err != nil {
+			return fmt.Errorf("scale shard %s groups to zero: %w", shard, err)
+		}
+	}
+
+	wait := func() ([]Instance, error) {
+		return waitForManagedInstances(ctx, opts.Provider, clusterID, opts.WaitTimeout, opts.PollInterval)
+	}
+	status("Waiting for Nstance-managed instances to terminate.")
+	remaining, err := wait()
+	if err != nil {
 		return err
 	}
-	status("Waiting for Nstance-managed EC2 instances to terminate.")
-	if err := opts.Provider.WaitForManagedInstancesGone(ctx); err != nil {
-		remaining, listErr := opts.Provider.RemainingManagedInstances(ctx)
-		if listErr != nil {
-			return fmt.Errorf("%w; additionally failed to list remaining managed instances: %v", err, listErr)
-		}
-		if len(remaining) == 0 {
+	if len(remaining) > 0 {
+		status(fmt.Sprintf("Nstance-managed instances are still present after scale-down: %s", formatInstances(remaining)))
+		ok, err := confirm("Terminate remaining Nstance-managed instances directly before destroy?")
+		if err != nil {
 			return err
-		}
-		status(fmt.Sprintf("Nstance-managed EC2 instances are still present after scale-down: %s", FormatInstances(remaining)))
-		ok, confirmErr := confirm("Terminate remaining Nstance-managed EC2 instances directly before destroy?")
-		if confirmErr != nil {
-			return confirmErr
 		}
 		if !ok {
+			return fmt.Errorf("%d Nstance-managed instance(s) still present", len(remaining))
+		}
+		if err := opts.Provider.Terminate(ctx, remaining); err != nil {
 			return err
 		}
-		if terminateErr := opts.Provider.TerminateInstances(ctx, remaining); terminateErr != nil {
-			return terminateErr
+		remaining, err = wait()
+		if err != nil {
+			return err
 		}
-		if waitErr := opts.Provider.WaitForManagedInstancesGone(ctx); waitErr != nil {
-			return waitErr
+		if len(remaining) > 0 {
+			return fmt.Errorf("timed out waiting for %d Nstance-managed instance(s) to terminate: %s", len(remaining), formatInstances(remaining))
 		}
 	}
 
@@ -132,52 +157,136 @@ func Delete(ctx context.Context, opts DeleteOptions) error {
 	if !ok {
 		return fmt.Errorf("destroy cancelled")
 	}
-	destroyTimeout := opts.DestroyTimeout
-	if destroyTimeout == 0 {
-		destroyTimeout = 2 * time.Hour
-	}
 	destroyCtx, destroyCancel := context.WithTimeout(ctx, destroyTimeout)
 	defer destroyCancel()
 	if err := opts.Executor.Destroy(destroyCtx, opts.StackDir, opts.AutoApprove); err != nil {
 		return err
 	}
 
-	dangling, err := opts.Provider.ListTaggedInstances(ctx, false)
+	dangling, err := opts.Provider.ManagedInstances(ctx, clusterID)
 	if err != nil {
 		return err
 	}
-	if len(dangling) > 0 {
-		status(fmt.Sprintf("Found dangling instances tagged for cluster %q: %s", opts.Provider.ClusterID(), FormatInstances(dangling)))
-		ok, err := confirm("Terminate dangling EC2 instances?")
-		if err != nil {
-			return err
+	if len(dangling) == 0 {
+		return nil
+	}
+	status(fmt.Sprintf("Found dangling Nstance-managed instances for cluster %q: %s", clusterID, formatInstances(dangling)))
+	ok, err = confirm("Terminate dangling Nstance-managed instances?")
+	if err != nil || !ok {
+		return err
+	}
+	return opts.Provider.Terminate(ctx, dangling)
+}
+
+// parseOutputs extracts the Nstance bucket and each shard's config key from
+// OpenTofu/Terraform output JSON.
+func parseOutputs(raw []byte) (string, map[string]string, error) {
+	var outputs struct {
+		Bucket struct {
+			Value string `json:"value"`
+		} `json:"nstance_bucket"`
+		Shards struct {
+			Value map[string]struct {
+				ConfigKey string `json:"config_key"`
+			} `json:"value"`
+		} `json:"nstance_shards"`
+	}
+	if err := json.Unmarshal(raw, &outputs); err != nil {
+		return "", nil, fmt.Errorf("parse OpenTofu/Terraform outputs: %w", err)
+	}
+	const regenerate = "rerun podplane cluster create --no-apply to regenerate managed .tf files and apply them"
+	if outputs.Bucket.Value == "" {
+		return "", nil, fmt.Errorf("missing nstance_bucket output; %s", regenerate)
+	}
+	if len(outputs.Shards.Value) == 0 {
+		return "", nil, fmt.Errorf("missing nstance_shards output; %s", regenerate)
+	}
+	shards := make(map[string]string, len(outputs.Shards.Value))
+	for shard, out := range outputs.Shards.Value {
+		if out.ConfigKey == "" {
+			return "", nil, fmt.Errorf("shard %s has empty config_key output", shard)
 		}
-		if ok {
-			if err := opts.Provider.TerminateInstances(ctx, dangling); err != nil {
-				return err
+		shards[shard] = out.ConfigKey
+	}
+	return outputs.Bucket.Value, shards, nil
+}
+
+// zeroShardConfig sets every group size in a shard config document to zero
+// and reports whether anything changed.
+func zeroShardConfig(raw []byte) ([]byte, bool, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, false, fmt.Errorf("parse shard config: %w", err)
+	}
+	groups, _ := doc["groups"].(map[string]any)
+	changed := false
+	for _, tenant := range groups {
+		tenant, _ := tenant.(map[string]any)
+		for _, group := range tenant {
+			group, ok := group.(map[string]any)
+			if ok && group["size"] != float64(0) {
+				group["size"] = float64(0)
+				changed = true
 			}
 		}
 	}
-	return nil
+	if !changed {
+		return raw, false, nil
+	}
+	next, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return nil, false, fmt.Errorf("marshal shard config: %w", err)
+	}
+	return next, true, nil
 }
 
-// FormatInstances formats provider instances for human-readable status and
+// waitForManagedInstances polls until no Nstance-managed instances remain or
+// timeout passes, bounding both requests and sleeps. On timeout it returns
+// the last successful instance list for direct termination; without a known
+// list it returns the request error instead of proceeding to destroy.
+func waitForManagedInstances(ctx context.Context, provider Provider, clusterID string, timeout, interval time.Duration) ([]Instance, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var remaining []Instance
+	for {
+		instances, err := provider.ManagedInstances(waitCtx, clusterID)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err != nil {
+			if waitCtx.Err() == context.DeadlineExceeded && errors.Is(err, context.DeadlineExceeded) && len(remaining) > 0 {
+				return remaining, nil
+			}
+			return nil, err
+		}
+		remaining = instances
+		if len(remaining) == 0 {
+			return nil, nil
+		}
+		select {
+		case <-waitCtx.Done():
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return remaining, nil
+		case <-time.After(interval):
+		}
+	}
+}
+
+// formatInstances formats provider instances for human-readable status and
 // confirmation messages.
-func FormatInstances(instances []Instance) string {
+func formatInstances(instances []Instance) string {
 	parts := make([]string, 0, len(instances))
 	for _, inst := range instances {
 		label := inst.ID
 		if inst.Name != "" {
 			label += " (" + inst.Name + ")"
 		}
-		if inst.Shard != "" {
-			label += " shard=" + inst.Shard
-		}
-		if inst.Group != "" {
-			label += " group=" + inst.Group
-		}
-		if inst.State != "" {
-			label += " state=" + inst.State
+		for _, attr := range []struct{ key, value string }{{"zone", inst.Zone}, {"shard", inst.Shard}, {"group", inst.Group}, {"state", inst.State}} {
+			if attr.value != "" {
+				label += " " + attr.key + "=" + attr.value
+			}
 		}
 		parts = append(parts, label)
 	}

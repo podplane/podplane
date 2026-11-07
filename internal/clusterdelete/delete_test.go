@@ -6,21 +6,36 @@ package clusterdelete
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
 )
 
-// TestDeleteTerminatesRemainingManagedInstances verifies that delete offers a
-// direct termination fallback when managed instances remain after scale-down.
-func TestDeleteTerminatesRemainingManagedInstances(t *testing.T) {
-	executor := &fakeExecutor{outputs: []byte(`{}`)}
+// testOutputs is OpenTofu/Terraform output JSON for a cluster with two shards.
+const testOutputs = `{
+  "nstance_bucket": {"sensitive": false, "type": "string", "value": "cluster-bucket"},
+  "nstance_shards": {"sensitive": false, "type": ["object", {}], "value": {
+    "zone-a": {"config_key": "shard/zone-a/config.jsonc", "server_ips": ["10.0.0.10"]},
+    "zone-b": {"config_key": "shard/zone-b/config.jsonc", "server_ips": ["10.0.1.10"]}
+  }}
+}`
+
+// TestDeleteScalesDownAndTerminatesRemainingManagedInstances verifies that
+// delete zeroes every shard's groups and offers direct termination when
+// managed instances remain after scale-down.
+func TestDeleteScalesDownAndTerminatesRemainingManagedInstances(t *testing.T) {
+	executor := &fakeExecutor{outputs: []byte(testOutputs)}
 	provider := &fakeProvider{
-		waitErrs: []error{errors.New("instances still running"), nil},
-		remaining: []Instance{
-			{ID: "i-123", Name: "control-plane"},
+		objects: map[string]string{
+			"cluster-bucket/shard/zone-a/config.jsonc": `{"groups": {"default": {"control-plane": {"size": 3}, "workers": {"size": 0}}}}`,
+			"cluster-bucket/shard/zone-b/config.jsonc": `{"groups": {"default": {"workers": {"size": 0}}}}`,
 		},
+		managed: []Instance{{ID: "i-123", Name: "control-plane"}},
 	}
 	var confirmations []string
 	err := Delete(context.Background(), DeleteOptions{
@@ -28,6 +43,8 @@ func TestDeleteTerminatesRemainingManagedInstances(t *testing.T) {
 		StackDir:      "/tmp/stack",
 		Executor:      executor,
 		Provider:      provider,
+		WaitTimeout:   time.Millisecond,
+		PollInterval:  time.Millisecond,
 		Confirm: func(message string) (bool, error) {
 			confirmations = append(confirmations, message)
 			return true, nil
@@ -36,11 +53,25 @@ func TestDeleteTerminatesRemainingManagedInstances(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Delete returned error: %v", err)
 	}
+	var doc struct {
+		Groups map[string]map[string]struct{ Size int } `json:"groups"`
+	}
+	if err := json.Unmarshal([]byte(provider.objects["cluster-bucket/shard/zone-a/config.jsonc"]), &doc); err != nil {
+		t.Fatal(err)
+	}
+	for name, group := range doc.Groups["default"] {
+		if group.Size != 0 {
+			t.Fatalf("zone-a group %s size = %d, want 0", name, group.Size)
+		}
+	}
+	if len(provider.writes) != 1 || provider.writes[0] != "cluster-bucket/shard/zone-a/config.jsonc" {
+		t.Fatalf("writes = %v, want only the zone-a config rewritten", provider.writes)
+	}
+	if len(provider.terminated) != 1 || provider.terminated[0] != "i-123" {
+		t.Fatalf("terminated = %v, want i-123", provider.terminated)
+	}
 	if !executor.destroyed {
 		t.Fatal("Destroy was not called")
-	}
-	if provider.terminated != 1 {
-		t.Fatalf("terminated = %d, want 1", provider.terminated)
 	}
 	if len(confirmations) != 2 {
 		t.Fatalf("confirmations = %v, want remaining and destroy confirmations", confirmations)
@@ -48,11 +79,17 @@ func TestDeleteTerminatesRemainingManagedInstances(t *testing.T) {
 }
 
 // TestDeleteTerminatesDanglingInstancesAfterDestroy verifies that delete can
-// clean up tagged instances left after Terraform destroy.
+// clean up Nstance-managed instances that appear during Terraform destroy.
 func TestDeleteTerminatesDanglingInstancesAfterDestroy(t *testing.T) {
-	executor := &fakeExecutor{outputs: []byte(`{}`)}
 	provider := &fakeProvider{
-		dangling: []Instance{{ID: "i-dangling"}},
+		objects: map[string]string{
+			"cluster-bucket/shard/zone-a/config.jsonc": `{}`,
+			"cluster-bucket/shard/zone-b/config.jsonc": `{}`,
+		},
+	}
+	executor := &fakeExecutor{
+		outputs:   []byte(testOutputs),
+		onDestroy: func() { provider.managed = []Instance{{ID: "i-dangling"}} },
 	}
 	err := Delete(context.Background(), DeleteOptions{
 		ClusterConfig: &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{ID: "test-cluster"}},
@@ -66,8 +103,88 @@ func TestDeleteTerminatesDanglingInstancesAfterDestroy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Delete returned error: %v", err)
 	}
-	if provider.terminated != 1 {
-		t.Fatalf("terminated = %d, want dangling instance terminated", provider.terminated)
+	if len(provider.terminated) != 1 || provider.terminated[0] != "i-dangling" {
+		t.Fatalf("terminated = %v, want dangling instance terminated", provider.terminated)
+	}
+}
+
+// TestDeleteBoundsInstancePolling checks request and sleep deadlines, safe
+// fallback with a known instance list, and cancellation/error propagation.
+func TestDeleteBoundsInstancePolling(t *testing.T) {
+	apiError := errors.New("instance listing denied")
+	for _, tt := range []struct {
+		name     string
+		wantErr  error
+		wantTime time.Duration
+	}{
+		{"first request stalls", context.DeadlineExceeded, 20 * time.Minute},
+		{"later request stalls", nil, 20 * time.Minute},
+		{"poll interval exceeds timeout", nil, 20 * time.Minute},
+		{"parent cancelled", context.Canceled, time.Minute},
+		{"parent deadline", context.DeadlineExceeded, time.Minute},
+		{"API failure", apiError, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+				defer cancel()
+				if tt.name == "parent cancelled" {
+					time.AfterFunc(time.Minute, cancel)
+				}
+				if tt.name == "parent deadline" {
+					var cancelDeadline context.CancelFunc
+					ctx, cancelDeadline = context.WithTimeout(ctx, time.Minute)
+					defer cancelDeadline()
+				}
+				provider := &fakeProvider{
+					objects: map[string]string{
+						"cluster-bucket/shard/zone-a/config.jsonc": `{}`,
+						"cluster-bucket/shard/zone-b/config.jsonc": `{}`,
+					},
+					managed: []Instance{{ID: "i-remaining"}},
+				}
+				listed := false
+				provider.list = func(ctx context.Context) ([]Instance, error) {
+					if tt.name == "API failure" {
+						return nil, apiError
+					}
+					if len(provider.managed) == 0 || tt.name == "poll interval exceeds timeout" {
+						return provider.managed, nil
+					}
+					if tt.name == "later request stalls" && !listed {
+						listed = true
+						return provider.managed, nil
+					}
+					<-ctx.Done()
+					return nil, fmt.Errorf("list instances: %w", ctx.Err())
+				}
+				interval := time.Second
+				if tt.name == "poll interval exceeds timeout" {
+					interval = time.Hour
+				}
+				executor := &fakeExecutor{outputs: []byte(testOutputs)}
+				started := time.Now()
+				err := Delete(ctx, DeleteOptions{
+					ClusterConfig: &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{ID: "test-cluster"}},
+					Executor:      executor, Provider: provider,
+					WaitTimeout: 20 * time.Minute, PollInterval: interval,
+					Confirm: func(string) (bool, error) { return true, nil },
+				})
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("Delete error = %v, want %v", err, tt.wantErr)
+				}
+				if elapsed := time.Since(started); elapsed != tt.wantTime {
+					t.Fatalf("Delete took %v, want %v", elapsed, tt.wantTime)
+				}
+				if tt.wantErr != nil {
+					if executor.destroyed || len(provider.terminated) != 0 {
+						t.Fatal("delete continued destructive operations after an error")
+					}
+				} else if !executor.destroyed || len(provider.terminated) != 1 || provider.terminated[0] != "i-remaining" {
+					t.Fatal("wait timeout did not allow direct termination and destroy")
+				}
+			})
+		})
 	}
 }
 
@@ -75,6 +192,8 @@ func TestDeleteTerminatesDanglingInstancesAfterDestroy(t *testing.T) {
 type fakeExecutor struct {
 	outputs   []byte
 	destroyed bool
+	// onDestroy, when set, runs during Destroy.
+	onDestroy func()
 }
 
 // OutputJSON returns canned Terraform outputs for delete workflow tests.
@@ -85,61 +204,47 @@ func (f *fakeExecutor) OutputJSON(context.Context, string) ([]byte, error) {
 // Destroy records that the fake executor was asked to destroy resources.
 func (f *fakeExecutor) Destroy(context.Context, string, bool) error {
 	f.destroyed = true
+	if f.onDestroy != nil {
+		f.onDestroy()
+	}
 	return nil
 }
 
-// fakeProvider supplies instance lists and tracks termination and queued wait failures.
+// fakeProvider stores objects in memory and lists managed instances until
+// they are terminated.
 type fakeProvider struct {
-	waitErrs   []error
-	remaining  []Instance
-	dangling   []Instance
-	terminated int
+	objects    map[string]string
+	writes     []string
+	managed    []Instance
+	terminated []string
+	list       func(context.Context) ([]Instance, error)
 }
 
-// Prepare satisfies the provider interface without extra setup.
-func (f *fakeProvider) Prepare(context.Context, *clusterconfig.ClusterConfig, []byte) error {
-	return nil
-}
-
-// ScaleManagedGroupsToZero satisfies the provider interface without changing
-// fake state.
-func (f *fakeProvider) ScaleManagedGroupsToZero(context.Context) error {
-	return nil
-}
-
-// WaitForManagedInstancesGone returns queued wait errors for fallback tests.
-func (f *fakeProvider) WaitForManagedInstancesGone(context.Context) error {
-	if len(f.waitErrs) == 0 {
-		return nil
+// UpdateObject applies update to an in-memory object and records writes.
+func (f *fakeProvider) UpdateObject(_ context.Context, bucket, key string, update func([]byte) ([]byte, bool, error)) error {
+	name := bucket + "/" + key
+	next, changed, err := update([]byte(f.objects[name]))
+	if err != nil || !changed {
+		return err
 	}
-	err := f.waitErrs[0]
-	f.waitErrs = f.waitErrs[1:]
-	return err
-}
-
-// RemainingManagedInstances returns canned managed instances for fallback
-// tests.
-func (f *fakeProvider) RemainingManagedInstances(context.Context) ([]Instance, error) {
-	return f.remaining, nil
-}
-
-// TerminateInstances records how many instances the workflow asked to
-// terminate.
-func (f *fakeProvider) TerminateInstances(_ context.Context, instances []Instance) error {
-	f.terminated += len(instances)
+	f.objects[name] = string(next)
+	f.writes = append(f.writes, name)
 	return nil
 }
 
-// ListTaggedInstances returns canned dangling instances unless the caller asks
-// only for managed instances.
-func (f *fakeProvider) ListTaggedInstances(_ context.Context, managedOnly bool) ([]Instance, error) {
-	if managedOnly {
-		return nil, nil
+// ManagedInstances returns the managed instances not yet terminated.
+func (f *fakeProvider) ManagedInstances(ctx context.Context, _ string) ([]Instance, error) {
+	if f.list != nil {
+		return f.list(ctx)
 	}
-	return f.dangling, nil
+	return f.managed, nil
 }
 
-// ClusterID returns a stable fake cluster ID for status messages.
-func (f *fakeProvider) ClusterID() string {
-	return "test-cluster"
+// Terminate records terminated instance IDs and removes them from listings.
+func (f *fakeProvider) Terminate(_ context.Context, instances []Instance) error {
+	for _, inst := range instances {
+		f.terminated = append(f.terminated, inst.ID)
+	}
+	f.managed = nil
+	return nil
 }

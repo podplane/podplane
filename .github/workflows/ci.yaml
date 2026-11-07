@@ -25,6 +25,8 @@ jobs:
             tools/go.sum
       - name: Check formatting and lint
         run: make precommit
+      - name: Check Truster schema copy
+        run: make check-truster-schema
       - name: Test
         run: make test
       - name: Build

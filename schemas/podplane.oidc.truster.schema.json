@@ -1,0 +1,1165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truster.dev/schema/v3/config.schema.json",
+  "$comment": "Truster <https://truster.dev>; Copyright The Truster Authors; SPDX-License-Identifier: Apache-2.0",
+  "title": "Truster v3 configuration",
+  "description": "Configuration for a Truster v3 server.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "issuer_url",
+    "http_listen_addr",
+    "secrets",
+    "user_login_connectors"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema used by editors to validate this configuration."
+    },
+    "issuer_url": {
+      "$ref": "#/$defs/publicURI",
+      "description": "Public issuer URL advertised to downstream OIDC clients. Production URLs must use HTTPS."
+    },
+    "homepage_url": {
+      "$ref": "#/$defs/publicURI",
+      "description": "URL to redirect to if users visit Truster directly e.g. your app home page."
+    },
+    "http_listen_addr": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Address and port on which Truster serves requests."
+    },
+    "serving_certificate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["certificate_file", "private_key_file"],
+      "properties": {
+        "certificate_file": { "type": "string", "minLength": 1 },
+        "private_key_file": { "type": "string", "minLength": 1 }
+      },
+      "description": "Optional PEM certificate and private key files for native HTTPS. Files are reloaded automatically when certificates rotate."
+    },
+    "signing_algorithm": {
+      "type": "string",
+      "enum": [
+        "RS256",
+        "RS384",
+        "RS512",
+        "ES256",
+        "ES384",
+        "ES512",
+        "PS256",
+        "PS384",
+        "PS512",
+        "EdDSA"
+      ],
+      "default": "RS256",
+      "description": "Asymmetric algorithm used to sign downstream ID tokens."
+    },
+    "jwks_kid": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional signing-key ID. By default it is derived from the signing key."
+    },
+    "access_token_ttl": { "$ref": "#/$defs/duration", "default": "15m" },
+    "id_token_ttl": { "$ref": "#/$defs/duration", "default": "15m" },
+    "templates_dir": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional directory of page and email template overrides and public files."
+    },
+    "secrets": {
+      "$ref": "#/$defs/secrets"
+    },
+    "user_login_connectors": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "oneOf": [
+          { "$ref": "#/$defs/googleConnector" },
+          { "$ref": "#/$defs/githubConnector" },
+          { "$ref": "#/$defs/genericConnector" },
+          { "$ref": "#/$defs/emailConnector" }
+        ]
+      },
+      "description": "Sign-in methods keyed by stable, path-safe connector IDs."
+    },
+    "email": {
+      "$ref": "#/$defs/email"
+    },
+    "service_token_issuers": {
+      "$ref": "#/$defs/serviceTokenIssuers",
+      "description": "External token issuers accepted for service authentication."
+    },
+    "static_policy": {
+      "$ref": "#/$defs/staticPolicy",
+      "description": "Authorization policy defined in this configuration file."
+    },
+    "state_database": {
+      "$ref": "#/$defs/stateDatabase",
+      "default": { "driver": "sqlite", "path": "data/truster-state.db" },
+      "description": "Authoritative protocol-state database. Defaults to SQLite under data in the working directory."
+    },
+    "policy_database": {
+      "$ref": "#/$defs/policyDatabase",
+      "description": "Optional policy database."
+    }
+  },
+  "allOf": [
+    {
+      "anyOf": [
+        {
+          "properties": {
+            "static_policy": { "required": ["clients"] }
+          },
+          "required": ["static_policy"]
+        },
+        { "required": ["policy_database"] }
+      ]
+    },
+    {
+      "if": { "required": ["static_policy"] },
+      "then": {
+        "properties": {
+          "static_policy": {
+            "anyOf": [
+              { "required": ["default_redirect_uris"] },
+              {
+                "properties": {
+                  "clients": {
+                    "additionalProperties": {
+                      "properties": {
+                        "redirect_uris": { "minItems": 1 }
+                      },
+                      "required": ["redirect_uris"]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "secrets": {
+            "properties": {
+              "provider": { "const": "azure" }
+            },
+            "required": ["provider"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "secrets": {
+            "required": ["azure_keyvault_url"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "secrets": {
+            "properties": {
+              "provider": { "const": "file" }
+            },
+            "required": ["provider"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "secrets": {
+            "required": ["file_directory"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "allOf": [
+          {
+            "properties": {
+              "static_policy": {
+                "properties": {
+                  "clients": {
+                    "not": {
+                      "additionalProperties": {
+                        "not": {
+                          "properties": {
+                            "refresh_tokens": {
+                              "properties": {
+                                "enabled": { "const": true }
+                              },
+                              "required": ["enabled"]
+                            }
+                          },
+                          "required": ["refresh_tokens"]
+                        }
+                      }
+                    }
+                  }
+                },
+                "required": ["clients"]
+              }
+            },
+            "required": ["static_policy"]
+          },
+          {
+            "properties": {
+              "user_login_connectors": {
+                "not": {
+                  "additionalProperties": {
+                    "not": {
+                      "properties": {
+                        "type": { "not": { "const": "email" } }
+                      },
+                      "required": ["type"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "secrets": {
+            "required": ["encryption_key_name"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "allOf": [
+          {
+            "properties": {
+              "policy_database": {
+                "properties": {
+                  "client_defaults": {
+                    "properties": {
+                      "refresh_tokens": {
+                        "properties": {
+                          "enabled": { "const": true }
+                        },
+                        "required": ["enabled"]
+                      }
+                    },
+                    "required": ["refresh_tokens"]
+                  }
+                },
+                "required": ["client_defaults"]
+              }
+            },
+            "required": ["policy_database"]
+          },
+          {
+            "properties": {
+              "user_login_connectors": {
+                "not": {
+                  "additionalProperties": {
+                    "not": {
+                      "properties": {
+                        "type": { "not": { "const": "email" } }
+                      },
+                      "required": ["type"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "secrets": {
+            "required": ["encryption_key_name"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "user_login_connectors": {
+            "not": {
+              "additionalProperties": {
+                "not": {
+                  "properties": {
+                    "type": { "const": "github" }
+                  },
+                  "required": ["type"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "secrets": {
+            "required": ["encryption_key_name"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "user_login_connectors": {
+            "not": {
+              "additionalProperties": {
+                "not": {
+                  "properties": {
+                    "type": { "const": "email" }
+                  },
+                  "required": ["type"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": ["email"],
+        "properties": {
+          "email": {
+            "required": ["otp_secret_name", "smtp"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "email": {
+            "properties": {
+              "verification_mode": {
+                "const": "strict"
+              }
+            },
+            "required": ["verification_mode"]
+          }
+        },
+        "required": ["email"]
+      },
+      "then": {
+        "properties": {
+          "email": {
+            "required": ["otp_secret_name", "smtp"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["email"],
+        "properties": {
+          "email": {
+            "required": ["smtp"],
+            "properties": {
+              "verification_mode": { "enum": ["provider", "strict"] }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "email": { "required": ["otp_secret_name"] }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "publicURI": {
+      "type": "string",
+      "format": "uri",
+      "anyOf": [
+        {
+          "pattern": "^https://"
+        },
+        {
+          "pattern": "^http://(?:localhost|127\\.0\\.0\\.1)(?::[0-9]+)?(?:[/?#]|$)"
+        }
+      ]
+    },
+    "duration": {
+      "type": "string",
+      "minLength": 2,
+      "pattern": "^[0-9]+(?:\\.[0-9]+)?(?:ns|us|µs|ms|s|m|h)(?:[0-9]+(?:\\.[0-9]+)?(?:ns|us|µs|ms|s|m|h))*$",
+      "not": { "pattern": "^(?:0+(?:\\.0+)?(?:ns|us|µs|ms|s|m|h))+$" },
+      "description": "A positive duration using Go time.ParseDuration syntax, such as 5m, 1h30m, or 720h."
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "signing_key_name"],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "aws-secrets-manager",
+            "aws-parameter-store",
+            "google-secret-manager",
+            "azure",
+            "env",
+            "file"
+          ],
+          "description": "Backend from which secret values are loaded once during startup."
+        },
+        "signing_key_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Secret containing the private downstream token-signing key."
+        },
+        "encryption_key_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Secret containing a 64-character hex-encoded 32-byte encryption master key. Required for GitHub connectors."
+        },
+        "aws_region": {
+          "type": "string",
+          "minLength": 1,
+          "description": "AWS region override. Standard AWS SDK region resolution is used when omitted."
+        },
+        "azure_keyvault_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Azure Key Vault URL. Required when provider is azure."
+        },
+        "file_directory": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Directory containing secret files. Required when provider is file; secret names are relative paths beneath it."
+        }
+      }
+    },
+    "connectorCommonProperties": {
+      "type": "object",
+      "properties": {
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable sign-in method shown on the selector page."
+        },
+        "order": {
+          "type": "integer",
+          "description": "Optional selector-page sort order."
+        },
+        "credentials_secret": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Secret containing a JSON object with client_id and client_secret."
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "OAuth scopes. Provider defaults are used when omitted."
+        }
+      }
+    },
+    "googleConnector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "display_name", "credentials_secret"],
+      "properties": {
+        "type": { "const": "google" },
+        "display_name": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/display_name"
+        },
+        "order": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/order"
+        },
+        "credentials_secret": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/credentials_secret"
+        },
+        "scopes": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/scopes"
+        },
+        "google": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hd": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Google Workspace hosted-domain hint."
+            }
+          }
+        }
+      }
+    },
+    "githubConnector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "display_name", "credentials_secret"],
+      "properties": {
+        "type": { "const": "github" },
+        "display_name": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/display_name"
+        },
+        "order": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/order"
+        },
+        "credentials_secret": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/credentials_secret"
+        },
+        "scopes": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/scopes"
+        },
+        "github": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hostname": {
+              "type": "string",
+              "minLength": 1,
+              "default": "github.com",
+              "description": "GitHub Enterprise hostname, or github.com for GitHub.com."
+            }
+          }
+        }
+      }
+    },
+    "genericConnector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "display_name", "credentials_secret", "generic"],
+      "properties": {
+        "type": { "const": "generic" },
+        "display_name": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/display_name"
+        },
+        "order": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/order"
+        },
+        "credentials_secret": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/credentials_secret"
+        },
+        "scopes": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/scopes"
+        },
+        "generic": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authorization_url", "token_url", "userinfo_url"],
+          "properties": {
+            "authorization_url": {
+              "type": "string",
+              "format": "uri",
+              "description": "Upstream OAuth authorization endpoint."
+            },
+            "token_url": {
+              "type": "string",
+              "format": "uri",
+              "description": "Upstream OAuth token endpoint."
+            },
+            "userinfo_url": {
+              "type": "string",
+              "format": "uri",
+              "description": "Upstream userinfo endpoint."
+            },
+            "subject_field": {
+              "type": "string",
+              "minLength": 1,
+              "default": "sub",
+              "description": "Userinfo field containing the provider's stable subject identifier."
+            },
+            "email_field": {
+              "type": "string",
+              "minLength": 1,
+              "default": "email",
+              "description": "Userinfo field containing the email address."
+            },
+            "email_verified_field": {
+              "type": "string",
+              "minLength": 1,
+              "default": "email_verified",
+              "description": "Userinfo field reporting whether the provider verified the email address."
+            },
+            "refresh": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "scopes": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                "authorization_params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "not": {
+                      "enum": [
+                        "client_id",
+                        "redirect_uri",
+                        "response_type",
+                        "scope",
+                        "state",
+                        "nonce",
+                        "code_challenge",
+                        "code_challenge_method"
+                      ]
+                    }
+                  },
+                  "additionalProperties": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "emailConnector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "display_name"],
+      "properties": {
+        "type": { "const": "email" },
+        "display_name": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/display_name"
+        },
+        "order": {
+          "$ref": "#/$defs/connectorCommonProperties/properties/order"
+        }
+      }
+    },
+    "email": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verification_mode": {
+          "type": "string",
+          "enum": ["disabled", "provider", "strict"],
+          "default": "provider",
+          "description": "Provider accepts current provider or prior local verification; otherwise it requires an OTP when SMTP is configured or denies sign-in. Strict requires local verification and SMTP. Disabled accepts unverified emails."
+        },
+        "otp_secret_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Secret used to derive typed one-time email verification codes."
+        },
+        "otp_ttl": { "$ref": "#/$defs/duration", "default": "5m" },
+        "smtp": {
+          "$ref": "#/$defs/smtp"
+        },
+        "turnstile": {
+          "$ref": "#/$defs/turnstile"
+        }
+      }
+    },
+    "smtp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "port", "from_address"],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "description": "SMTP server hostname. Plaintext SMTP is permitted only for localhost."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "SMTP server port."
+        },
+        "tls_mode": {
+          "type": "string",
+          "enum": ["starttls", "implicit", "plaintext"],
+          "default": "starttls",
+          "description": "SMTP transport security mode. Plaintext is permitted only for localhost development."
+        },
+        "from_name": {
+          "type": "string",
+          "description": "Display name used for verification email."
+        },
+        "from_address": {
+          "type": "string",
+          "format": "email",
+          "minLength": 1,
+          "description": "Bare sender email address."
+        },
+        "credentials_secret": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional secret containing SMTP username and password as JSON. When omitted, SMTP authentication is not attempted."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "tls_mode": { "const": "plaintext" }
+            },
+            "required": ["tls_mode"]
+          },
+          "then": {
+            "properties": {
+              "host": { "const": "localhost" }
+            }
+          }
+        }
+      ]
+    },
+    "turnstile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["site_key", "secret_name"],
+      "properties": {
+        "site_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Public Cloudflare Turnstile site key rendered on the selector page."
+        },
+        "secret_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Secret containing the Cloudflare Turnstile server-side key."
+        },
+        "remote_ip": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source"],
+          "properties": {
+            "source": {
+              "type": "string",
+              "enum": ["remote_addr", "header"],
+              "description": "Trusted source of the visitor IP address sent to Turnstile."
+            },
+            "header": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Trusted proxy header used by the header source. For comma-separated forwarding headers, Truster uses the first address."
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "source": { "const": "header" } },
+                "required": ["source"]
+              },
+              "then": { "required": ["header"] },
+              "else": { "not": { "required": ["header"] } }
+            }
+          ]
+        }
+      }
+    },
+    "staticPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "require_user_groups_from_policy": {
+          "type": "boolean",
+          "default": true,
+          "description": "Require policy to resolve at least one group for each user unless overridden by a client."
+        },
+        "default_redirect_uris": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/publicURI" },
+          "description": "Redirect URIs inherited by static clients that do not define their own list."
+        },
+        "user_group_mappings": {
+          "type": "object",
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": {
+            "type": "object",
+            "propertyNames": {
+              "format": "email",
+              "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+            },
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "description": "Named mappings from normalized email addresses to downstream groups."
+        },
+        "trust_policies": {
+          "type": "object",
+          "propertyNames": { "minLength": 1, "maxLength": 64 },
+          "additionalProperties": { "$ref": "#/$defs/trustPolicy" }
+        },
+        "clients": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": { "$ref": "#/$defs/client" },
+          "description": "Static downstream OIDC clients keyed by client ID."
+        }
+      }
+    },
+    "client": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "redirect_uris": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/publicURI"
+          },
+          "description": "Allowed redirect URIs for this public OIDC client."
+        },
+        "user_group_mapping": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the user_group_mappings entry used by this client."
+        },
+        "require_user_groups_from_policy": {
+          "type": "boolean",
+          "description": "Client-specific override for static_policy.require_user_groups_from_policy."
+        },
+        "dpop": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["disabled", "required"],
+              "default": "disabled"
+            },
+            "signing_algorithm": {
+              "type": "string",
+              "enum": ["ES256", "ES512"],
+              "description": "Required proof algorithm. Defaults to ES256 when DPoP is required."
+            }
+          },
+          "allOf": [
+            {
+              "if": { "required": ["signing_algorithm"] },
+              "then": {
+                "properties": { "mode": { "const": "required" } },
+                "required": ["mode"]
+              }
+            }
+          ],
+          "description": "DPoP policy and proof algorithm for this public client."
+        },
+        "require_par": {
+          "type": "boolean",
+          "default": false,
+          "description": "Require authorization parameters to be submitted through PAR."
+        },
+        "trust_bindings": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/trustBinding" }
+        },
+        "refresh_tokens": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "allow_offline_access": { "type": "boolean", "default": false },
+            "session_idle_ttl": {
+              "$ref": "#/$defs/duration",
+              "default": "30m"
+            },
+            "session_absolute_ttl": {
+              "$ref": "#/$defs/duration",
+              "default": "10h"
+            },
+            "offline_idle_ttl": {
+              "$ref": "#/$defs/duration",
+              "default": "720h"
+            },
+            "offline_absolute_ttl": {
+              "$ref": "#/$defs/duration",
+              "default": "2160h"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "allow_offline_access": { "const": true } },
+                "required": ["allow_offline_access"]
+              },
+              "then": {
+                "properties": { "enabled": { "const": true } },
+                "required": ["enabled"]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "stateDatabase": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "driver": { "const": "sqlite", "default": "sqlite" },
+            "path": { "type": "string", "minLength": 1, "pattern": "\\S", "default": "data/truster-state.db" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["driver", "connection_string_secret"],
+          "properties": {
+            "driver": { "const": "postgresql" },
+            "connection_string_secret": { "type": "string", "minLength": 1, "pattern": "\\S" },
+            "max_connections": { "type": "integer", "minimum": 1, "default": 16 },
+            "query_timeout": { "$ref": "#/$defs/duration", "default": "5s" },
+            "migrations": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "connection_string_secret": { "type": "string", "minLength": 1, "pattern": "\\S" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "policyDatabase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["driver", "connection_string_secret", "redirect_uris"],
+      "properties": {
+        "driver": { "const": "postgresql" },
+        "connection_string_secret": { "type": "string", "minLength": 1 },
+        "redirect_uris": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/publicURI" }
+        },
+        "client_defaults": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "require_user_groups_from_policy": { "type": "boolean" },
+            "dpop": { "$ref": "#/$defs/client/properties/dpop" },
+            "require_par": { "$ref": "#/$defs/client/properties/require_par" },
+            "refresh_tokens": {
+              "$ref": "#/$defs/client/properties/refresh_tokens"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "refresh_tokens": {
+                    "properties": { "allow_offline_access": { "const": true } },
+                    "required": ["allow_offline_access"]
+                  }
+                },
+                "required": ["refresh_tokens"]
+              },
+              "then": {
+                "properties": {
+                  "refresh_tokens": {
+                    "properties": { "enabled": { "const": true } },
+                    "required": ["enabled"]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "queries": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Policy database queries. Omit a query to use its built-in SQL, provide non-empty SQL to override it, or set it to null to disable that lookup. These queries run only when policy_database is configured and never for static clients.",
+          "properties": {
+            "client_exists": {
+              "type": ["string", "null"],
+              "minLength": 1,
+              "pattern": "\\S",
+              "description": "Checks whether a database-managed client exists. Parameter: $1 client ID. Returns exactly one row with a non-null boolean exists column. Omit for built-in SQL; null disables database-managed clients without affecting static clients.",
+              "default": "SELECT EXISTS (SELECT 1 FROM truster_policy.clients WHERE client_id = $1) AS exists"
+            },
+            "user_access": {
+              "type": ["string", "null"],
+              "minLength": 1,
+              "pattern": "\\S",
+              "description": "Checks user access and loads current groups for a database-managed client. Parameters: $1 client ID, $2 lowercase email subject. Returns exactly one row with non-null allowed boolean and groups text[] columns. Omit for built-in SQL; null denies human sign-in and refresh for database-managed clients, even when groups are optional.",
+              "default": "SELECT users.subject IS NOT NULL AS allowed, COALESCE(users.groups, ARRAY[]::text[]) AS groups FROM (VALUES ($1::text, $2::text)) AS input(client_id, subject) LEFT JOIN truster_policy.users USING (client_id, subject)"
+            },
+            "trust_issuer": {
+              "type": ["string", "null"],
+              "minLength": 1,
+              "pattern": "\\S",
+              "description": "Loads an approved OIDC issuer for a database-managed client by exact URL. Parameters: $1 client ID, $2 token issuer URL. Returns zero or one row with issuer_id text, provider text, issuer_url text, signing_algs text[], and max_token_age_seconds bigint columns, in that order. Omit for built-in SQL; null disables dynamic issuer lookup without affecting statically configured issuers.",
+              "default": "SELECT issuer_id, provider, issuer_url, signing_algs, max_token_age_seconds FROM truster_policy.trust_issuers WHERE client_id = $1 AND issuer_url = $2"
+            },
+            "trust_bindings": {
+              "type": ["string", "null"],
+              "minLength": 1,
+              "pattern": "\\S",
+              "description": "Loads current trust bindings for a verified token. Parameters: $1 client ID, $2 resolved issuer ID. Returns zero or more rows with client_id text, issuer_id text, binding_id text, subject text, required_claims json/jsonb, policy_claims json/jsonb, binding_claims json/jsonb, and groups text[] columns, in that order. Omit for built-in SQL; null denies service-token exchange for database-managed clients, including those using static issuers.",
+              "default": "SELECT client_id, issuer_id, binding_id, subject, required_claims, policy_claims, binding_claims, groups FROM truster_policy.trust_bindings WHERE client_id = $1 AND issuer_id = $2 ORDER BY binding_id"
+            }
+          }
+        },
+        "client_lookup_cache": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ttl": { "$ref": "#/$defs/duration", "default": "5m" },
+            "negative_ttl": { "$ref": "#/$defs/duration", "default": "30s" },
+            "max_entries": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000,
+              "default": 10000
+            }
+          }
+        },
+        "policy_build_cache": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_entries": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000,
+              "default": 10000
+            }
+          }
+        },
+        "query_timeout": { "$ref": "#/$defs/duration", "default": "500ms" },
+        "max_connections": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32,
+          "default": 4
+        },
+        "max_trust_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100
+        },
+        "max_groups": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100
+        },
+        "max_group_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 256
+        },
+        "max_json_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1048576,
+          "default": 65536
+        }
+      }
+    },
+    "claimSchema": {
+      "description": "A bounded Draft 2020-12 schema fragment. References, vocabularies, and content keywords are rejected at startup."
+    },
+    "claimSchemas": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": { "minLength": 1, "maxLength": 256 },
+      "additionalProperties": { "$ref": "#/$defs/claimSchema" }
+    },
+    "serviceTokenIssuers": {
+      "type": "object",
+      "propertyNames": { "minLength": 1, "maxLength": 64 },
+      "additionalProperties": { "$ref": "#/$defs/trustIssuer" }
+    },
+    "trustIssuer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "provider": { "enum": ["github", "buildkite", "oidc"] },
+        "issuer_url": { "$ref": "#/$defs/publicURI" },
+        "signing_algs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "RS256",
+              "RS384",
+              "RS512",
+              "ES256",
+              "ES384",
+              "ES512",
+              "PS256",
+              "PS384",
+              "PS512",
+              "EdDSA"
+            ]
+          }
+        },
+        "max_token_age": { "$ref": "#/$defs/duration" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "provider": { "const": "oidc" } } },
+          "then": {
+            "required": ["issuer_url", "signing_algs", "max_token_age"]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                { "required": ["issuer_url"] },
+                { "required": ["signing_algs"] },
+                { "required": ["max_token_age"] }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "trustPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer"],
+      "properties": {
+        "issuer": { "type": "string", "minLength": 1 },
+        "subject": { "type": "string", "pattern": "^trusted:" },
+        "groups": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "required_claims": { "$ref": "#/$defs/claimSchemas" },
+        "claims": { "$ref": "#/$defs/claimSchemas" }
+      }
+    },
+    "trustBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "trust_policy"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "trust_policy": { "type": "string", "minLength": 1 },
+        "subject": { "type": "string", "pattern": "^trusted:" },
+        "groups": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "claims": { "$ref": "#/$defs/claimSchemas" }
+      }
+    }
+  }
+}

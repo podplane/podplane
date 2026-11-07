@@ -5,6 +5,7 @@
 package tfexec
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,14 +16,6 @@ import (
 
 // CommandEnvVar selects the OpenTofu or Terraform command used by Podplane.
 const CommandEnvVar = "PODPLANE_TF_CMD"
-
-// Executor runs OpenTofu/Terraform operations for a generated stack.
-type Executor interface {
-	Init(ctx context.Context, dir string) error
-	Apply(ctx context.Context, dir string, autoApprove bool) error
-	Destroy(ctx context.Context, dir string, autoApprove bool) error
-	OutputJSON(ctx context.Context, dir string) ([]byte, error)
-}
 
 // CLI runs OpenTofu/Terraform by invoking a local executable.
 type CLI struct {
@@ -48,9 +41,10 @@ func NewCLI() (*CLI, error) {
 	return nil, fmt.Errorf("OpenTofu/Terraform executable not found on PATH; install tofu or terraform")
 }
 
-// Init runs OpenTofu/Terraform init in dir.
-func (c *CLI) Init(ctx context.Context, dir string) error {
-	return c.run(ctx, dir, "init")
+// Init runs OpenTofu/Terraform init in dir, configuring its backend from the
+// backendConfig file.
+func (c *CLI) Init(ctx context.Context, dir, backendConfig string) error {
+	return c.run(ctx, dir, "init", "-backend-config="+backendConfig)
 }
 
 // InitBackendDisabled initializes dependencies without configuring a backend.
@@ -74,15 +68,16 @@ func (c *CLI) ProvidersLock(ctx context.Context, dir, mirrorDir string, platform
 
 // Platform returns the platform reported by the selected engine.
 func (c *CLI) Platform(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, c.binary, "version", "-json")
-	out, err := cmd.Output()
-	if err != nil {
+	cmd := exec.Command(c.binary, "version", "-json")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := runProcess(ctx, cmd); err != nil {
 		return "", fmt.Errorf("read OpenTofu/Terraform platform: %w", err)
 	}
 	var version struct {
 		Platform string `json:"platform"`
 	}
-	if err := json.Unmarshal(out, &version); err != nil {
+	if err := json.Unmarshal(out.Bytes(), &version); err != nil {
 		return "", fmt.Errorf("decode OpenTofu/Terraform version: %w", err)
 	}
 	if version.Platform == "" {
@@ -98,8 +93,12 @@ func (c *CLI) WithCLIConfig(path string) *CLI {
 	return &configured
 }
 
-// Apply runs OpenTofu/Terraform apply in dir.
-func (c *CLI) Apply(ctx context.Context, dir string, autoApprove bool) error {
+// InitApply initializes the stack in dir against the remote-state backend
+// settings in the backendConfig file, then applies it.
+func (c *CLI) InitApply(ctx context.Context, dir, backendConfig string, autoApprove bool) error {
+	if err := c.Init(ctx, dir, backendConfig); err != nil {
+		return err
+	}
 	args := []string{"apply"}
 	if autoApprove {
 		args = append(args, "-auto-approve")
@@ -123,17 +122,18 @@ func (c *CLI) OutputJSON(ctx context.Context, dir string) ([]byte, error) {
 		return nil, err
 	}
 	defer cleanup()
-	cmd := exec.CommandContext(ctx, c.binary, "output", "-json")
+	cmd := exec.Command(c.binary, "output", "-json")
 	cmd.Dir = dir
 	cmd.Stderr = os.Stderr
 	if config != "" {
 		cmd.Env = append(withoutEnv(os.Environ(), "TF_CLI_CONFIG_FILE"), "TF_CLI_CONFIG_FILE="+config)
 	}
-	out, err := cmd.Output()
-	if err != nil {
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := runProcess(ctx, cmd); err != nil {
 		return nil, fmt.Errorf("run OpenTofu/Terraform output -json in %s: %w", dir, err)
 	}
-	return out, nil
+	return out.Bytes(), nil
 }
 
 // run invokes the configured executable with args in dir.
@@ -143,7 +143,7 @@ func (c *CLI) run(ctx context.Context, dir string, args ...string) error {
 		return err
 	}
 	defer cleanup()
-	cmd := exec.CommandContext(ctx, c.binary, args...)
+	cmd := exec.Command(c.binary, args...)
 	cmd.Dir = dir
 	if config != "" {
 		cmd.Env = withoutEnv(os.Environ(), "TF_CLI_CONFIG_FILE")
@@ -152,7 +152,7 @@ func (c *CLI) run(ctx context.Context, dir string, args ...string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := runProcess(ctx, cmd); err != nil {
 		return fmt.Errorf("run OpenTofu/Terraform %v in %s: %w", args, dir, err)
 	}
 	return nil

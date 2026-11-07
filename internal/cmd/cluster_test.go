@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -65,6 +66,32 @@ func TestClusterCreateCommandHasExpectedInterface(t *testing.T) {
 	}
 	if cmd.Flags().Lookup("tf-deps") != nil {
 		t.Fatal("cluster create should use cached dependencies without --tf-deps")
+	}
+}
+
+// TestClusterCreateChecksCloudBeforeGeneration verifies authentication failure
+// is reported before dependency preparation or Terraform file generation.
+func TestClusterCreateChecksCloudBeforeGeneration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "podplane.cluster.jsonc")
+	cfg, err := clusterconfig.NewDraftConfig("google")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Cluster.Providers[0].Project = "example-project"
+	if err := clusterconfig.Write(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", filepath.Join(dir, "missing-credentials.json"))
+	t.Setenv("STORAGE_EMULATOR_HOST", "")
+	cmd := newClusterCreateCmd(&config.Config{})
+	cmd.SetArgs([]string{"--cluster-config", path})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "before Terraform generation") {
+		t.Fatalf("create error = %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("unexpected generated files: %v, %v", entries, err)
 	}
 }
 
