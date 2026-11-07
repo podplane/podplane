@@ -5,6 +5,8 @@
 package clustercreate
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"regexp"
@@ -15,7 +17,9 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/podplane/podplane/internal/cloud"
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/tui"
 	"github.com/podplane/podplane/pkg/seeds"
@@ -43,17 +47,24 @@ type configForm struct {
 	dnsProvider    string
 	cancel         bool
 	complete       bool
+	ctx            context.Context
+	verifyDNS      func(context.Context, string, string, string, string) error
+	verification   *tui.Verification
+	width          int
 }
 
 // RunConfigWizard runs the AWS or Google Cloud form and returns a cluster
 // configuration without an OIDC issuer URL, which the caller sets once it has
 // chosen or created an issuer for the cluster.
-func RunConfigWizard(providerKind, seedVersion string) (*clusterconfig.ClusterConfig, error) {
+func RunConfigWizard(ctx context.Context, providerKind, seedVersion string) (*clusterconfig.ClusterConfig, error) {
 	m, err := newConfigForm(providerKind, seedVersion)
 	if err != nil {
 		return nil, err
 	}
-	got, err := tea.NewProgram(m).Run()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	m.ctx, m.verifyDNS = ctx, cloud.CheckRoute53Zone
+	got, err := tea.NewProgram(m, tea.WithContext(ctx)).Run()
 	if err != nil {
 		return nil, fmt.Errorf("run cluster config form: %w", err)
 	}
@@ -98,6 +109,8 @@ func newConfigForm(providerKind, seedVersion string) (configForm, error) {
 	fields := []configField{
 		{label: "Cluster name", value: draft.Cluster.Name, validate: tui.Required("cluster name")},
 		{label: "Cluster ID / slug", value: draft.Cluster.ID, validate: validateClusterID},
+		regionField,
+		credentialsField,
 		{label: "Cluster domain (optional)", validate: validateOptionalDomain},
 		dnsField,
 		{label: "Google Cloud DNS managed-zone resource name", validate: tui.Required("managed-zone resource name"), visible: func(m configForm) bool {
@@ -107,8 +120,6 @@ func newConfigForm(providerKind, seedVersion string) (configForm, error) {
 			return (&clusterconfig.DomainProvider{Kind: m.dnsProvider}).SupportsACME()
 		}},
 		{label: "Kubernetes API hostname", validate: validateDomain, visible: func(m configForm) bool { return m.domain == "" }},
-		regionField,
-		credentialsField,
 		{label: "Cluster seed", value: seeds.Agentic, choices: []string{seeds.Agentic, seeds.Platform, seeds.Minimal, seeds.None}},
 		{label: "Configure networking options?", value: "no", choices: []string{"yes", "no"}},
 		{label: "VPC IPv4 CIDR", value: provider.VPC.V4CIDR, validate: validateVPCCIDR, visible: func(m configForm) bool { return m.showNetworking }},
@@ -133,12 +144,33 @@ func (m configForm) Init() tea.Cmd {
 // Update handles text entry, cancellation, and field submission for the
 // cluster config form.
 func (m configForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = size.Width
+	}
+	if m.verification != nil {
+		cmd := m.verification.Update(msg)
+		if !m.verification.Done {
+			return m, cmd
+		}
+		m.err = m.verification.Err
+		m.verification = nil
+		if errors.Is(m.err, context.Canceled) {
+			m.cancel = true
+			return m, tea.Quit
+		}
+		if m.err != nil {
+			return m, nil
+		}
+		return m.advance()
+	}
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "esc":
+		case "ctrl+c":
 			m.cancel = true
 			return m, tea.Quit
+		case "esc":
+			return m, nil
 		case "enter", "tab":
 			return m.moveNext()
 		case "shift+tab":
@@ -165,6 +197,9 @@ func (m configForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the active cluster config form field.
 func (m configForm) View() string {
+	if m.verification != nil {
+		return m.verification.View()
+	}
 	if m.cancel || m.complete {
 		return "\n"
 	}
@@ -175,9 +210,9 @@ func (m configForm) View() string {
 	if m.err != nil {
 		errText = "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("#d20f39")).Render(m.err.Error())
 	}
-	help := "enter/tab: next  esc: cancel"
+	help := "enter/tab: next  ctrl+c: cancel"
 	if m.canMovePrevious() {
-		help = "enter/tab: next  shift+tab: back  esc: cancel"
+		help = "enter/tab: next  shift+tab: back  ctrl+c: cancel"
 	}
 	input := m.input.View()
 	if choices := m.fields[m.index].choices; len(choices) > 0 {
@@ -192,7 +227,11 @@ func (m configForm) View() string {
 		input = strings.Join(rows, "\n")
 		help = "↑/↓: select  " + help
 	}
-	return fmt.Sprintf("\n%s %s\n\n%s\n%s%s\n\n%s\n", title, progress, label, input, errText, help)
+	width := m.width
+	if width == 0 {
+		width = 80
+	}
+	return ansi.Wrap(fmt.Sprintf("\n%s %s\n\n%s\n%s%s\n\n%s\n", title, progress, label, input, errText, help), max(1, width-1), "")
 }
 
 // moveNext validates and stores the active field, advancing to the next field
@@ -223,6 +262,23 @@ func (m configForm) moveNext() (tea.Model, tea.Cmd) {
 	if field.label == "Cluster name" {
 		m.suggestClusterID(m.fields[m.index].value, value)
 	}
+	if field.label == "DNS provider" && value == "aws-route53" && m.verifyDNS != nil {
+		region := m.fields[indexForLabel(m.fields, "AWS region")].value
+		profile := m.fields[indexForLabel(m.fields, "AWS profile (optional)")].value
+		check := tui.NewVerification(m.ctx, "Checking Route53 hosted zone", "Public hosted zone: "+m.domain, func(ctx context.Context) error {
+			return m.verifyDNS(ctx, region, profile, m.domain, "")
+		})
+		m.verification = &check
+		if m.width > 0 {
+			m.verification.Update(tea.WindowSizeMsg{Width: m.width})
+		}
+		return m, m.verification.Start()
+	}
+	return m.advance()
+}
+
+// advance stores an accepted or explicitly unverified answer.
+func (m configForm) advance() (tea.Model, tea.Cmd) {
 	m.storeCurrentValue()
 	m.err = nil
 	m.index = m.nextIndex(m.index + 1)

@@ -51,7 +51,7 @@ func Run(ctx context.Context, opts Options) (string, error) {
 		return "", err
 	}
 	if !opts.NoApply {
-		if err := backend.Preflight(ctx); err != nil {
+		if err := tui.RunVerification(ctx, "Checking cloud access", "Remote-state bucket: "+backend.Bucket, backend.Preflight, opts.AutoApprove); err != nil {
 			return "", err
 		}
 	}

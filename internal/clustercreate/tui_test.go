@@ -5,6 +5,8 @@
 package clustercreate
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -176,6 +178,52 @@ func TestDNSSelection(t *testing.T) {
 		if err != nil || cfg.Cluster.Domains[0].Provider != nil || cfg.Cluster.ACME != nil {
 			t.Fatalf("manual DNS kept managed settings: %v, %v", cfg, err)
 		}
+	}
+}
+
+// TestDNSVerification checks selection stays editable after failure, while
+// skipping preserves the selected DNS provider and ignores late results.
+func TestDNSVerification(t *testing.T) {
+	form := testConfigForm(t, "aws", "v1.2.3-1")
+	form.ctx = t.Context()
+	form.domain = "test.example.com"
+	form.fields[indexForField(t, form, "AWS profile (optional)")].value = "chosen"
+	form.index = indexForField(t, form, "DNS provider")
+	form.input.SetValue("aws-route53")
+	failure := errors.New("hosted zone missing")
+	form.verifyDNS = func(ctx context.Context, region, profile, name, id string) error {
+		if profile != "chosen" || region != "us-east-1" || name != "test.example.com" || id != "" {
+			t.Fatalf("incorrect lookup inputs: %s %s %s %s", region, profile, name, id)
+		}
+		return failure
+	}
+	update := func(msg tea.Msg) tea.Cmd {
+		model, cmd := form.Update(msg)
+		form = model.(configForm)
+		return cmd
+	}
+	cmd := update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Execute the asynchronous check and feed its result through the wizard.
+	batch := cmd().(tea.BatchMsg)
+	result := batch[1]()
+	update(result)
+	update(tea.KeyMsg{Type: tea.KeyEnter})
+	if form.fields[form.index].label != "DNS provider" || !errors.Is(form.err, failure) {
+		t.Fatal("failure should return to the DNS selection for editing")
+	}
+	cmd = update(tea.KeyMsg{Type: tea.KeyEnter})
+	batch = cmd().(tea.BatchMsg)
+	update(tea.KeyMsg{Type: tea.KeyEsc})
+	update(tea.KeyMsg{Type: tea.KeyEsc})
+	update(batch[1]())
+	if form.cancel || form.verification != nil || form.fields[form.index].label != "ACME account email (optional)" || form.dnsProvider != "aws-route53" {
+		t.Fatal("skip, repeated Escape, or late result changed the DNS answer or cancelled creation")
+	}
+	update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	update(tea.KeyMsg{Type: tea.KeyUp})
+	update(tea.KeyMsg{Type: tea.KeyEnter})
+	if form.verification != nil || form.dnsProvider != "manual" {
+		t.Fatal("manual DNS should not verify online")
 	}
 }
 

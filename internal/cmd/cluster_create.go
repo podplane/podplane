@@ -52,6 +52,7 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 			// Load an existing cluster config, or create one first so the rest of
 			// the command can operate on a single resolved config value.
 			var cfg *clusterconfig.ClusterConfig
+			usedWizard := false
 			if _, err := os.Stat(path); os.IsNotExist(err) {
 				providerKind, cancelled, err := infrafiles.SelectCloudProvider("Which cloud provider?")
 				if err != nil {
@@ -71,10 +72,11 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 					return err
 				}
 				// Begin cluster-config-related questions
-				cfg, err = clustercreate.RunConfigWizard(providerKind, seedManifest.Seeds.Version)
+				cfg, err = clustercreate.RunConfigWizard(cmd.Context(), providerKind, seedManifest.Seeds.Version)
 				if err != nil {
 					return err
 				}
+				usedWizard = true
 				if providerKind == "aws" {
 					provider := &cfg.Cluster.Providers[0]
 					provider.Account, err = infrafiles.ConfirmAWSAccount(cmd.Context(), provider.Region, provider.Profile, false)
@@ -126,7 +128,13 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 				return err
 			}
 			if !noApply {
-				if err := stateBackend.Preflight(cmd.Context()); err != nil {
+				// The wizard already checked DNS or the user explicitly skipped it.
+				if !usedWizard {
+					if err := clustercreate.VerifyDNS(cmd.Context(), cfg, autoApprove); err != nil {
+						return err
+					}
+				}
+				if err := tui.RunVerification(cmd.Context(), "Checking cloud access", "Remote-state bucket: "+stateBackend.Bucket, stateBackend.Preflight, autoApprove); err != nil {
 					return err
 				}
 			}
