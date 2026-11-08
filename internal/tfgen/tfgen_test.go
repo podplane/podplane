@@ -54,6 +54,7 @@ func testClusterOptions(cfg *clusterconfig.ClusterConfig) ClusterOptions {
 	opts := ClusterOptions{
 		DepsMirrorURL:    "https://deps.podplane.dev",
 		NstanceModuleDir: "../../cache/deps/tf/modules/nstance/2.0.1",
+		SeedPath:         "/cache/seeds/snapshot.netsy",
 	}
 	for _, target := range RequiredVMTargets(cfg) {
 		manifest := sampleVMConfigManifest(target.Kind, target.Arch)
@@ -195,6 +196,18 @@ func TestGenerateClusterScenarios(t *testing.T) {
 				if err != nil {
 					t.Fatalf("profile %q: %v", profile, err)
 				}
+				contents := fileContents(profileFiles)
+				seeded := profile != "none" && profile != ""
+				main := contents["podplane.cluster.main.tf"]
+				if strings.Count(main, `resource "podplane_nstance_registration_key" "cluster"`) != 1 || !strings.Contains(main, "depends_on = [podplane_nstance_registration_key.cluster") {
+					t.Errorf("profile %q: registration key must be provisioned once before server startup", profile)
+				}
+				if strings.Contains(main, `"podplane_nstance_ca"`) != seeded || strings.Contains(main, "seed_path") != seeded {
+					t.Errorf("profile %q: seed upload and pre-provisioned CA must exist only for seeded clusters", profile)
+				}
+				if strings.Contains(main, "NETSY_SEED_REQUIRED") || strings.Contains(main, "netsy-seed-ready") {
+					t.Errorf("profile %q: unexpected VM startup protocol", profile)
+				}
 				for name, content := range fileContents(profileFiles) {
 					if profile == "agentic" {
 						if content != fileContents(files)[name] {
@@ -307,7 +320,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		`resource "podplane_workload_ca_key" "cluster"`,
 		`secrets_provider = "aws-secrets-manager"`,
 		`key_prefix = "test-cluster"`,
-		`depends_on = [aws_iam_role_policy_attachment.ebs_csi, aws_iam_role_policy.podplane_knc, podplane_workload_ca_key.cluster, aws_iam_role_policy.podplane_workload_ca_key]`,
+		`depends_on = [podplane_nstance_ca.cluster, aws_iam_role_policy_attachment.ebs_csi, aws_iam_role_policy.podplane_knc, podplane_workload_ca_key.cluster, aws_iam_role_policy.podplane_workload_ca_key]`,
 		`resource "aws_iam_role" "ebs_csi"`,
 		`arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy`,
 		`controller = { podAnnotations = { "iam.amazonaws.com/role" = aws_iam_role.ebs_csi.arn } }`,

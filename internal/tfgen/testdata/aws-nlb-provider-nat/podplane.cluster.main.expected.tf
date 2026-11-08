@@ -72,6 +72,7 @@ data "podplane_userdata" "nst_arm64_us_east_1a" {
     "NSTANCE_TUNNEL_SHARD" = "us-east-1a"
     "NSTANCE_TUNNEL_PREFIX" = "shard/us-east-1a/"
   })
+  depends_on = [podplane_nstance_registration_key.cluster, podplane_netsy_seed_s3.cluster]
 }
 
 resource "terraform_data" "deployment_modes" {
@@ -249,13 +250,6 @@ resource "podplane_service_account_key" "cluster" {
   depends_on = [module.cluster]
 }
 
-resource "podplane_workload_ca_key" "cluster" {
-  key_prefix = "test-cluster"
-  secrets_provider = "aws-secrets-manager"
-  region = "us-east-1"
-  depends_on = [module.cluster]
-}
-
 resource "podplane_nstance_registration_key" "cluster" {
   secrets_provider = "aws-parameter-store"
   secret_prefix = "/test-cluster/"
@@ -263,8 +257,25 @@ resource "podplane_nstance_registration_key" "cluster" {
   depends_on = [module.cluster]
 }
 
+resource "podplane_workload_ca_key" "cluster" {
+  key_prefix = "test-cluster"
+  secrets_provider = "aws-secrets-manager"
+  region = "us-east-1"
+  depends_on = [module.cluster]
+}
+
+resource "podplane_nstance_ca" "cluster" {
+  secrets_provider = "aws-parameter-store"
+  secret_prefix = "/test-cluster/"
+  region = local.provider_region
+  depends_on = [module.cluster]
+  bucket = module.cluster.bucket
+  cluster_id = local.cluster_id
+}
+
 resource "podplane_netsy_seed_s3" "cluster" {
   cluster_config_path = "${path.module}/podplane.cluster.jsonc"
+  seed_path = "/cache/seeds/snapshot.netsy"
   bucket = aws_s3_bucket.podplane_cluster["netsy"].bucket
   region = local.aws_region
   values_content = yamlencode({
@@ -307,5 +318,5 @@ resource "podplane_netsy_seed_s3" "cluster" {
     namespace = "platform-nstance-operator"
     ca_bucket = module.cluster.bucket
   }
-  depends_on = [aws_iam_role_policy_attachment.ebs_csi, aws_iam_role_policy.podplane_knc, podplane_workload_ca_key.cluster, aws_iam_role_policy.podplane_workload_ca_key]
+  depends_on = [podplane_nstance_ca.cluster, aws_iam_role_policy_attachment.ebs_csi, aws_iam_role_policy.podplane_knc, podplane_workload_ca_key.cluster, aws_iam_role_policy.podplane_workload_ca_key]
 }

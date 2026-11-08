@@ -334,14 +334,12 @@ func cloudSigningKey(resourceType string, provider clusterconfig.Provider, prefi
 	return key
 }
 
-// addNstanceBootstrap orders metadata-only registration-key creation before seed bootstrap.
-func addNstanceBootstrap(doc *hclDocument, seed *hclBlock, provider clusterconfig.Provider, prefix string) {
+// addNstanceBootstrap configures operator registration in the seed.
+func addNstanceBootstrap(seed *hclBlock, provider clusterconfig.Provider, prefix string) {
 	secretProvider := "aws-parameter-store"
 	if provider.Kind == "google" {
 		secretProvider = "google-secret-manager"
 	}
-	key := cloudSigningKey("podplane_nstance_registration_key", provider, prefix)
-	doc.AddBlock(key)
 	seed.Body.Attr("nstance_bootstrap", object(
 		identField("provider", str(secretProvider)), identField("secret_prefix", str(prefix)),
 		identField("signing_key_id", expr("podplane_nstance_registration_key.cluster.id")),

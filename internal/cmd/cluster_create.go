@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
@@ -85,7 +86,8 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 					}
 				}
 				// Triggers `oidc create` flow if no existing issuer
-				cfg.Cluster.OIDC.IssuerURL, err = clusterCreateOIDCIssuer(cmd, originDir, cfg.Cluster.Providers[0], cfg.ResolvedClientID(), noApply, autoApprove)
+				var oidcNotice string
+				cfg.Cluster.OIDC.IssuerURL, oidcNotice, err = clusterCreateOIDCIssuer(cmd, originDir, cfg.Cluster.Providers[0], cfg.ResolvedClientID(), noApply, autoApprove)
 				if err != nil {
 					return err
 				}
@@ -103,7 +105,11 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 				if err := clusterconfig.Write(path, cfg); err != nil {
 					return err
 				}
-				fmt.Printf("Created %s\n", path)
+				resume := "podplane cluster create -f '" + strings.ReplaceAll(path, "'", "'\\''") + "'"
+				if noApply {
+					resume += " --no-apply"
+				}
+				fmt.Printf("Created cluster configuration based on your answers:\n  %s\n\nIf you exit this command early, resume with:\n  %s\n\n%s\n\n", path, resume, oidcNotice)
 			} else if err != nil {
 				return err
 			} else {
@@ -194,9 +200,16 @@ func prepareClusterGeneration(ctx context.Context, c *config.Config, depsManager
 	if err := tfgen.ValidateClusterGeneration(cfg); err != nil {
 		return tfgen.ClusterOptions{}, err
 	}
+	var seedPath string
 	if cfg.Cluster.Seed.Name != "" && cfg.Cluster.Seed.Name != seeds.None {
-		if _, err := depsManager.EnsureSeedSnapshot(ctx, cfg.Cluster.Seed.Name, cfg.Cluster.Seed.Version, nil); err != nil {
+		var err error
+		seedPath, err = depsManager.EnsureSeedSnapshot(ctx, cfg.Cluster.Seed.Name, cfg.Cluster.Seed.Version, nil)
+		if err != nil {
 			return tfgen.ClusterOptions{}, fmt.Errorf("failed to prepare seed snapshot %q: %w", cfg.Cluster.Seed.Name, err)
+		}
+		seedPath, err = filepath.Abs(seedPath)
+		if err != nil {
+			return tfgen.ClusterOptions{}, err
 		}
 	}
 
@@ -220,38 +233,37 @@ func prepareClusterGeneration(ctx context.Context, c *config.Config, depsManager
 	return tfgen.ClusterOptions{
 		DepsMirrorURL:     c.DepsBaseURL(),
 		VMConfigManifests: manifestList,
+		SeedPath:          seedPath,
 	}, nil
 }
 
 // clusterCreateOIDCIssuer collects or creates the OIDC issuer URL needed by a
 // new cluster that logs in with clientID. A new Truster server registers a
-// client for clientID; an existing issuer must already have one.
-func clusterCreateOIDCIssuer(cmd *cobra.Command, originDir string, provider clusterconfig.Provider, clientID string, noApply bool, autoApprove bool) (string, error) {
+// client for clientID; an existing issuer must already have one. It returns a
+// notice for the caller to print after the cluster config has been saved.
+func clusterCreateOIDCIssuer(cmd *cobra.Command, originDir string, provider clusterconfig.Provider, clientID string, noApply bool, autoApprove bool) (string, string, error) {
 	hasOIDC, err := tui.Confirm("Do you already have an OIDC issuer for this cluster?", false, 0)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if hasOIDC {
 		issuerURL, err := tui.Input("Cluster OIDC", "OIDC issuer URL", "https://auth.example.com", tui.Required("OIDC issuer URL"))
-		if err == nil {
-			fmt.Printf("The cluster logs in with OIDC client ID %q; make sure your issuer has a client with that ID.\n", clientID)
-		}
-		return issuerURL, err
+		return issuerURL, fmt.Sprintf("The cluster logs in with OIDC client ID %q; make sure your issuer has a client with that ID.", clientID), err
 	}
 	setUpOIDC, err := tui.Confirm("Set up a new Truster <https://truster.dev> server now?", false, 0)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if !setUpOIDC {
-		return "", fmt.Errorf("cluster creation requires an OIDC issuer URL; provide an existing issuer or run podplane oidc create first")
+		return "", "", fmt.Errorf("cluster creation requires an OIDC issuer URL; provide an existing issuer or run podplane oidc create first")
 	}
 	oidcPath, err := filepath.Abs(defaultOIDCConfigName)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	oidcPath, err = infrafiles.ConfirmConfigPath(oidcPath, originDir, "OIDC config and OpenTofu/Terraform", "my-oidc-server")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	oidcProvider := oidcconfig.Provider{
 		Kind: provider.Kind, Region: provider.Region, Account: provider.Account,
@@ -274,8 +286,7 @@ func clusterCreateOIDCIssuer(cmd *cobra.Command, originDir string, provider clus
 		AutoApprove: autoApprove,
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	fmt.Printf("Using new OIDC issuer %s for the cluster config.\n", issuerURL)
-	return issuerURL, nil
+	return issuerURL, fmt.Sprintf("Using new OIDC issuer %s for the cluster config.", issuerURL), nil
 }

@@ -68,6 +68,7 @@ data "podplane_userdata" "nst_amd64_us_central1_a" {
     "NSTANCE_TUNNEL_SHARD" = "us-central1-a"
     "NSTANCE_TUNNEL_PREFIX" = "shard/us-central1-a/"
   })
+  depends_on = [podplane_nstance_registration_key.cluster, podplane_netsy_seed_gcs.cluster]
 }
 
 resource "terraform_data" "deployment_modes" {
@@ -362,13 +363,6 @@ resource "podplane_service_account_key" "cluster" {
   depends_on = [module.cluster]
 }
 
-resource "podplane_workload_ca_key" "cluster" {
-  key_prefix = "test-cluster"
-  secrets_provider = "google-secret-manager"
-  project = "test-project"
-  depends_on = [module.cluster]
-}
-
 resource "podplane_nstance_registration_key" "cluster" {
   secrets_provider = "google-secret-manager"
   secret_prefix = "test-cluster-"
@@ -376,8 +370,25 @@ resource "podplane_nstance_registration_key" "cluster" {
   depends_on = [module.cluster]
 }
 
+resource "podplane_workload_ca_key" "cluster" {
+  key_prefix = "test-cluster"
+  secrets_provider = "google-secret-manager"
+  project = "test-project"
+  depends_on = [module.cluster]
+}
+
+resource "podplane_nstance_ca" "cluster" {
+  secrets_provider = "google-secret-manager"
+  secret_prefix = "test-cluster-"
+  project = local.provider_project
+  depends_on = [module.cluster]
+  bucket = module.cluster.bucket
+  cluster_id = local.cluster_id
+}
+
 resource "podplane_netsy_seed_gcs" "cluster" {
   cluster_config_path = "${path.module}/podplane.cluster.jsonc"
+  seed_path = "/cache/seeds/snapshot.netsy"
   bucket = google_storage_bucket.podplane_cluster["netsy"].name
   project = local.provider_project
   values_content = yamlencode({
@@ -452,7 +463,7 @@ resource "podplane_netsy_seed_gcs" "cluster" {
     namespace = "platform-nstance-operator"
     ca_bucket = module.cluster.bucket
   }
-  depends_on = [google_storage_bucket_iam_member.podplane_registry_writer, google_iam_workload_identity_pool_provider.cluster, google_project_iam_member.podplane_secrets_catalog, google_project_iam_member.podplane_secrets_lifecycle, google_project_iam_member.podplane_secrets_reader, google_project_iam_member.podplane_ingress_state, google_project_iam_member.csi_gce_pd_storage, google_project_iam_member.csi_gce_pd_instances, google_service_account_iam_member.csi_gce_pd_agent, podplane_workload_ca_key.cluster]
+  depends_on = [podplane_nstance_ca.cluster, google_storage_bucket_iam_member.podplane_registry_writer, google_iam_workload_identity_pool_provider.cluster, google_project_iam_member.podplane_secrets_catalog, google_project_iam_member.podplane_secrets_lifecycle, google_project_iam_member.podplane_secrets_reader, google_project_iam_member.podplane_ingress_state, google_project_iam_member.csi_gce_pd_storage, google_project_iam_member.csi_gce_pd_instances, google_service_account_iam_member.csi_gce_pd_agent, podplane_workload_ca_key.cluster]
 }
 
 data "google_storage_bucket_object_content" "nstance_ca" {

@@ -5,7 +5,10 @@
 package cmd
 
 import (
+	"crypto/sha512"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +17,8 @@ import (
 
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/config"
+	"github.com/podplane/podplane/internal/deps"
+	"github.com/podplane/podplane/internal/tfgen"
 	"github.com/spf13/cobra"
 )
 
@@ -67,6 +72,69 @@ func TestClusterCreateCommandHasExpectedInterface(t *testing.T) {
 	if cmd.Flags().Lookup("tf-deps") != nil {
 		t.Fatal("cluster create should use cached dependencies without --tf-deps")
 	}
+}
+
+// TestClusterGenerationReusesCachedSeed checks the downloaded snapshot path
+// reaches Terraform instead of causing another provider-side download.
+func TestClusterGenerationReusesCachedSeed(t *testing.T) {
+	var cfg clusterconfig.ClusterConfig
+	if err := json.Unmarshal([]byte(validClusterConfigJSON), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Cluster.SPIFFE.TrustDomain = "k8s.example.com"
+	cfg.Cluster.Secrets = clusterconfig.Secrets{
+		DefaultProvider: "aws",
+		Providers:       map[string]clusterconfig.SecretsProvider{"aws": {Kind: "aws", ObjectType: "secretsmanager"}},
+	}
+	seed := []byte("cached snapshot")
+	digest := fmt.Sprintf("sha512:%x", sha512.Sum512(seed))
+	cfg.Cluster.Seed = clusterconfig.Seed{Name: "minimal", Version: "v1", Digest: digest}
+	manager := deps.NewManager("http://127.0.0.1:1", t.TempDir())
+	seedPath := manager.SeedSnapshotCachePath("minimal", "v1", "minimal.netsy")
+	if err := os.MkdirAll(filepath.Dir(seedPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(seedPath, seed, 0600); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := json.Marshal(deps.SeedsManifest{Seeds: deps.Seeds{
+		Version: "v1", Snapshots: map[string]deps.SeedSnapshot{
+			"minimal": {URL: "http://127.0.0.1:1/minimal.netsy", Digest: digest, Size: int64(len(seed)), Cached: true},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.WriteCachedSeedsManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range tfgen.RequiredVMTargets(&cfg) {
+		raw, err := json.Marshal(deps.Manifest{VMConfig: deps.VMConfig{Version: "v1", Kind: target.Kind, OS: deps.OSInfo{Name: deps.OS, Arch: target.Arch}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := manager.WriteCachedManifest(target.Kind, target.Arch, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opts, err := prepareClusterGeneration(t.Context(), &config.Config{}, manager, &cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.SeedPath != seedPath {
+		t.Fatalf("seed path = %q, want cached path %q", opts.SeedPath, seedPath)
+	}
+	opts.NstanceModuleDir = "./nstance"
+	files, err := tfgen.GenerateCluster("podplane.cluster.jsonc", &cfg, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if file.Name == "podplane.cluster.main.tf" && strings.Contains(file.Content, `seed_path`) && strings.Contains(file.Content, seedPath) {
+			return
+		}
+	}
+	t.Fatal("generated seed resource did not reuse the cached snapshot")
 }
 
 // TestClusterCreateChecksCloudBeforeGeneration verifies authentication failure

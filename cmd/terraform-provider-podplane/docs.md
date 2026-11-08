@@ -43,9 +43,11 @@ Nstance Server `nst` instance manifests accept a non-secret `server_env` string 
 
 `podplane_workload_ca_key` creates or adopts exactly one unencrypted PKCS#8 Ed25519 key at the canonical name derived from `secrets_provider` and `key_prefix`:
 
-- `aws-secrets-manager`: `/<key_prefix>/workload-ca-key`
-- `aws-parameter-store`: `/<key_prefix>/workload-ca-key` as a `SecureString`
-- `google-secret-manager`: `<key_prefix>_workload-ca-key` in `project`
+| `secrets_provider` | Secret name |
+| --- | --- |
+| `aws-secrets-manager` | `/<key_prefix>/workload-ca-key` |
+| `aws-parameter-store` | `/<key_prefix>/workload-ca-key`, a `SecureString` |
+| `google-secret-manager` | `<key_prefix>_workload-ca-key` in `project` |
 
 For AWS, `region` and `profile` can select the SDK configuration to use. For Google Cloud, `project` identifies the project in which the secret is stored. Externally administered Vault and OpenBao installations are outside this resource's scope; customers provision their workload CA key before creating the cluster.
 
@@ -59,21 +61,29 @@ Changing any resource argument requires VM replacement, but automatic key replac
 
 Google Secret Manager creates a secret and its first version in two separate operations. If provisioning is interrupted between them, an empty secret can remain. The provider will not add a key to that existing empty secret because another provisioning process could still be using it. Confirm that no other provisioning process is active, delete the empty secret manually, and apply again.
 
-### Nstance registration signing key
+### Nstance Certificate Authority (CA)
 
-`podplane_nstance_registration_key` uses Nstance v2's PKCS#8 Ed25519 contract, independently of the workload CA:
+Nstance needs a certificate authority so its servers, agents, and operators can verify each other's identity when communicating securely.
 
-| `secrets_provider` (same as Nstance `cluster.secrets.provider`) | Backend name |
+`podplane_nstance_ca` creates or reuses this CA before server startup, rather than waiting for `nstance-server` to create it. This lets Podplane include the public CA certificate in the seed and finish uploading it before Nstance starts launching cluster nodes.
+
+The private key is encrypted at rest in the cloud secret service and never enters OpenTofu/Terraform state. The public certificate is stored at `cluster/ca.crt` in the Nstance bucket. State records the public certificate, key location and version, and configuration.
+
+If initial setup is interrupted after saving the key, retrying completes it using the same key. Existing keys and certificates must match. Later refreshes report missing or changed CA data rather than replacing it; restore the originals if this happens. Removing the resource leaves the key and certificate in cloud storage. Empty Google secrets require the manual recovery described above.
+
+### Nstance Registration Signing Key
+
+`podplane_nstance_registration_key` creates or reuses the Ed25519 key Nstance uses to sign registration tokens. This key is separate from the workload CA. The CLI provisions it for every cloud cluster before `nstance-server` starts, rather than relying on the server to create it at runtime, so the `platform` and `agentic` seeds can include a registration token for the Nstance operator.
+
+| `secrets_provider` | Secret name |
 | --- | --- |
 | `aws-parameter-store` (default) | `secret_prefix` + `registration-nonce.key`, a SecureString |
 | `aws-secrets-manager` | `secret_prefix` + `registration-nonce.key`, binary secret data |
 | `google-secret-manager` | `projects/<project>/secrets/` + `secret_prefix` + `registration-nonce-key` |
 
-`secret_prefix` is the exact Nstance secrets prefix, including any trailing separator. Unlike the workload CA resource, this resource does not insert separators. Google requires `project`; AWS accepts `region` and `profile`. The cloud service encrypts the PKCS#8 payload at rest and decrypts authorized reads. Nstance's optional client-encrypted `object-storage` secrets backend is not supported by this resource; configure one of the cloud backends above. Do not wrap cloud secret payloads in Nstance's object-storage encryption envelope.
+The private key is encrypted at rest by the cloud secret service.
 
-Create uses backend create-only operations and adopts the winner if Nstance, another apply, or an earlier interrupted apply already created it. OpenTofu/Terraform stores the backend identity in `id`, the immutable `backend_version`, and the SHA-256 PKIX public-key `public_key_fingerprint`, plus non-secret configuration. Refresh reads metadata only and fails closed on key loss/version changes. Update never rotates the signer, and destroy retains it. An existing empty Google secret is handled with the same manual recovery procedure as the workload CA key.
-
-The CLI generates the signer and seed bootstrap references when the AWS/Google `platform` or `agentic` overlay enables the Nstance operator. Infrastructure must be ready before signer creation, and Nstance-server VM creation must not depend on seed completion: the provider waits for the server to publish its CA.
+The private key never enters OpenTofu/Terraform state. State records only its location, version, public-key fingerprint, and configuration. If a valid key already exists, the provider reuses it and records its details in state without changing it. Refresh checks metadata and reports missing or changed keys; restore the original version if this happens. The provider never rotates the key, and removing the resource leaves it in the secret backend. Empty Google secrets require the manual recovery described above.
 
 ### Kubernetes ServiceAccount signing key
 

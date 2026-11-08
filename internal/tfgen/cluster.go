@@ -40,6 +40,7 @@ type ClusterOptions struct {
 	DepsMirrorURL     string
 	VMConfigManifests []VMConfigManifest
 	NstanceModuleDir  string
+	SeedPath          string
 }
 
 // VMConfigManifest is one pinned vmconfig manifest used by generated Terraform.
@@ -309,6 +310,17 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 			}
 			if target.Kind == "nst" {
 				userdata.Body.Attr("server_env", serverEnvValue(cfg, zone))
+				dependencies := list(expr("podplane_nstance_registration_key.cluster"))
+				if cfg.Cluster.Seed.Name != "" && cfg.Cluster.Seed.Name != seeds.None {
+					storage := "s3"
+					if provider.Kind == "google" {
+						storage = "gcs"
+					}
+					// Delay server launch, not address allocation: the seed uses
+					// the shard's independently reserved leader address.
+					dependencies = append(dependencies, expr("podplane_netsy_seed_"+storage+".cluster"))
+				}
+				userdata.Body.Attr("depends_on", dependencies)
 			}
 			mainDoc.AddBlock(userdata)
 		}
@@ -607,6 +619,7 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		addPodplaneGooglePermissions(&rolesDoc, cfg, accountName)
 	}
 	mainDoc.AddBlock(cloudSigningKey("podplane_service_account_key", provider, secretPrefix))
+	mainDoc.AddBlock(cloudSigningKey("podplane_nstance_registration_key", provider, secretPrefix))
 	managedWorkloadCAKey := addWorkloadCAKey(&mainDoc, cfg, provider)
 
 	if cfg.Cluster.Seed.Name != "" && cfg.Cluster.Seed.Name != seeds.None {
@@ -616,6 +629,9 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		}
 		seed := block("resource", "podplane_netsy_seed_"+storage, "cluster")
 		seed.Body.Attr("cluster_config_path", str("${path.module}/"+filepath.Base(configPath)))
+		if opts.SeedPath != "" {
+			seed.Body.Attr("seed_path", str(opts.SeedPath))
+		}
 		if provider.Kind == "aws" {
 			seed.Body.Attr("bucket", expr("aws_s3_bucket.podplane_cluster[\"netsy\"].bucket"))
 			seed.Body.Attr("region", expr("local.aws_region"))
@@ -628,9 +644,13 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		}
 		seed.Body.Attr("values_content", seedValues(cfg, provider))
 		if seeds.HasPlatformComponents(cfg.Cluster.Seed.Name) {
-			addNstanceBootstrap(&mainDoc, &seed, provider, secretPrefix)
+			addNstanceBootstrap(&seed, provider, secretPrefix)
 		}
-		dependencies := []hclValue{}
+		ca := cloudSigningKey("podplane_nstance_ca", provider, secretPrefix)
+		ca.Body.Attr("bucket", expr("module.cluster.bucket"))
+		ca.Body.Attr("cluster_id", expr("local.cluster_id"))
+		mainDoc.AddBlock(ca)
+		dependencies := []hclValue{expr("podplane_nstance_ca.cluster")}
 		if provider.Kind == "aws" {
 			dependencies = append(dependencies, expr("aws_iam_role_policy_attachment.ebs_csi"), expr("aws_iam_role_policy.podplane_knc"))
 		}
