@@ -271,7 +271,8 @@ func TestConfigFormOnlyShowsACMEEmailForSupportedDNS(t *testing.T) {
 	}
 }
 
-// TestConfigFormBuildsDomainlessCluster verifies explicit unmanaged API setup.
+// TestConfigFormBuildsDomainlessCluster keeps the selected NLB while leaving
+// DNS management to the user when only an API hostname is supplied.
 func TestConfigFormBuildsDomainlessCluster(t *testing.T) {
 	form := testConfigForm(t, "aws", "v1.2.3-1")
 	form.fields[indexForField(t, form, "Cluster ID / slug")].value = "production"
@@ -287,7 +288,7 @@ func TestConfigFormBuildsDomainlessCluster(t *testing.T) {
 	if got, want := cfg.Cluster.Registry.Hostname, "production-registry.local"; got != want {
 		t.Fatalf("registry hostname = %q, want %q", got, want)
 	}
-	if len(cfg.Cluster.Domains) != 0 || len(cfg.Cluster.Providers[0].LoadBalancers) != 0 || cfg.Cluster.Kubernetes.APILoadBalancer != "" {
+	if len(cfg.Cluster.Domains) != 0 || len(cfg.Cluster.Providers[0].LoadBalancers) != 1 || cfg.Cluster.Kubernetes.APILoadBalancer != "main" {
 		t.Fatalf("domainless managed wiring = domains %#v, load balancers %#v, API load balancer %q", cfg.Cluster.Domains, cfg.Cluster.Providers[0].LoadBalancers, cfg.Cluster.Kubernetes.APILoadBalancer)
 	}
 }
@@ -485,10 +486,20 @@ func TestConfigFormNetworkingSelection(t *testing.T) {
 	press(tea.KeyShiftTab)
 	press(tea.KeyUp)
 	press(tea.KeyEnter)
+	if form.fields[form.index].label != "IP mode" {
+		t.Fatal("yes should show IP mode first")
+	}
+	press(tea.KeyEnter)
+	if form.fields[form.index].label != "NAT" {
+		t.Fatal("IP mode should be followed by NAT")
+	}
+	press(tea.KeyEnter)
 	if form.fields[form.index].label != "VPC IPv4 CIDR" {
 		t.Fatal("yes should show advanced networking")
 	}
 	form.input.SetValue("172.20.0.0/16")
+	press(tea.KeyShiftTab)
+	press(tea.KeyShiftTab)
 	press(tea.KeyShiftTab)
 	if form.input.Value() != "yes" {
 		t.Fatal("back navigation lost yes selection")
@@ -500,6 +511,8 @@ func TestConfigFormNetworkingSelection(t *testing.T) {
 	}
 	press(tea.KeyShiftTab)
 	press(tea.KeyUp)
+	press(tea.KeyEnter)
+	press(tea.KeyEnter)
 	press(tea.KeyEnter)
 	if form.input.Value() != "172.20.0.0/16" {
 		t.Fatal("hidden networking answer was lost")

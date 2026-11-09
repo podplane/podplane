@@ -33,6 +33,23 @@ Before preparing dependencies or generating Terraform for an apply, the command 
 
 If Google reports expired application credentials or `invalid_rapt`, run `gcloud auth application-default login` and retry. This refreshes the application credentials used by Podplane, not just the separate `gcloud` CLI login. If `GOOGLE_APPLICATION_CREDENTIALS` is set, refresh the credentials referenced by that variable instead.
 
+## Networking and Cloudflare Tunnels
+
+No tunnel (the default) uses a cloud NLB for cluster ingress and Kubernetes API
+traffic. Networking defaults to dual-stack and Nstance NAT, with cloud-provider
+NAT available. Changing LB/tunnel, IP versions, or NAT mode requires recreating
+the cluster.
+
+For Cloudflare Tunnels, create a [“locally managed” tunnel](https://developers.cloudflare.com/tunnel/features/locally-managed-tunnels/)
+and DNS records first. A "locally managed" tunnel must be used because Podplane
+dynamically routes traffic as the cluster sleeps or wakes. Cloudflare handles
+public TLS, so DNS and ACME questions are skipped when Cloudflare Tunnels is used.
+
+The wizard reuses `tunnel-credentials` or asks for credentials JSON to save after
+confirmation, even with `--no-apply`. Review masks the secret; editing reveals it.
+If lookup is skipped or unavailable, enter the UUID and provision the secret
+separately. Cancelling does not remove saved secrets.
+
 ## Review and apply progress
 
 Podplane initialises the stack, saves a plan, and asks you to review it before

@@ -86,6 +86,9 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 						return err
 					}
 				}
+				if err := clustercreate.ConfigureTunnel(cmd.Context(), cfg); err != nil {
+					return err
+				}
 				// Triggers `oidc create` flow if no existing issuer
 				var oidcNotice string
 				cfg.Cluster.OIDC.IssuerURL, oidcNotice, err = clusterCreateOIDCIssuer(cmd, originDir, cfg.Cluster.Providers[0], cfg.ResolvedClientID(), noApply, autoApprove)

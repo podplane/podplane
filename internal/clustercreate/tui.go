@@ -45,6 +45,7 @@ type configForm struct {
 	showNetworking bool
 	domain         string
 	dnsProvider    string
+	tunnel         *clusterconfig.Tunnel
 	cancel         bool
 	complete       bool
 	ctx            context.Context
@@ -91,6 +92,9 @@ func (m configForm) RunInline(ctx context.Context) (tea.Model, error) {
 		field := m.fields[m.index]
 		label := field.label
 		validate := field.validate
+		if field.label == "What do you want to use for Kubernetes API access and cluster ingress?" {
+			_, _ = fmt.Fprintln(tui.FlowOutput(ctx), cloudflareTunnelDescription+"\n"+cloudflareTunnelDocsURL)
+		}
 		if len(field.choices) > 0 {
 			label += " (" + strings.Join(field.choices, "/") + ")"
 			validate = func(value string) error {
@@ -151,23 +155,26 @@ func newConfigForm(providerKind, seedVersion string) (configForm, error) {
 		dnsField.choices = []string{"manual", "google-cloud-dns"}
 	}
 	zoneField.visible = func(m configForm) bool { return m.showNetworking }
-	dnsField.visible = func(m configForm) bool { return m.domain != "" }
+	dnsField.visible = func(m configForm) bool { return m.domain != "" && m.tunnel == nil }
 	fields := []configField{
 		{label: "Cluster name", value: draft.Cluster.Name, validate: tui.Required("cluster name")},
 		{label: "Cluster ID / slug", value: draft.Cluster.ID, validate: validateClusterID},
 		regionField,
 		credentialsField,
+		{label: "What do you want to use for Kubernetes API access and cluster ingress?", value: "Cloud load balancer (NLB)", choices: []string{"Cloud load balancer (NLB)", "Cloudflare Tunnels"}},
 		{label: "Cluster domain (optional)", validate: validateOptionalDomain},
 		dnsField,
 		{label: "Google Cloud DNS managed-zone resource name", validate: tui.Required("managed-zone resource name"), visible: func(m configForm) bool {
-			return m.domain != "" && m.providerKind == "google" && m.dnsProvider == "google-cloud-dns"
+			return m.tunnel == nil && m.domain != "" && m.providerKind == "google" && m.dnsProvider == "google-cloud-dns"
 		}},
 		{label: "ACME account email (optional)", visible: func(m configForm) bool {
-			return (&clusterconfig.DomainProvider{Kind: m.dnsProvider}).SupportsACME()
+			return m.tunnel == nil && (&clusterconfig.DomainProvider{Kind: m.dnsProvider}).SupportsACME()
 		}},
 		{label: "Kubernetes API hostname", validate: validateDomain, visible: func(m configForm) bool { return m.domain == "" }},
 		{label: "Cluster seed", value: seeds.Agentic, choices: []string{seeds.Agentic, seeds.Platform, seeds.Minimal, seeds.None}},
 		{label: "Configure networking options?", value: "no", choices: []string{"yes", "no"}},
+		{label: "IP mode", value: "Dual-stack", choices: []string{"Dual-stack"}, visible: func(m configForm) bool { return m.showNetworking }},
+		{label: "NAT", value: "Nstance NAT", choices: []string{"Nstance NAT", "Cloud-provider NAT"}, visible: func(m configForm) bool { return m.showNetworking }},
 		{label: "VPC IPv4 CIDR", value: provider.VPC.V4CIDR, validate: validateVPCCIDR, visible: func(m configForm) bool { return m.showNetworking }},
 		zoneField,
 		{label: "Control plane architecture", value: pool.Arch, choices: []string{"arm64", "amd64"}},
@@ -276,6 +283,12 @@ func (m configForm) View() string {
 	width := m.width
 	if width == 0 {
 		width = 80
+	}
+	if m.fields[m.index].label == "What do you want to use for Kubernetes API access and cluster ingress?" {
+		input += "\n\n" + cloudflareTunnelDescription + "\n" + cloudflareTunnelDocsURL + "\nChanging tunnel or NAT mode later requires recreating the cluster."
+	}
+	if m.fields[m.index].label == "IP mode" {
+		input += "\n\nApplies to cloud workload networking and Kubernetes pods/services. IPv6-only is not available yet."
 	}
 	return ansi.Wrap(fmt.Sprintf("\n%s %s\n\n%s\n%s%s\n\n%s\n", title, progress, label, input, errText, help), max(1, width-1), "")
 }
@@ -386,6 +399,9 @@ func (m *configForm) storeCurrentValue() {
 	}
 	if m.fields[m.index].label == "DNS provider" {
 		m.dnsProvider = value
+	}
+	if m.fields[m.index].label == "What do you want to use for Kubernetes API access and cluster ingress?" {
+		m.tunnel = tunnelForChoice(value)
 	}
 }
 
@@ -502,20 +518,20 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 	provider.Zones = map[string][]clusterconfig.Subnet{
 		zone: subnets,
 	}
+	cfg.Cluster.Tunnel = tunnelForChoice(values["What do you want to use for Kubernetes API access and cluster ingress?"])
 	domain := values["Cluster domain (optional)"]
 	if domain == "" {
 		cfg.Cluster.Kubernetes.APIHostname = values["Kubernetes API hostname"]
 		cfg.Cluster.Registry.Hostname = cfg.Cluster.ID + "-registry.local"
-		provider.LoadBalancers = nil
 	} else {
 		configuredDomain := clusterconfig.Domain{Zone: domain}
-		if values["DNS provider"] == "aws-route53" {
+		if cfg.Cluster.Tunnel == nil && values["DNS provider"] == "aws-route53" {
 			configuredDomain.Provider = &clusterconfig.DomainProvider{Kind: "aws-route53"}
 			if email := values["ACME account email (optional)"]; email != "" {
 				cfg.Cluster.ACME = &clusterconfig.ACME{Email: email}
 			}
 		}
-		if m.providerKind == "google" && values["DNS provider"] == "google-cloud-dns" {
+		if cfg.Cluster.Tunnel == nil && m.providerKind == "google" && values["DNS provider"] == "google-cloud-dns" {
 			zoneName := values["Google Cloud DNS managed-zone resource name"]
 			if err := tui.Required("managed-zone resource name")(zoneName); err != nil {
 				return nil, err
@@ -526,8 +542,10 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 		}
 		cfg.Cluster.Domains = []clusterconfig.Domain{configuredDomain}
 		cfg.Cluster.Kubernetes.APIHostname = "k8s." + domain
-		cfg.Cluster.Kubernetes.APILoadBalancer = "main"
 		cfg.Cluster.Registry.Hostname = "registry." + domain
+	}
+	if cfg.Cluster.Tunnel == nil {
+		cfg.Cluster.Kubernetes.APILoadBalancer = "main"
 		provider.LoadBalancers = map[string]clusterconfig.LoadBalancer{
 			"main": {
 				Public:  true,
@@ -538,9 +556,15 @@ func (m configForm) config() (*clusterconfig.ClusterConfig, error) {
 				},
 			},
 		}
+	} else {
+		cfg.Cluster.ACME = nil
+		cfg.Cluster.Kubernetes.APILoadBalancer = ""
+		cfg.Cluster.Kubernetes.APIPort = 443
+		provider.LoadBalancers = nil
 	}
 	cfg.Cluster.SPIFFE.TrustDomain = cfg.Cluster.Kubernetes.APIHostname
 	cfg.Cluster.Providers[0] = provider
+	configureNetworking(cfg, values["NAT"])
 	return cfg, nil
 }
 
