@@ -48,8 +48,8 @@ type fakeExecutor struct {
 	destroyed bool
 }
 
-// Destroy records that the fake executor was asked to destroy resources.
-func (f *fakeExecutor) Destroy(context.Context, string, bool) error {
+// DestroyPlan records that the fake executor was asked to destroy resources.
+func (f *fakeExecutor) DestroyPlan(context.Context, string) error {
 	f.destroyed = true
 	return nil
 }

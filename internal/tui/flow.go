@@ -22,7 +22,7 @@ import (
 	"golang.org/x/term"
 )
 
-// flowKey identifies the terminal session shared by a create workflow.
+// flowKey identifies the terminal session shared by a command workflow.
 type flowKey struct{}
 
 // flowSession connects sequential workflow operations to one terminal owner.
@@ -80,7 +80,7 @@ type flowModel struct {
 	logPanel       *planAndApplyModel
 }
 
-// RunFlow owns one alternate-screen session for a complete create workflow.
+// RunFlow owns one alternate-screen session for a complete command workflow.
 // Nested flows reuse the session; non-interactive callers run the same operations.
 func RunFlow(ctx context.Context, title string, run func(context.Context) error) error {
 	if _, ok := ctx.Value(flowKey{}).(*flowSession); ok {
@@ -359,7 +359,7 @@ func (m flowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.KeyMsg:
 		_, dashboard := m.model.(planAndApplyModel)
-		if !dashboard && (v.String() == "ctrl+l" || (m.model == nil && v.String() == "l")) {
+		if !dashboard && (v.String() == "ctrl+l" || (m.model == nil && m.logPanel == nil && v.String() == "l")) {
 			if m.logPanel != nil {
 				m.logPanel = nil
 			} else {
@@ -367,7 +367,7 @@ func (m flowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.logPanel != nil && v.String() == "esc" {
+		if m.logPanel != nil && v.String() == "esc" && !m.logPanel.panelSearch.editing {
 			m.logPanel = nil
 			return m, nil
 		}
@@ -419,7 +419,7 @@ func (m flowModel) View() string {
 		return dashboard.View()
 	}
 	if m.width < 80 || m.height < 24 {
-		return fmt.Sprintf("%s\n\nThis view needs at least 80 columns × 24 rows.\nResize, press Ctrl+O for Inline mode, or Ctrl-C to cancel.\n", m.title)
+		return fmt.Sprintf("%s\n\nThis view needs at least 80 columns × 24 rows.\n%s\n", m.title, Shortcuts("Resize, press `Ctrl+O` for Inline mode, or `Ctrl-C` to cancel."))
 	}
 	w := min(m.width-4, 116)
 	primary := lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary)
@@ -432,7 +432,7 @@ func (m flowModel) View() string {
 		body += strings.Join(m.logs[start:], "\n")
 	}
 	body = ansi.Wrap(body, w-4, "")
-	body = lipgloss.NewStyle().Height(m.height-5).Render(body) + "\n\nCtrl-L Logs · Ctrl+O Inline mode · Ctrl-C Cancel"
+	body = lipgloss.NewStyle().Height(m.height-5).Render(body) + "\n\n" + Shortcuts("`Ctrl-L` Logs · `Ctrl+O` Inline mode · `Ctrl-C` Cancel")
 	card := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#5865f2")).Padding(0, 1).Width(w).Height(m.height - 3)
 	return card.Render(body) + "\n" + (planAndApplyModel{stage: m.stage}).stages()
 }

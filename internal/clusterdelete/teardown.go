@@ -59,6 +59,14 @@ type TeardownOptions struct {
 	ConfigPath       string
 	Select           func([]string) (Actions, error)
 	ConfirmCustom    ConfirmFunc
+	// Run presents the already-confirmed execution; nil executes directly.
+	Run      func(context.Context, func(context.Context) error) error
+	Progress func(tfexec.Event)
+}
+
+// CleanupTasks lists the teardown steps in execution order.
+func CleanupTasks() []string {
+	return []string{"Stop workload instances", "Destroy compute and networking", "Delete cluster buckets", "Delete state bucket", "Remove Terraform files", "Remove cluster config"}
 }
 
 // Teardown retains storage during the first destroy, waits for all writers to
@@ -107,7 +115,32 @@ func Teardown(ctx context.Context, opts TeardownOptions) (retErr error) {
 			return fmt.Errorf("cluster deletion cancelled")
 		}
 	}
-	// Plain confirmation blocks on stdin. Keep default signal handling until
+	run := func(ctx context.Context) error { return executeTeardown(ctx, opts, actions, buckets, custom) }
+	if opts.Run != nil {
+		return opts.Run(ctx, run)
+	}
+	return run(ctx)
+}
+
+// executeTeardown holds the backend lock across validated destruction and cleanup.
+func executeTeardown(ctx context.Context, opts TeardownOptions, actions Actions, buckets, custom []string) (retErr error) {
+	var err error
+	tasks := CleanupTasks()
+	progress := func(index int, state string) {
+		if opts.Progress != nil {
+			stage := "Delete"
+			if index >= 2 {
+				stage = "Cleanup"
+			}
+			opts.Progress(tfexec.Event{Stage: stage, Type: "task_" + state, Address: tasks[index], Message: tasks[index] + ": " + state})
+		}
+	}
+	for i := 2; i < len(tasks); i++ {
+		if !actions[i-1] && opts.Progress != nil {
+			opts.Progress(tfexec.Event{Type: "task_skip", Address: tasks[i]})
+		}
+	}
+	// Inline confirmation blocks on stdin. Keep default signal handling until
 	// approval; only teardown needs graceful cancellation to release its state lock.
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -145,7 +178,7 @@ func Teardown(ctx context.Context, opts TeardownOptions) (retErr error) {
 			retErr = errors.Join(retErr, unlock())
 		}
 	}()
-	state, err = opts.Engine.ReadState(ctx, opts.StackDir)
+	state, err := opts.Engine.ReadState(ctx, opts.StackDir)
 	if err != nil {
 		return err
 	}
@@ -160,7 +193,8 @@ func Teardown(ctx context.Context, opts TeardownOptions) (retErr error) {
 	if !slices.Equal(buckets, currentBuckets) {
 		return fmt.Errorf("cluster buckets changed during confirmation; rerun cluster delete to review them")
 	}
-	opts.Executor = &stagedExecutor{TeardownExecutor: opts.Engine, state: state, keep: keep}
+	progress(0, "start")
+	opts.Executor = &stagedExecutor{TeardownExecutor: opts.Engine, state: state, keep: keep, progress: progress}
 	opts.Provider = opts.Cloud
 	opts.AfterDestroy = func(ctx context.Context) error {
 		status("Waiting for Nstance servers to terminate before storage cleanup.")
@@ -207,9 +241,12 @@ func Teardown(ctx context.Context, opts TeardownOptions) (retErr error) {
 			}
 		}
 		if !actions[ClusterBuckets] {
+			progress(1, "complete")
 			status("Cluster buckets, their dependencies, state, and local files were retained.")
 			return nil
 		}
+		progress(1, "complete")
+		progress(2, "start")
 		if err := opts.Engine.DestroyExcept(ctx, opts.StackDir, remaining, map[string]bool{}, true, func(ctx context.Context) error {
 			for _, bucket := range buckets {
 				status("Emptying cluster bucket " + bucket + " (including old versions).")
@@ -228,7 +265,9 @@ func Teardown(ctx context.Context, opts TeardownOptions) (retErr error) {
 		if len(remaining.Resources) != 0 {
 			return fmt.Errorf("managed resources remain; state and local files retained")
 		}
+		progress(2, "complete")
 		if actions[StateBucket] {
+			progress(3, "start")
 			status("Removing state bucket " + opts.StateBucketName + ".")
 			if err := lock.EmptyBucket(ctx); err != nil {
 				return err
@@ -241,19 +280,28 @@ func Teardown(ctx context.Context, opts TeardownOptions) (retErr error) {
 			if err := opts.Cloud.DeleteBucket(ctx, opts.StateBucketName); err != nil {
 				return fmt.Errorf("state bucket retained; it may have been reused by another client (contents were not deleted again): %w", err)
 			}
+			progress(3, "complete")
+		}
+		if actions[TerraformFiles] {
+			progress(4, "start")
 		}
 		for _, file := range files {
 			if err := os.RemoveAll(file); err != nil {
 				return fmt.Errorf("infrastructure deleted; remove local file %s manually: %w", file, err)
 			}
 		}
+		if actions[TerraformFiles] {
+			progress(4, "complete")
+		}
 		if actions[ConfigFile] {
+			progress(5, "start")
 			if err := os.Remove(opts.ConfigPath); err != nil {
 				return fmt.Errorf("infrastructure deleted; remove config manually: %w", err)
 			}
 			if err := os.RemoveAll(filepath.Join(opts.StackDir, ".podplane")); err != nil {
 				return fmt.Errorf("remove cluster support directory: %w", err)
 			}
+			progress(5, "complete")
 		}
 		return nil
 	}
@@ -263,12 +311,15 @@ func Teardown(ctx context.Context, opts TeardownOptions) (retErr error) {
 // stagedExecutor adapts VM teardown to a destroy that preserves storage dependencies.
 type stagedExecutor struct {
 	TeardownExecutor
-	state tfexec.State
-	keep  map[string]bool
+	state    tfexec.State
+	keep     map[string]bool
+	progress func(int, string)
 }
 
 // Destroy limits the initial teardown to resources outside the retained set.
 func (s *stagedExecutor) Destroy(ctx context.Context, dir string, _ bool) error {
+	s.progress(0, "complete")
+	s.progress(1, "start")
 	return s.DestroyExcept(ctx, dir, s.state, s.keep, true, nil)
 }
 

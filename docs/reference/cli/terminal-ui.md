@@ -11,6 +11,7 @@ Podplane uses a few terminal UI styles for interactive commands:
 | Configuration wizard | [cluster create](commands/cluster-create.md), [oidc create](commands/oidc-create.md) | Collect settings when creating a new config. |
 | VM boot wizard | [local start](commands/local-start.md) | Show local VM startup tasks and health checks. |
 | OpenTofu/Terraform plan-and-apply dashboard | [cluster create](commands/cluster-create.md), [cluster upgrade](commands/cluster-upgrade.md), [oidc create](commands/oidc-create.md) | Review infrastructure changes and track apply progress. |
+| Deletion workflow | [cluster delete](commands/cluster-delete.md), [oidc delete](commands/oidc-delete.md) | Confirm removal and track destruction and cleanup. |
 
 Before the style-specific controls, here's how to switch modes and stop execution safely.
 
@@ -25,6 +26,13 @@ Type `yes` to approve, or use `--auto-approve` to skip confirmation.
 
 **Ctrl-C requests a safe stop.** Wait for cleanup to finish. Cancellation and
 failure do not undo applied changes; inspect the logs before retrying.
+
+Shortcut keys are bold teal; their descriptions are muted. In lists, checklists,
+resource tables, and text panels, press `/`, type a term, then Enter to search.
+Use `n` for the next matching row or line and `N` for the previous one; search
+wraps at either end. Matching is literal and case-insensitive. Esc cancels search
+entry without closing the panel. Search respects the hide-completed filter and
+never approves or toggles an item. Searching logs pauses following; End resumes it.
 
 ## Configuration wizard
 
@@ -78,3 +86,14 @@ updates; scrolling or pressing a key clears it. Press `c` to copy all retained
 logs (up to 4 MiB per copy). Logs have a 64 MiB retention budget; reaching it
 discards oldest entries and shows a warning. Copying uses the clipboard
 on the machine running Podplane; clipboard access must be available there.
+
+## Deletion workflow
+
+`cluster delete` and `oidc delete` use **Prepare → Confirm → Delete → Cleanup**. Cluster deletion offers dependent cleanup checkboxes; OIDC
+deletion confirms infrastructure removal and retains state and local files.
+
+The TUI dashboard shows cleanup tasks and each validated destroy plan's resources.
+Resource progress applies to the current phase, not the entire deletion.
+Table, details, and log controls match the plan-and-apply dashboard above.
+Ctrl+O preserves checkbox selections when switching to Inline mode.
+Cancellation waits for safe cleanup; failures leave diagnostics and a resume command.

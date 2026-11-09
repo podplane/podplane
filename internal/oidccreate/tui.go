@@ -227,9 +227,9 @@ func (m configForm) View() string {
 	if m.err != nil {
 		errText = "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("#d20f39")).Render(m.err.Error())
 	}
-	help := "enter/tab: next  esc: cancel"
+	help := tui.Shortcuts("`Enter/Tab` Next · `Esc` Cancel")
 	if m.index > 0 {
-		help = "enter/tab: next  shift+tab: back  esc: cancel"
+		help = tui.Shortcuts("`Enter/Tab` Next · `Shift+Tab` Back · `Esc` Cancel")
 	}
 	// Keep the input unbounded so textinput never scrolls it horizontally.
 	// Wrap the rendered text (including its cursor), not the stored value.

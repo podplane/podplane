@@ -5,6 +5,7 @@
 package tui
 
 import (
+	"context"
 	"os"
 	"slices"
 	"strings"
@@ -36,6 +37,14 @@ func TestChecklistDependencies(t *testing.T) {
 	}
 	if lipgloss.Width(m.View()) > 80 || lipgloss.Height(m.View()) > 24 {
 		t.Fatalf("checklist overflow:\n%s", m.View())
+	}
+	for i := range items {
+		embedded := m
+		embedded.embedded, embedded.width, embedded.height, embedded.selected = true, 74, 18, i
+		view := embedded.View()
+		if lipgloss.Height(view) > 18 || lipgloss.Width(view) > 74 || !strings.Contains(view, "Delete selected") {
+			t.Fatalf("embedded checklist hides actions at row %d:\n%s", i, view)
+		}
 	}
 	key(tea.KeyDown)
 	key(tea.KeySpace)
@@ -145,7 +154,7 @@ func TestChecklistIndependentChoices(t *testing.T) {
 			}
 			_ = writer.Close()
 			opts.AutoApprove = scenario.auto
-			got, err := Checklist(opts)
+			got, err := Checklist(context.Background(), opts)
 			if (err != nil) != (scenario.want == nil) || !slices.Equal(got, scenario.want) {
 				t.Fatalf("selection = %v, %v; want %v", got, err, scenario.want)
 			}
@@ -162,7 +171,7 @@ func TestChecklistInvalidDependencies(t *testing.T) {
 		{{Label: "Missing", Requires: []int{3}}},
 		{{Label: "Later", Requires: []int{1}}, {Label: "Earlier", Requires: []int{0}}},
 	} {
-		if _, err := Checklist(ChecklistOptions{Items: items, AutoApprove: true}); err == nil {
+		if _, err := Checklist(context.Background(), ChecklistOptions{Items: items, AutoApprove: true}); err == nil {
 			t.Fatalf("accepted invalid items: %v", items)
 		}
 	}

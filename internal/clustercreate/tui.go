@@ -256,9 +256,9 @@ func (m configForm) View() string {
 	if m.err != nil {
 		errText = "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("#d20f39")).Render(m.err.Error())
 	}
-	help := "enter/tab: next  ctrl+c: cancel"
+	help := tui.Shortcuts("`Enter/Tab` Next · `Ctrl-C` Cancel")
 	if m.canMovePrevious() {
-		help = "enter/tab: next  shift+tab: back  ctrl+c: cancel"
+		help = tui.Shortcuts("`Enter/Tab` Next · `Shift+Tab` Back · `Ctrl-C` Cancel")
 	}
 	input := m.input.View()
 	if choices := m.fields[m.index].choices; len(choices) > 0 {

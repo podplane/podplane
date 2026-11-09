@@ -111,14 +111,14 @@ func (m Verification) View() string {
 	}
 	title := lipgloss.NewStyle().Background(ColorPrimary).Foreground(ColorWhite).Padding(0, 1).Render(m.title)
 	status := m.spinner.View() + " Verifying…"
-	help := "esc: skip verification  ctrl+c: cancel"
+	help := Shortcuts("`Esc` Skip verification · `Ctrl-C` Cancel")
 	if m.failure != nil {
 		lines := strings.Split(ansi.Wrap(m.failure.Error(), max(1, m.width-1), ""), "\n")
 		if len(lines) > 8 {
 			lines = append(lines[:8], "…")
 		}
 		status = lipgloss.NewStyle().Foreground(lipgloss.Color("#d20f39")).Render(strings.Join(lines, "\n"))
-		help = "r: retry  enter: return error  esc: skip verification  ctrl+c: cancel"
+		help = Shortcuts("`r` Retry · `Enter` Return error · `Esc` Skip verification · `Ctrl-C` Cancel")
 	}
 	return ansi.Wrap(fmt.Sprintf("\n%s\n\n%s\n\n%s\n\n%s\n", title, m.detail, status, help), max(1, m.width-1), "")
 }

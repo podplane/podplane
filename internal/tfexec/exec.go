@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // CommandEnvVar selects the OpenTofu or Terraform command used by Podplane.
@@ -21,6 +22,24 @@ const CommandEnvVar = "PODPLANE_TF_CMD"
 type CLI struct {
 	binary        string
 	cliConfigFile string
+	emit          func(Event)
+}
+
+// WithEvents returns a copy that sends engine output to a serialized event sink.
+func (c *CLI) WithEvents(emit func(Event)) *CLI {
+	configured := *c
+	var mu sync.Mutex
+	configured.emit = func(e Event) { mu.Lock(); defer mu.Unlock(); emit(e) }
+	return &configured
+}
+
+// report sends diagnostics to the configured sink or the conventional stderr stream.
+func (c *CLI) report(e Event) {
+	if c.emit != nil {
+		c.emit(e)
+	} else if e.Message != "" {
+		fmt.Fprintln(os.Stderr, e.Message)
+	}
 }
 
 // NewCLI selects the configured executable or finds tofu or terraform on PATH.
@@ -102,8 +121,22 @@ func (c *CLI) Destroy(ctx context.Context, dir string, autoApprove bool) error {
 	return c.run(ctx, dir, args...)
 }
 
+// DestroyPlan validates and applies a saved destroy plan after the caller's approval.
+func (c *CLI) DestroyPlan(ctx context.Context, dir string) error {
+	state, err := c.ReadState(ctx, dir)
+	if err != nil {
+		return err
+	}
+	return c.DestroyExcept(ctx, dir, state, nil, false, nil)
+}
+
 // OutputJSON runs OpenTofu/Terraform output -json in dir.
 func (c *CLI) OutputJSON(ctx context.Context, dir string) ([]byte, error) {
+	if c.emit != nil {
+		var out bytes.Buffer
+		err := c.eventProcess(ctx, dir, &out, &eventWriter{emit: c.report}, "output", "-json")
+		return out.Bytes(), err
+	}
 	config, cleanup, err := c.commandConfig()
 	if err != nil {
 		return nil, err
@@ -125,6 +158,9 @@ func (c *CLI) OutputJSON(ctx context.Context, dir string) ([]byte, error) {
 
 // run invokes the configured executable with args in dir.
 func (c *CLI) run(ctx context.Context, dir string, args ...string) error {
+	if c.emit != nil {
+		return c.eventCommand(ctx, dir, false, c.report, args...)
+	}
 	config, cleanup, err := c.commandConfig()
 	if err != nil {
 		return err

@@ -491,7 +491,7 @@ func (m taskProgressModel) View() string {
 		content = lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(58).Render(body.String()), m.renderStack())
 	}
 	if m.doneReceived && m.closed {
-		content += "\n" + faintStyle.Render("Press any key to continue")
+		content += "\n" + Shortcuts("Press `any key` to continue")
 	}
 
 	card := cardStyle.Width(m.cardWidth()).Height(taskProgressFrameHeight).Render(content)
@@ -512,7 +512,7 @@ func (m taskProgressModel) tooSmall() bool {
 
 // tooSmallTaskProgressView renders the compact undersized-terminal message.
 func tooSmallTaskProgressView() string {
-	return fmt.Sprintf("Podplane local start is still running.\n\nThe installer view needs at least %dx%d.\nResize your terminal to continue.\n\nPress Ctrl+O to continue in Inline mode.\n", MinTUIWidth, MinTUIHeight)
+	return fmt.Sprintf("Podplane local start is still running.\n\nThe installer view needs at least %dx%d.\nResize your terminal to continue.\n\n%s\n", MinTUIWidth, MinTUIHeight, Shortcuts("Press `Ctrl+O` to continue in Inline mode."))
 }
 
 // renderRocketLaunch renders the completed-state launch animation shown while

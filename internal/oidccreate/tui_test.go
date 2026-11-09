@@ -107,7 +107,7 @@ func TestConfigReusesClusterProvider(t *testing.T) {
 func TestConfigFormCanNavigateBackWithoutLosingAnswers(t *testing.T) {
 	form := testConfigForm(t, "aws", "google", "")
 	form.input.SetValue("auth.example.com")
-	if view := form.View(); strings.Contains(view, "shift+tab: back") {
+	if view := form.View(); strings.Contains(view, "Shift+Tab Back") {
 		t.Fatalf("first OIDC step should not show back hint; view = %q", view)
 	}
 
@@ -119,7 +119,7 @@ func TestConfigFormCanNavigateBackWithoutLosingAnswers(t *testing.T) {
 	if got := form.fields[1].label; got != "DNS zone" {
 		t.Fatalf("active field = %q, want DNS zone", got)
 	}
-	if view := form.View(); !strings.Contains(view, "shift+tab: back") {
+	if view := form.View(); !strings.Contains(view, "Shift+Tab Back") {
 		t.Fatalf("second OIDC step should show back hint; view = %q", view)
 	}
 

@@ -65,8 +65,28 @@ resource "terraform_data" "independent" { input = "network" }
 			if _, err := os.Stat(dataPath); err != nil {
 				t.Fatal("unsafe plan destroyed data")
 			}
+			var planned, completed []string
+			cli = cli.WithEvents(func(e Event) {
+				if e.Plan != nil {
+					for _, change := range e.Plan.Changes {
+						planned = append(planned, change.Address)
+					}
+				}
+				if e.Type == "apply_complete" {
+					if !slices.Contains(planned, e.Address) {
+						t.Errorf("completion before validated plan: %s", e.Address)
+					}
+					completed = append(completed, e.Address)
+				}
+			})
 			if err := cli.DestroyExcept(ctx, dir, state, map[string]bool{"terraform_data.bucket": true}, false, nil); err != nil {
 				t.Fatal(err)
+			}
+			slices.Sort(planned)
+			slices.Sort(completed)
+			want := []string{"terraform_data.independent", "terraform_data.server"}
+			if !slices.Equal(planned, want) || !slices.Equal(completed, want) {
+				t.Fatalf("destroy progress: planned %v, completed %v; want %v", planned, completed, want)
 			}
 			remaining, err := cli.ReadState(ctx, dir)
 			if err != nil {

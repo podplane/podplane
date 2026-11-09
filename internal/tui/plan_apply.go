@@ -31,6 +31,8 @@ import (
 type PlanAndApplyOptions struct {
 	Title, Subtitle, Resume string
 	AutoApprove             bool
+	Destroy                 bool
+	Tasks                   []string
 }
 
 // PlanAndApplyRun owns execution, sending events and requesting approval of a saved plan.
@@ -108,6 +110,10 @@ func RunPlanAndApply(ctx context.Context, opts PlanAndApplyOptions, run PlanAndA
 		events <- planAndApplyDone{err}
 	}()
 	m := planAndApplyModel{opts: opts, events: events, cancel: cancel, stage: "Init", started: time.Now(), rows: map[string]*planAndApplyRow{}, hideCompleted: true}
+	if opts.Destroy {
+		m.stage = "Delete"
+		m.tasks = make(map[string]string)
+	}
 	if CanUseTUI(0, 0).OK && term.IsTerminal(int(os.Stdin.Fd())) && !flowInline(ctx) {
 		final, err := Run(ctx, m)
 		if err != nil {
@@ -161,7 +167,9 @@ func RunPlanAndApply(ctx context.Context, opts PlanAndApplyOptions, run PlanAndA
 	_, _ = fmt.Fprintln(FlowOutput(ctx), m.status())
 	if m.err != nil {
 		FlowSummary(ctx, "Inspect the engine diagnostics above, including any state recovery instructions.")
-		if m.stage == "Apply" {
+		if opts.Destroy {
+			FlowSummary(ctx, "Deletion was not rolled back. Remaining resources and recovery files were retained where possible.")
+		} else if m.stage == "Apply" {
 			FlowSummary(ctx, "Applied changes have not been rolled back. Do not reuse the old plan.")
 		}
 		FlowSummary(ctx, "After resolving the error, create and review a new plan with:\n  "+opts.Resume)
@@ -202,6 +210,8 @@ type planAndApplyModel struct {
 	selection                                               *logSelection
 	copyStatus                                              string
 	err                                                     error
+	tasks                                                   map[string]string
+	tableSearch, panelSearch                                textSearch
 }
 
 // Init starts the dashboard clock without taking ownership of engine events.
@@ -265,11 +275,12 @@ func (m planAndApplyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.detail && e.Button == tea.MouseButtonLeft {
 				m.detail, m.scroll = false, 0
+				m.panelSearch = textSearch{}
 			}
 			break
 		}
 		// The table starts after the border, title, summary, and column header.
-		const firstRow = 10
+		firstRow := 10 + m.taskRows()
 		if e.X < 2 || e.X >= min(m.width-4, 116) || e.Y < firstRow || e.Y >= firstRow+m.visibleRows() {
 			break
 		}
@@ -283,6 +294,7 @@ func (m planAndApplyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if selected >= 0 {
 				m.selected, m.focus, m.scroll = selected, 0, 0
 				m.detail = true
+				m.panelSearch = textSearch{}
 			}
 		}
 	case planAndApplyTick:
@@ -303,9 +315,17 @@ func (m planAndApplyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.done {
 			return m, planAndApplyClock()
 		}
+		if m.stopping {
+			return m, tea.Quit
+		}
 	case tea.KeyMsg:
 		m.selection = nil
 		m.copyStatus = ""
+		if !m.small() {
+			if handled, cmd := m.searchKey(e); handled {
+				return m, cmd
+			}
+		}
 		switch e.String() {
 		case "c":
 			if m.logView {
@@ -323,13 +343,16 @@ func (m planAndApplyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "esc":
 			m.detail, m.logView, m.outputView, m.scroll = false, false, false, 0
+			m.panelSearch = textSearch{}
 		case "l":
 			m.logView, m.detail, m.outputView, m.scroll = true, false, false, 0
 			m.followLogs = true
+			m.panelSearch = textSearch{}
 		case "o":
 			m.outputView, m.detail, m.logView, m.scroll = true, false, false, 0
+			m.panelSearch = textSearch{}
 		case "h":
-			if m.stage == "Apply" && !m.detail && !m.logView && !m.outputView {
+			if (m.stage == "Apply" || m.opts.Destroy) && !m.detail && !m.logView && !m.outputView {
 				m.hideCompleted = !m.hideCompleted
 			}
 		case "home", "end", "g", "G":
@@ -391,6 +414,7 @@ func (m planAndApplyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == 0 && len(m.tableIndices()) > 0 {
 				m.detail = true
 				m.scroll = 0
+				m.panelSearch = textSearch{}
 			} else if m.done {
 				return m, tea.Quit
 			} else if m.review != nil && m.focus > 0 {
@@ -410,6 +434,52 @@ func (m planAndApplyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// searchKey moves within the active viewport without approving plans or toggling rows.
+func (m *planAndApplyModel) searchKey(key tea.KeyMsg) (bool, tea.Cmd) {
+	panel := m.detail || m.logView || m.outputView
+	if !panel && len(m.plan.Changes) == 0 {
+		return false, nil
+	}
+	search := &m.tableSearch
+	if panel {
+		search = &m.panelSearch
+	}
+	if !search.editing && key.String() != "/" && key.String() != "n" && key.String() != "N" {
+		return false, nil
+	}
+	if search.editing && key.String() != "enter" {
+		_, handled, cmd := search.update(key, nil, 0)
+		return handled, cmd
+	}
+	var lines []string
+	current := m.scroll
+	indices := m.tableIndices()
+	if panel {
+		var n int
+		_, lines, n = m.modalContent()
+		if m.logView && m.followLogs {
+			current = max(0, len(lines)-n)
+			m.followLogs, m.scroll = false, current
+		}
+	} else {
+		current = slices.Index(indices, m.selected)
+		for _, i := range indices {
+			c := m.plan.Changes[i]
+			lines = append(lines, c.Address+" "+c.Action()+" "+m.rows[c.Address].status)
+		}
+	}
+	position, handled, cmd := search.update(key, lines, current)
+	if position >= 0 {
+		if panel {
+			m.scroll = position
+		} else {
+			m.selected, m.focus = indices[position], 0
+			m.adjustTable()
+		}
+	}
+	return handled, cmd
+}
+
 // accept applies an execution event independently of the active renderer.
 func (m *planAndApplyModel) accept(msg tea.Msg) {
 	defer m.adjustTable()
@@ -417,12 +487,22 @@ func (m *planAndApplyModel) accept(msg tea.Msg) {
 	case planAndApplyReview:
 		m.plan, m.review, m.focus = e.plan, &e, 0
 		m.selected, m.tableTop = 0, 0
+		m.rows = make(map[string]*planAndApplyRow)
 		for _, c := range e.plan.Changes {
 			m.rows[c.Address] = &planAndApplyRow{change: c, status: "Waiting", completed: map[string]bool{}}
 		}
 	case planAndApplyDone:
 		m.done, m.err, m.ended = true, e.err, time.Now()
 		m.review = nil
+		for task, status := range m.tasks {
+			if status == "start" {
+				if e.err != nil {
+					m.tasks[task] = "failed"
+				} else {
+					m.tasks[task] = "complete"
+				}
+			}
+		}
 		if e.err != nil {
 			m.addLog(e.err.Error())
 		}
@@ -432,6 +512,20 @@ func (m *planAndApplyModel) accept(msg tea.Msg) {
 			}
 		}
 	case tfexec.Event:
+		if e.Plan != nil {
+			m.accept(planAndApplyReview{plan: *e.Plan})
+			m.review = nil
+		}
+		if strings.HasPrefix(e.Type, "task_") {
+			if m.tasks == nil {
+				m.tasks = make(map[string]string)
+			}
+			m.tasks[e.Address] = strings.TrimPrefix(e.Type, "task_")
+			if e.Type == "task_start" {
+				m.plan, m.rows = tfexec.Plan{}, make(map[string]*planAndApplyRow)
+				m.selected, m.tableTop = 0, 0
+			}
+		}
 		if e.Stage != "" {
 			m.stage = e.Stage
 		}
@@ -605,7 +699,13 @@ func (m planAndApplyModel) status() string {
 			return m.stage + " stopped: " + m.err.Error()
 		}
 		if !m.plan.HasChanges {
+			if m.opts.Destroy {
+				return "Selected deletion tasks completed"
+			}
 			return "Infrastructure is up to date"
+		}
+		if m.opts.Destroy {
+			return "Selected deletion tasks completed"
 		}
 		return "Infrastructure applied"
 	}
@@ -628,7 +728,7 @@ func (m planAndApplyModel) small() bool { return m.width < MinTUIWidth || m.heig
 func (m planAndApplyModel) tableIndices() []int {
 	indices := make([]int, 0, len(m.plan.Changes))
 	for i, c := range m.plan.Changes {
-		if m.stage == "Apply" && m.hideCompleted && m.rows[c.Address].status == "Complete" {
+		if (m.stage == "Apply" || m.opts.Destroy) && m.hideCompleted && m.rows[c.Address].status == "Complete" {
 			continue
 		}
 		indices = append(indices, i)
@@ -652,17 +752,18 @@ func (m *planAndApplyModel) adjustTable() {
 
 // resourceAt hits only the displayed name, excluding row padding and other columns.
 func (m planAndApplyModel) resourceAt(x, y int) int {
-	if m.small() || m.detail || m.logView || m.outputView || y < 10 || y >= 10+m.visibleRows() {
+	firstRow := 10 + m.taskRows()
+	if m.small() || m.detail || m.logView || m.outputView || y < firstRow || y >= firstRow+m.visibleRows() {
 		return -1
 	}
-	i := m.tableTop + y - 10
+	i := m.tableTop + y - firstRow
 	indices := m.tableIndices()
 	if i >= len(indices) {
 		return -1
 	}
 	i = indices[i]
 	left, width := 4, min(m.width-4, 116)-12
-	if m.stage == "Apply" {
+	if m.stage == "Apply" || m.opts.Destroy {
 		left, width = 5, min(m.width-4, 116)-31
 	}
 	name := ansi.Truncate(m.plan.Changes[i].Address, width, "…")
@@ -674,7 +775,36 @@ func (m planAndApplyModel) resourceAt(x, y int) int {
 
 // visibleRows reserves space for the summary, activity panel, and controls.
 func (m planAndApplyModel) visibleRows() int {
-	return max(1, m.height-17-lipgloss.Height(m.activity()))
+	return max(1, m.height-17-lipgloss.Height(m.activity())-m.taskRows())
+}
+
+// taskRows reserves a compact task list while leaving room for resource progress.
+func (m planAndApplyModel) taskRows() int {
+	return min(len(m.opts.Tasks), max(1, m.height-24))
+}
+
+// taskView shows the current cleanup task and nearby steps without an invented percentage.
+func (m planAndApplyModel) taskView() string {
+	n := m.taskRows()
+	if n == 0 {
+		return ""
+	}
+	current := 0
+	for i, task := range m.opts.Tasks {
+		if m.tasks[task] != "" && m.tasks[task] != "skip" {
+			current = i
+		}
+	}
+	start := min(current, len(m.opts.Tasks)-n)
+	var b strings.Builder
+	for _, task := range m.opts.Tasks[start : start+n] {
+		icon := map[string]string{"start": "◉", "complete": "✓", "skip": "–", "failed": "✕"}[m.tasks[task]]
+		if icon == "" {
+			icon = "○"
+		}
+		fmt.Fprintf(&b, "%s %s\n", icon, task)
+	}
+	return b.String()
 }
 
 // activity renders the latest message in a fixed-height panel to avoid table jumps.
@@ -685,6 +815,15 @@ func (m planAndApplyModel) activity() string {
 	}
 	if m.done && m.err != nil && m.stage == "Apply" {
 		latest = "Applied changes were not rolled back. Press l for recovery diagnostics."
+	}
+	if m.done && m.err != nil && (m.stage == "Init" || m.stage == "Plan") {
+		latest = m.err.Error()
+		for _, diagnostic := range m.diagnostics {
+			if strings.HasPrefix(diagnostic, "error:") {
+				latest = diagnostic
+				break
+			}
+		}
 	}
 	width := max(1, min(m.width-4, 116)-4)
 	lines := strings.Split(ansi.Wrap(latest, width, ""), "\n")
@@ -760,7 +899,7 @@ func (m planAndApplyModel) modalContent() (string, []string, int) {
 func (m planAndApplyModel) View() string {
 	statusStyle := lipgloss.NewStyle().Bold(true)
 	if m.small() {
-		return fmt.Sprintf("%s\n\n%s\n\nThis view needs at least 80 columns × 24 rows.\nCurrent terminal: %d × %d.\n\nResize to restore the dashboard.\nPress Ctrl+O to continue in Inline mode.\nCtrl-C requests a safe stop.\n", m.opts.Title, statusStyle.Render(m.status()), m.width, m.height)
+		return fmt.Sprintf("%s\n\n%s\n\nThis view needs at least 80 columns × 24 rows.\nCurrent terminal: %d × %d.\n\nResize to restore the dashboard.\n%s\n", m.opts.Title, statusStyle.Render(m.status()), m.width, m.height, Shortcuts("Press `Ctrl+O` to continue in Inline mode.\n`Ctrl-C` requests a safe stop."))
 	}
 	w := min(m.width-4, 116)
 	primary := lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary)
@@ -777,6 +916,13 @@ func (m planAndApplyModel) View() string {
 			body += summary + "\n\n"
 		}
 		visible := append([]string(nil), lines[start:end]...)
+		for i, line := range visible {
+			visible[i] = m.panelSearch.highlight(line)
+			if m.panelSearch.query != "" && !m.panelSearch.missing && start+i == m.panelSearch.position {
+				visible[i] = lipgloss.NewStyle().Width(w - 8).
+					Background(lipgloss.AdaptiveColor{Light: "#DCEEEA", Dark: "#153D43"}).Render(visible[i])
+			}
+		}
 		if m.logView && m.selection != nil {
 			s := m.selection
 			first, last := min(s.start, s.end), max(s.start, s.end)
@@ -805,7 +951,7 @@ func (m planAndApplyModel) View() string {
 			} else {
 				info += " · Paused"
 			}
-			info += " · c Copy logs"
+			info += Shortcuts(" · `c` Copy logs")
 			if m.copyStatus != "" {
 				info = m.copyStatus
 			}
@@ -813,8 +959,19 @@ func (m planAndApplyModel) View() string {
 				info = "Log limit reached · " + info
 			}
 		}
+		info += Shortcuts(" · `/` Search")
+		if m.panelSearch.editing || m.panelSearch.query != "" {
+			suffix := ""
+			if m.logView && !m.followLogs {
+				suffix = " · Paused"
+			}
+			info = m.panelSearch.view(w-8-ansi.StringWidth(suffix)) + suffix
+			if m.copyStatus != "" && !m.panelSearch.editing {
+				info = m.copyStatus
+			}
+		}
 		body += "\n\n" + ansi.Truncate(info, w-8, "…")
-		body += "\n↑↓ Line · Ctrl+B/PgUp Up · Ctrl+F/PgDn/Space Down\nHome/g Top · End/G Bottom · Esc Close · Ctrl+O Inline mode"
+		body += "\n" + Shortcuts("`↑↓` Line · `Ctrl+B/PgUp` Up · `Ctrl+F/PgDn/Space` Down\n`Home/g` Top · `End/G` Bottom · `Esc` Close · `Ctrl+O` Inline mode")
 		background := m
 		background.detail, background.logView, background.outputView = false, false, false
 		return planAndApplyOverlay(background.View(), card.Width(w-6).Render(body), 3, 2)
@@ -823,6 +980,9 @@ func (m planAndApplyModel) View() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n%s\n\n", primary.Render(m.opts.Title), ansi.Truncate(m.opts.Subtitle, w-2, "…"))
 	status := m.status()
+	if m.done && m.err != nil && (m.stage == "Init" || m.stage == "Plan") {
+		status = m.stage + " failed"
+	}
 	warnings := 0
 	for _, diagnostic := range m.diagnostics {
 		if strings.HasPrefix(diagnostic, "warning:") {
@@ -842,19 +1002,34 @@ func (m planAndApplyModel) View() string {
 	} else {
 		b.WriteString("\n")
 	}
-	if len(m.plan.Changes) == 0 && (m.stage == "Init" || m.stage == "Plan") && !m.done {
-		if len(m.logs) > 0 {
+	b.WriteString(m.taskView())
+	if len(m.plan.Changes) == 0 && (m.opts.Destroy || m.stage == "Init" || m.stage == "Plan") {
+		if m.done && m.err != nil {
+			b.WriteString("\n" + m.activity())
+		} else if len(m.logs) > 0 {
 			latest := strings.ReplaceAll(m.logs[len(m.logs)-1], "\n", " ")
 			b.WriteString("\n" + ansi.Truncate(latest, w-2, "…"))
 		}
 		body := lipgloss.NewStyle().Height(m.height - 5).Render(strings.TrimRight(b.String(), "\n"))
-		body += "\n\nl Logs  Ctrl+O Inline mode  Ctrl-C Stop"
+		controls := Shortcuts("`l` Logs  `Ctrl+O` Inline mode  `Ctrl-C` Stop")
+		if m.done {
+			close := "[ Close ]"
+			if m.focus > 0 {
+				close = primary.Render("> " + close)
+			}
+			controls = close + Shortcuts("  `Enter` Close · `l` Logs · `Ctrl+O` Inline mode")
+		}
+		body += "\n\n" + controls
 		return card.Render(body) + "\n" + m.stages()
 	}
 	complete, active, failed := m.counts()
-	if m.stage == "Apply" && len(m.plan.Changes) > 0 {
+	if (m.stage == "Apply" || m.opts.Destroy) && len(m.plan.Changes) > 0 {
 		percent := complete * 100 / len(m.plan.Changes)
-		fmt.Fprintf(&b, "%s %d%% · %d/%d complete\n%d active · %d failed\n", renderBar(int64(complete), int64(len(m.plan.Changes)), 24), percent, complete, len(m.plan.Changes), active, failed)
+		scope := ""
+		if m.opts.Destroy {
+			scope = " in this phase"
+		}
+		fmt.Fprintf(&b, "%s %d%% · %d/%d complete%s\n%d active · %d failed\n", renderBar(int64(complete), int64(len(m.plan.Changes)), 24), percent, complete, len(m.plan.Changes), scope, active, failed)
 	} else {
 		counts := map[string]int{}
 		for _, c := range m.plan.Changes {
@@ -869,7 +1044,7 @@ func (m planAndApplyModel) View() string {
 	}
 	addressWidth := w - 31
 	header := ""
-	if m.stage == "Apply" {
+	if m.stage == "Apply" || m.opts.Destroy {
 		header = fmt.Sprintf("   %-*s %-8s %s", addressWidth, "Resource", "Action", "Status")
 	} else {
 		addressWidth = w - 12
@@ -909,7 +1084,7 @@ func (m planAndApplyModel) View() string {
 			name = lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true).Underline(true).Render(name)
 		}
 		line := fmt.Sprintf("%s%s %s%s %-8s %s", cursor, marker, name, padding, c.Action(), status)
-		if m.stage != "Apply" {
+		if m.stage != "Apply" && !m.opts.Destroy {
 			line = fmt.Sprintf("%s %s%s %-8s", cursor, name, padding, c.Action())
 		}
 		rowStyle := lipgloss.NewStyle().Width(w - 2)
@@ -920,24 +1095,32 @@ func (m planAndApplyModel) View() string {
 			rowStyle = rowStyle.Foreground(ColorSecondary).Bold(true).
 				Background(lipgloss.AdaptiveColor{Light: "#DCEEEA", Dark: "#153D43"})
 		}
-		b.WriteString(rowStyle.Render(line) + "\n")
+		b.WriteString(rowStyle.Render(m.tableSearch.highlight(line)) + "\n")
 	}
 	for i := end - start; i < n; i++ {
-		if i == 0 && m.hideCompleted && m.stage == "Apply" {
-			b.WriteString("All resources applied! Press h to show completed resources.\n")
+		if i == 0 && m.hideCompleted && (m.stage == "Apply" || m.opts.Destroy) {
+			if m.opts.Destroy {
+				b.WriteString(Shortcuts("No pending resources in this phase. Press `h` to show completed.") + "\n")
+			} else {
+				b.WriteString(Shortcuts("All resources applied! Press `h` to show completed resources.") + "\n")
+			}
 		} else {
 			b.WriteString("\n")
 		}
 	}
 	rowCount := fmt.Sprintf("Rows %d–%d of %d", min(start+1, len(indices)), end, len(indices))
-	if m.stage == "Apply" {
+	if m.stage == "Apply" || m.opts.Destroy {
 		if m.hideCompleted {
-			rowCount += " · h Show completed"
+			rowCount += Shortcuts(" · `h` Show completed")
 		} else {
-			rowCount += " · h Hide completed"
+			rowCount += Shortcuts(" · `h` Hide completed")
 		}
 	}
-	fmt.Fprintln(&b, muted.Render(rowCount))
+	rowCount += Shortcuts(" · `/` Search")
+	if m.tableSearch.editing || m.tableSearch.query != "" {
+		rowCount = m.tableSearch.view(w - 2)
+	}
+	fmt.Fprintln(&b, rowCount)
 	b.WriteString(m.activity() + "\n\n")
 	if m.review != nil {
 		cancel, approve := "[ Cancel ]", "[ Approve and apply ]"
@@ -957,7 +1140,7 @@ func (m planAndApplyModel) View() string {
 	} else {
 		b.WriteString("\n")
 	}
-	b.WriteString("↑↓ Select  Enter Details  Tab Actions  l Logs  o Outputs\nCtrl+O Inline mode  Ctrl-C Stop  Ctrl+B/F/PgUp/PgDn Page  Space Next")
+	b.WriteString(Shortcuts("`↑↓` Select  `Enter` Details  `Tab` Actions  `l` Logs  `o` Outputs\n`Ctrl+O` Inline mode  `Ctrl-C` Stop  `Ctrl+B/F/PgUp/PgDn` Page  `Space` Next"))
 	return card.Render(b.String()) + "\n" + m.stages()
 }
 
@@ -983,6 +1166,9 @@ func planAndApplyOverlay(background, modal string, x, y int) string {
 // stages renders wizard progress without implying that skipped apply work ran.
 func (m planAndApplyModel) stages() string {
 	stages := []string{"Questions", "Init", "Plan", "Review", "Apply"}
+	if m.opts.Destroy || slices.Contains([]string{"Prepare", "Confirm", "Delete", "Cleanup"}, m.stage) {
+		stages = []string{"Prepare", "Confirm", "Delete", "Cleanup"}
+	}
 	current := 1
 	for i, s := range stages {
 		if s == m.stage {

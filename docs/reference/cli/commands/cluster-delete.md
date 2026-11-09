@@ -8,6 +8,9 @@ aliases:
 
 ## Overview
 
+Uses the [TUI or Inline deletion workflow](../terminal-ui.md#deletion-workflow)
+to prepare, confirm, delete, and clean up.
+
 Starts by allowing you to choose what to remove using a list of checkboxes 
 covering: infrastructure, cluster buckets (names shown together), the
 Terraform-state bucket, generated cluster Terraform and support files, and the

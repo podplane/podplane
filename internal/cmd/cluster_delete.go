@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
@@ -45,7 +46,7 @@ func newClusterDeleteCmd(c *config.Config) *cobra.Command {
 			}
 			dir := filepath.Dir(path)
 			if noApply {
-				fmt.Println("--no-apply set; cluster config validated and no destroy was run.")
+				tui.FlowSummary(cmd.Context(), "--no-apply set; cluster config validated and no destroy was run.")
 				return nil
 			}
 			stateBackend, err := tfstate.ForCluster(cfg)
@@ -72,6 +73,14 @@ func newClusterDeleteCmd(c *config.Config) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			report := func(e tfexec.Event) {
+				if e.Message != "" {
+					_, _ = fmt.Fprintln(tui.FlowOutput(cmd.Context()), e.Message)
+				}
+			}
+			executor = executor.WithEvents(func(e tfexec.Event) { report(e) })
+			resume := "podplane cluster delete -f '" + strings.ReplaceAll(path, "'", "'\\''") + "'"
+			tui.FlowResume(cmd.Context(), resume)
 			depsCtx, depsCancel := context.WithTimeout(cmd.Context(), 30*time.Minute)
 			defer depsCancel()
 			configuration, err := tfdeps.New(c.DepsCacheDir()).Ensure(depsCtx, executor, dir, cloud.Kind)
@@ -88,7 +97,19 @@ func newClusterDeleteCmd(c *config.Config) *cobra.Command {
 			if err := executor.CheckDefaultWorkspace(cmd.Context(), dir); err != nil {
 				return err
 			}
+			var selectedActions clusterdelete.Actions
+			var actionLabels []string
 			err = clusterdelete.Teardown(cmd.Context(), clusterdelete.TeardownOptions{
+				Progress: func(e tfexec.Event) { report(e) },
+				Run: func(ctx context.Context, run func(context.Context) error) error {
+					return tui.RunPlanAndApply(ctx, tui.PlanAndApplyOptions{
+						Title: "Podplane · Delete cluster", Subtitle: cfg.Cluster.ID + " · " + cloud.Kind + " · " + cloud.Region,
+						Destroy: true, Tasks: clusterdelete.CleanupTasks(), Resume: resume,
+					}, func(ctx context.Context, emit func(tfexec.Event), _ func(tfexec.Plan) (bool, error)) error {
+						report = emit
+						return run(ctx)
+					})
+				},
 				Engine:           executor,
 				Cloud:            provider,
 				StateBucketName:  stateBackend.Bucket,
@@ -96,10 +117,11 @@ func newClusterDeleteCmd(c *config.Config) *cobra.Command {
 				CheckStateBucket: func(ctx context.Context) error { return stateBackend.Check(ctx, io.Discard) },
 				ConfigPath:       path,
 				ConfirmCustom: func(message string) (bool, error) {
-					fmt.Println(message)
-					return tui.Confirm(cmd.Context(), "Proceed with deletion of custom resources?", autoApprove, 1)
+					_, _ = fmt.Fprintln(tui.FlowOutput(cmd.Context()), message)
+					return tui.Confirm(cmd.Context(), message+"\nProceed with deletion of custom resources?", autoApprove, 1)
 				},
 				Select: func(labels []string) (clusterdelete.Actions, error) {
+					tui.FlowStage(cmd.Context(), "Podplane · Delete cluster "+cfg.Cluster.ID, "Confirm")
 					items := make([]tui.ChecklistItem, len(labels))
 					for i, label := range labels {
 						items[i] = tui.ChecklistItem{Label: label, Checked: true}
@@ -107,7 +129,7 @@ func newClusterDeleteCmd(c *config.Config) *cobra.Command {
 							items[i].Requires = []int{i - 1}
 						}
 					}
-					selected, err := tui.Checklist(tui.ChecklistOptions{
+					selected, err := tui.Checklist(cmd.Context(), tui.ChecklistOptions{
 						Title:         "Podplane · Delete cluster " + cfg.Cluster.ID,
 						Description:   "Unchecked actions keep their data and recovery files.\nDeletion is permanent. Later steps require earlier steps.",
 						Items:         items,
@@ -118,7 +140,8 @@ func newClusterDeleteCmd(c *config.Config) *cobra.Command {
 					if err != nil {
 						return clusterdelete.Actions{}, err
 					}
-					return clusterdelete.Actions(selected), nil
+					selectedActions, actionLabels = clusterdelete.Actions(selected), labels
+					return selectedActions, nil
 				},
 				DeleteOptions: clusterdelete.DeleteOptions{
 					ClusterConfig: cfg,
@@ -130,20 +153,43 @@ func newClusterDeleteCmd(c *config.Config) *cobra.Command {
 					PollInterval:  15 * time.Second,
 					Confirm: func(message string) (bool, error) {
 						// The checklist explicitly approved instance and infrastructure deletion.
-						fmt.Println(message)
+						report(tfexec.Event{Message: message})
 						return true, nil
 					},
 					Status: func(message string) {
-						fmt.Println(message)
+						report(tfexec.Event{Message: message})
 					},
 				},
 			})
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Selected cleanup actions for cluster %q completed.\n", cfg.Cluster.ID)
+			if !selectedActions[clusterdelete.Infrastructure] {
+				tui.FlowSummary(cmd.Context(), "No deletion actions selected; nothing was removed.")
+				return nil
+			}
+			var receipt strings.Builder
+			fmt.Fprintf(&receipt, "Cluster %q cleanup completed.", cfg.Cluster.ID)
+			for i, label := range actionLabels {
+				result := "Retained"
+				if selectedActions[i] {
+					result = "Completed"
+				}
+				fmt.Fprintf(&receipt, "\n  %s: %s", result, label)
+			}
+			tui.FlowSummary(cmd.Context(), receipt.String())
 			return nil
 		},
+	}
+	run := cmd.RunE
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		parent := cmd.Context()
+		defer cmd.SetContext(parent)
+		return tui.RunFlow(parent, "Podplane · Delete cluster", func(ctx context.Context) error {
+			cmd.SetContext(ctx)
+			tui.FlowStage(ctx, "Podplane · Delete cluster", "Prepare")
+			return run(cmd, args)
+		})
 	}
 	cmd.Flags().StringVarP(&cfgPath, "cluster-config", "f", defaultClusterConfigName, "Path to the cluster config file")
 	cmd.Flags().BoolVar(&noApply, "no-apply", false, "Validate config but do not run destroy")

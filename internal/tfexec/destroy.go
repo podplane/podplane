@@ -38,7 +38,7 @@ type State struct {
 // CheckDefaultWorkspace prevents teardown from locking a different workspace's state.
 func (c *CLI) CheckDefaultWorkspace(ctx context.Context, dir string) error {
 	var out bytes.Buffer
-	if err := c.eventProcess(ctx, dir, &out, &eventWriter{emit: func(e Event) { fmt.Fprintln(os.Stderr, e.Message) }}, "workspace", "show"); err != nil {
+	if err := c.eventProcess(ctx, dir, &out, &eventWriter{emit: c.report}, "workspace", "show"); err != nil {
 		return err
 	}
 	if workspace := strings.TrimSpace(out.String()); workspace != "default" {
@@ -50,7 +50,7 @@ func (c *CLI) CheckDefaultWorkspace(ctx context.Context, dir string) error {
 // ReadState reads the current state, without refreshing or modifying resources.
 func (c *CLI) ReadState(ctx context.Context, dir string) (State, error) {
 	var out bytes.Buffer
-	if err := c.eventProcess(ctx, dir, &out, &eventWriter{emit: func(e Event) { fmt.Fprintln(os.Stderr, e.Message) }}, "state", "pull"); err != nil {
+	if err := c.eventProcess(ctx, dir, &out, &eventWriter{emit: c.report}, "state", "pull"); err != nil {
 		return State{}, err
 	}
 	return parseState(out.Bytes())
@@ -139,7 +139,7 @@ func (c *CLI) DestroyExcept(ctx context.Context, dir string, state State, keep m
 	}
 	defer func() { _ = os.RemoveAll(private) }()
 	plan := filepath.Join(private, "plan")
-	args := []string{"plan", "-destroy", "-input=false", "-out=" + plan}
+	args := []string{"plan", "-destroy", "-json", "-input=false", "-out=" + plan}
 	if lockHeld {
 		args = append(args, "-lock=false")
 	}
@@ -153,11 +153,11 @@ func (c *CLI) DestroyExcept(ctx context.Context, dir string, state State, keep m
 			args = append(args, "-target="+address)
 		}
 	}
-	if err := c.run(ctx, dir, args...); err != nil {
+	if err := c.eventCommand(ctx, dir, true, c.report, args...); err != nil {
 		return err
 	}
 	var out bytes.Buffer
-	if err := c.eventProcess(ctx, dir, &out, &eventWriter{emit: func(e Event) { fmt.Fprintln(os.Stderr, e.Message) }}, "show", "-json", plan); err != nil {
+	if err := c.eventProcess(ctx, dir, &out, &eventWriter{emit: c.report}, "show", "-json", plan); err != nil {
 		return err
 	}
 	var decoded struct {
@@ -179,14 +179,19 @@ func (c *CLI) DestroyExcept(ctx context.Context, dir string, state State, keep m
 			}
 		}
 	}
+	visible, err := decodePlan(out.Bytes())
+	if err != nil {
+		return err
+	}
+	c.report(Event{Type: "plan", Plan: &visible})
 	if beforeApply != nil {
 		if err := beforeApply(ctx); err != nil {
 			return err
 		}
 	}
-	args = []string{"apply", "-input=false"}
+	args = []string{"apply", "-json", "-input=false"}
 	if lockHeld {
 		args = append(args, "-lock=false")
 	}
-	return c.run(ctx, dir, append(args, plan)...)
+	return c.eventCommand(ctx, dir, true, c.report, append(args, plan)...)
 }

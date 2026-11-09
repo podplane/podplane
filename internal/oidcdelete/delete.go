@@ -12,7 +12,7 @@ import (
 
 // Executor destroys OpenTofu/Terraform-managed OIDC resources.
 type Executor interface {
-	Destroy(ctx context.Context, dir string, autoApprove bool) error
+	DestroyPlan(ctx context.Context, dir string) error
 }
 
 // ConfirmFunc asks the user to confirm a destructive action.
@@ -22,9 +22,10 @@ type ConfirmFunc func(message string) (bool, error)
 type DeleteOptions struct {
 	StackDir       string
 	Executor       Executor
-	AutoApprove    bool
 	Confirm        ConfirmFunc
 	DestroyTimeout time.Duration
+	// Run presents the confirmed execution without changing its timeout or cancellation.
+	Run func(context.Context, func(context.Context) error) error
 }
 
 // Delete confirms and destroys OpenTofu/Terraform-managed OIDC resources.
@@ -51,5 +52,8 @@ func Delete(ctx context.Context, opts DeleteOptions) error {
 	}
 	destroyCtx, cancel := context.WithTimeout(ctx, destroyTimeout)
 	defer cancel()
-	return opts.Executor.Destroy(destroyCtx, opts.StackDir, opts.AutoApprove)
+	if opts.Run != nil {
+		return opts.Run(destroyCtx, func(ctx context.Context) error { return opts.Executor.DestroyPlan(ctx, opts.StackDir) })
+	}
+	return opts.Executor.DestroyPlan(destroyCtx, opts.StackDir)
 }

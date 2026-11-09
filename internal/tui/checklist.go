@@ -5,7 +5,7 @@
 package tui
 
 import (
-	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -14,7 +14,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"golang.org/x/term"
 )
 
 // ChecklistItem is a choice with an initial selection and optional prerequisites.
@@ -39,7 +38,7 @@ type ChecklistOptions struct {
 // Checklist returns selections in item order after explicit confirmation.
 // Unchecking a prerequisite clears its dependents, but rechecking it does not
 // select them automatically. Dependencies apply to TUI and Inline input.
-func Checklist(opts ChecklistOptions) ([]bool, error) {
+func Checklist(ctx context.Context, opts ChecklistOptions) ([]bool, error) {
 	m, err := newChecklistModel(opts)
 	if err != nil {
 		return nil, err
@@ -50,14 +49,12 @@ func Checklist(opts ChecklistOptions) ([]bool, error) {
 			if m.checked[i] {
 				mark = "x"
 			}
-			fmt.Printf("[%s] %s\n", mark, item.Label)
+			_, _ = fmt.Fprintf(FlowOutput(ctx), "[%s] %s\n", mark, item.Label)
 		}
 		return m.checked, nil
 	}
-	if !CanUseTUI(MinTUIWidth, MinTUIHeight).OK || !term.IsTerminal(int(os.Stdin.Fd())) {
-		return m.readText(os.Stdin, os.Stdout)
-	}
-	result, err := tea.NewProgram(m).Run()
+	_, m.embedded = ctx.Value(flowKey{}).(*flowSession)
+	result, err := Run(ctx, m)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +71,15 @@ type checklistModel struct {
 	checked                        []bool
 	selected, focus, width, height int
 	approved                       bool
+	embedded                       bool
+	search                         textSearch
+}
+
+// RunInline continues with the current selections and requires explicit approval.
+func (m checklistModel) RunInline(ctx context.Context) (tea.Model, error) {
+	checked, err := m.readText(func() (string, error) { return ReadLine(ctx) }, os.Stdout)
+	m.checked, m.approved = checked, err == nil
+	return m, err
 }
 
 // newChecklistModel validates dependencies and initializes independent selection state.
@@ -120,8 +126,7 @@ func (m checklistModel) setChecked(i int, checked bool) {
 }
 
 // readText collects choices and enforces prerequisites without terminal control sequences.
-func (m checklistModel) readText(in io.Reader, out io.Writer) ([]bool, error) {
-	reader := bufio.NewReader(in)
+func (m checklistModel) readText(read func() (string, error), out io.Writer) ([]bool, error) {
 	for i, item := range m.opts.Items {
 		if !m.available(i) {
 			if _, err := fmt.Fprintln(out, "[ ] "+item.Label); err != nil {
@@ -136,7 +141,7 @@ func (m checklistModel) readText(in io.Reader, out io.Writer) ([]bool, error) {
 		if _, err := fmt.Fprintf(out, "%s? [%s]: ", item.Label, choices); err != nil {
 			return nil, err
 		}
-		line, err := reader.ReadString('\n')
+		line, err := read()
 		if err != nil {
 			return nil, err
 		}
@@ -153,7 +158,7 @@ func (m checklistModel) readText(in io.Reader, out io.Writer) ([]bool, error) {
 	if _, err := fmt.Fprint(out, m.opts.ConfirmPrompt+" Type yes to continue: "); err != nil {
 		return nil, err
 	}
-	line, err := reader.ReadString('\n')
+	line, err := read()
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +177,19 @@ func (m checklistModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyMsg:
+		if !m.small() {
+			labels := make([]string, len(m.opts.Items))
+			for i, item := range m.opts.Items {
+				labels[i] = item.Label
+			}
+			position, handled, cmd := m.search.update(msg, labels, m.selected)
+			if handled {
+				if position >= 0 {
+					m.selected, m.focus = position, 0
+				}
+				return m, cmd
+			}
+		}
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			return m, tea.Quit
@@ -204,13 +222,16 @@ func (m checklistModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // small reports whether the checklist's actions would be hidden by the terminal.
 func (m checklistModel) small() bool {
+	if m.embedded {
+		return m.width < MinTUIWidth-6 || m.height < MinTUIHeight-6
+	}
 	return m.width < MinTUIWidth || m.height < MinTUIHeight
 }
 
 // View renders choices and confirmation controls, or a resize warning.
 func (m checklistModel) View() string {
 	if m.small() {
-		return "Resize to at least 80×24 to review selection. Esc cancels.\n"
+		return Shortcuts("Resize to at least 80×24 to review selection. `Esc` cancels.") + "\n"
 	}
 	width := min(m.width-6, 110)
 	primary := lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true)
@@ -229,7 +250,7 @@ func (m checklistModel) View() string {
 		if m.focus == 0 && m.selected == i {
 			line = primary.Render(line)
 		}
-		lines = append(lines, line)
+		lines = append(lines, m.search.highlight(line))
 	}
 	cancel, proceed := "[ Cancel ]", "[ "+m.opts.ConfirmLabel+" ]"
 	if m.focus == 1 {
@@ -242,6 +263,24 @@ func (m checklistModel) View() string {
 	if m.opts.Description != "" {
 		body += "\n\n" + m.opts.Description
 	}
-	body += "\n\n" + cancel + "    " + proceed + "\n\n↑↓ Select · Space Toggle · Tab Actions · Enter Confirm · Esc Cancel"
+	hints := Shortcuts("`↑↓` Select · `Space` Toggle · `Tab` Actions · `Enter` Confirm · `/` Search")
+	if m.search.editing || m.search.query != "" {
+		hints = m.search.view(width)
+	}
+	body += "\n\n" + cancel + "    " + proceed + "\n\n" + hints
+	if m.embedded {
+		// Keep the selected item and actions visible even with long bucket names.
+		description := ansi.Wrap(m.opts.Description, width, "")
+		n := max(1, m.height-lipgloss.Height(description)-6)
+		start := 0
+		for i := 0; i < m.selected; i++ {
+			start += lipgloss.Height(lines[i])
+		}
+		all := strings.Split(strings.Join(lines, "\n"), "\n")
+		start = min(start, max(0, len(all)-n))
+		return strings.Join(all[start:min(len(all), start+n)], "\n") + "\n\n" +
+			description + "\n\n" + cancel + "    " + proceed +
+			"\n" + hints
+	}
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(ColorPrimary).Padding(0, 1).Width(width+2).Render(body) + "\n"
 }

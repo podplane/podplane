@@ -21,10 +21,10 @@ func SelectList(ctx context.Context, action string, title string, items []list.I
 	l := list.New(items, itemDelegate{}, listWidth, listHeight)
 	l.Title = title
 	l.SetShowStatusBar(false)
+	l.SetShowHelp(false)
 	l.SetFilteringEnabled(false)
 	l.Styles.Title = lipgloss.NewStyle().Background(ColorPrimary).Foreground(ColorWhite)
 	l.Styles.PaginationStyle = list.DefaultStyles().PaginationStyle
-	l.Styles.HelpStyle = list.DefaultStyles().HelpStyle.PaddingBottom(1)
 
 	m, err := Run(ctx, model{list: l, action: action})
 	if err != nil {
@@ -126,6 +126,7 @@ type model struct {
 	list     list.Model
 	choice   string
 	quitting bool
+	search   textSearch
 }
 
 // Init starts the selection list without an initial command.
@@ -141,6 +142,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		labels := make([]string, len(m.list.Items()))
+		for i, item := range m.list.Items() {
+			labels[i] = item.(Item).Label
+		}
+		position, handled, cmd := m.search.update(msg, labels, m.list.Index())
+		if handled {
+			if position >= 0 {
+				m.list.Select(position)
+			}
+			return m, cmd
+		}
 		switch keypress := msg.String(); keypress {
 		case "q", "ctrl+c":
 			m.quitting = true
@@ -168,5 +180,5 @@ func (m model) View() string {
 		// clears the window of selection output
 		return "\n"
 	}
-	return "\n" + m.list.View()
+	return "\n" + m.list.View() + "\n" + Shortcuts("`↑↓` Select · `Enter` Confirm · `q` Cancel") + "\n" + m.search.view(m.list.Width())
 }

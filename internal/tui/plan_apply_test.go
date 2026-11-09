@@ -658,6 +658,72 @@ func TestPlanAndApplyEmptyStages(t *testing.T) {
 	}
 }
 
+// TestPlanFailureFocus shows the engine error instead of an empty resource table.
+func TestPlanFailureFocus(t *testing.T) {
+	for _, stage := range []string{"Init", "Plan"} {
+		for _, height := range []int{24, 40} {
+			m := planAndApplyFixture()
+			m.stage, m.height, m.plan, m.review = stage, height, tfexec.Plan{}, nil
+			m.accept(tfexec.Event{Type: "diagnostic", Message: "error: no matching Route 53 Hosted Zone found\nCheck the configured DNS zone."})
+			m.accept(planAndApplyDone{errors.New("OpenTofu/Terraform plan: exit status 1")})
+			view := m.View()
+			for _, hidden := range []string{"Rows", "0 create", "Resource", "Select", "Outputs", "Search", "exit status 1"} {
+				if strings.Contains(view, hidden) {
+					t.Fatalf("failed %s shows %q:\n%s", stage, hidden, view)
+				}
+			}
+			if !strings.Contains(view, "Check the configured DNS zone.") || !strings.Contains(view, "Enter Close") || lipgloss.Height(view) != height {
+				t.Fatalf("failure lost diagnostic, controls, or fixed frame:\n%s", view)
+			}
+			updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+			if !strings.Contains(updated.View(), "exit status 1") {
+				t.Fatal("failure logs lost the underlying process error")
+			}
+			_, quit := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			if quit == nil {
+				t.Fatal("Enter did not close failed plan")
+			}
+			m.diagnostics = nil
+			if !strings.Contains(m.View(), "exit status 1") {
+				t.Fatal("missing diagnostic hid the fallback error")
+			}
+		}
+	}
+}
+
+// TestDeleteDashboardPhases keeps task progress separate from each destroy plan.
+func TestDeleteDashboardPhases(t *testing.T) {
+	for _, height := range []int{24, 40} {
+		m := planAndApplyFixture()
+		m.height, m.review = height, nil
+		m.opts.Destroy, m.opts.Tasks = true, []string{"Stop instances", "Destroy infrastructure", "Delete buckets", "Remove files"}
+		m.accept(tfexec.Event{Stage: "Delete", Type: "task_start", Address: "Destroy infrastructure"})
+		p := tfexec.Plan{HasChanges: true, Changes: []tfexec.Change{
+			{Address: "terraform_data.first", Actions: []string{"delete"}},
+			{Address: "terraform_data.second", Actions: []string{"delete"}},
+		}}
+		m.accept(tfexec.Event{Plan: &p})
+		m.accept(tfexec.Event{Type: "apply_complete", Address: "terraform_data.first", Action: "delete"})
+		view := m.View()
+		if m.review != nil || !strings.Contains(view, "50%") || !strings.Contains(view, "in this phase") || strings.Contains(view, "terraform_data.first") {
+			t.Fatalf("incorrect deletion progress:\n%s", view)
+		}
+		if lipgloss.Height(view) != height || lipgloss.Width(view) > 80 {
+			t.Fatalf("delete dashboard overflow:\n%s", view)
+		}
+		m.accept(tfexec.Event{Type: "task_complete", Address: "Destroy infrastructure"})
+		m.accept(tfexec.Event{Stage: "Cleanup", Type: "task_start", Address: "Delete buckets"})
+		m.accept(planAndApplyDone{errors.New("bucket retention denied deletion")})
+		view = m.View()
+		if !strings.Contains(view, "Delete buckets") || !strings.Contains(view, "Close") || strings.Contains(view, "Rows") || strings.Contains(view, "50%") {
+			t.Fatalf("cleanup displays stale resource progress:\n%s", view)
+		}
+		if lipgloss.Height(view) != height || lipgloss.Width(view) > 80 {
+			t.Fatalf("cleanup dashboard overflow:\n%s", view)
+		}
+	}
+}
+
 // planAndApplyFixture starts a minimum-size review with one replacement awaiting approval.
 func planAndApplyFixture() planAndApplyModel {
 	m := planAndApplyModel{opts: PlanAndApplyOptions{Title: "Podplane · Create cluster", Subtitle: "demo · AWS · ap-southeast-2"}, width: 80, height: 24, stage: "Review", started: time.Now(), rows: map[string]*planAndApplyRow{}, hideCompleted: true}

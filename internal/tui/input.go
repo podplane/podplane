@@ -121,7 +121,7 @@ func (m inputModel) View() string {
 	if m.err != nil {
 		errText = "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("#d20f39")).Render(m.err.Error())
 	}
-	return fmt.Sprintf("\n%s\n\n%s\n%s%s\n\nenter: continue  esc: cancel\n", title, label, m.input.View(), errText)
+	return fmt.Sprintf("\n%s\n\n%s\n%s%s\n\n%s\n", title, label, m.input.View(), errText, Shortcuts("`Enter` Continue · `Esc` Cancel"))
 }
 
 // Required returns a validator that rejects empty input.

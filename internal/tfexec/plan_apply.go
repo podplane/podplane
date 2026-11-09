@@ -48,6 +48,7 @@ type Plan struct {
 // and resource lifecycle events.
 // Emit callbacks are serialized, including stdout and stderr messages.
 type Event struct {
+	Plan    *Plan // Validated, redacted plan; never the raw saved state.
 	Stage   string
 	Type    string
 	Address string

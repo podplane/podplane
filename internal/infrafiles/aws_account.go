@@ -137,7 +137,7 @@ func (m awsAccountLookup) View() string {
 		if m.err != nil {
 			errText = "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("#d20f39")).Render(m.err.Error())
 		}
-		return ansi.Hardwrap(fmt.Sprintf("\n%s\n\n%s\n\n%s\n%s%s\n\nenter: continue  ctrl+c: cancel\n", title, m.notice, label, m.input.View(), errText), max(1, m.width-1), true)
+		return ansi.Hardwrap(fmt.Sprintf("\n%s\n\n%s\n\n%s\n%s%s\n\n%s\n", title, m.notice, label, m.input.View(), errText, tui.Shortcuts("`Enter` Continue · `Ctrl-C` Cancel")), max(1, m.width-1), true)
 	}
 	title := lipgloss.NewStyle().Foreground(tui.ColorWhite).Background(tui.ColorPrimary).Padding(0, 1).Render("Resolving AWS account")
 	description := "Using supplied profile to resolve AWS account ID automatically"
@@ -145,5 +145,5 @@ func (m awsAccountLookup) View() string {
 		description = "Using default AWS credentials to resolve AWS account ID automatically"
 	}
 	description = lipgloss.NewStyle().Width(m.width).Render(description)
-	return fmt.Sprintf("\n%s\n\n%s\n\n%s Looking up account ID…\n\nesc: enter manually  ctrl+c: cancel\n", title, description, m.spinner.View())
+	return fmt.Sprintf("\n%s\n\n%s\n\n%s Looking up account ID…\n\n%s\n", title, description, m.spinner.View(), tui.Shortcuts("`Esc` Enter manually · `Ctrl-C` Cancel"))
 }

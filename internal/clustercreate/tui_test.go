@@ -374,7 +374,7 @@ func TestConfigFormRejectsInvalidNetworkFieldsBeforeAdvancing(t *testing.T) {
 func TestConfigFormCanNavigateBackWithoutLosingAnswers(t *testing.T) {
 	form := testConfigForm(t, "aws", "v1.2.3-1")
 	form.input.SetValue("production")
-	if view := form.View(); strings.Contains(view, "shift+tab: back") {
+	if view := form.View(); strings.Contains(view, "Shift+Tab Back") {
 		t.Fatalf("first cluster step should not show back hint; view = %q", view)
 	}
 
@@ -386,7 +386,7 @@ func TestConfigFormCanNavigateBackWithoutLosingAnswers(t *testing.T) {
 	if got := form.fields[1].label; got != "Cluster ID / slug" {
 		t.Fatalf("active field = %q, want Cluster ID / slug", got)
 	}
-	if view := form.View(); !strings.Contains(view, "shift+tab: back") {
+	if view := form.View(); !strings.Contains(view, "Shift+Tab Back") {
 		t.Fatalf("second cluster step should show back hint; view = %q", view)
 	}
 
