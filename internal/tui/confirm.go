@@ -5,28 +5,23 @@
 package tui
 
 import (
-	"bufio"
+	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"golang.org/x/term"
 )
 
 // Confirm asks the user to confirm an action with the requested selected option,
-// using Bubble Tea in terminals and a plain text prompt when interactive
+// using Bubble Tea in terminals and an inline prompt when interactive
 // terminal UI is unavailable.
-func Confirm(message string, autoApprove bool, selected int) (bool, error) {
+func Confirm(ctx context.Context, message string, autoApprove bool, selected int) (bool, error) {
 	if autoApprove {
 		return true, nil
 	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-		return confirmText(message)
-	}
-	m, err := tea.NewProgram(confirmModel{message: message, selected: selected}).Run()
+	m, err := Run(ctx, confirmModel{message: message, selected: selected})
 	if err != nil {
 		return false, fmt.Errorf("error running confirmation prompt: %w", err)
 	}
@@ -36,15 +31,12 @@ func Confirm(message string, autoApprove bool, selected int) (bool, error) {
 	return false, fmt.Errorf("error processing confirmation")
 }
 
-// confirmText asks for an explicit "yes" response using standard input and
-// output.
-func confirmText(message string) (bool, error) {
-	fmt.Printf("%s Type yes to continue: ", ansi.Strip(message))
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-	if err != nil {
-		return false, err
-	}
-	return strings.EqualFold(strings.TrimSpace(line), "yes"), nil
+// RunInline requires an explicit yes, even when Yes is highlighted in the TUI.
+func (m confirmModel) RunInline(ctx context.Context) (tea.Model, error) {
+	fmt.Printf("%s Type yes to continue: ", ansi.Strip(m.message))
+	line, err := ReadLine(ctx)
+	m.confirmed, m.done = strings.EqualFold(strings.TrimSpace(line), "yes"), true
+	return m, err
 }
 
 // confirmModel tracks the yes/no selection, result, and available prompt width.

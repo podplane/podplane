@@ -5,12 +5,14 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
 	"github.com/podplane/podplane/internal/config"
 	"github.com/podplane/podplane/internal/infrafiles"
 	"github.com/podplane/podplane/internal/oidccreate"
+	"github.com/podplane/podplane/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -36,7 +38,7 @@ func newOIDCCreateCmd(c *config.Config) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				path, err = infrafiles.ConfirmConfigPath(path, originDir, "OIDC config and OpenTofu/Terraform", "my-oidc-server")
+				path, err = infrafiles.ConfirmConfigPath(cmd.Context(), path, originDir, "OIDC config and OpenTofu/Terraform", "my-oidc-server")
 				if err != nil {
 					return err
 				}
@@ -50,6 +52,15 @@ func newOIDCCreateCmd(c *config.Config) *cobra.Command {
 			})
 			return err
 		},
+	}
+	run := cmd.RunE
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		parent := cmd.Context()
+		defer cmd.SetContext(parent)
+		return tui.RunFlow(parent, "Podplane · Create OIDC server", func(ctx context.Context) error {
+			cmd.SetContext(ctx)
+			return run(cmd, args)
+		})
 	}
 	cmd.Flags().StringVarP(&cfgPath, "oidc-config", "f", defaultOIDCConfigName, "Path to the OIDC config file")
 	cmd.Flags().BoolVar(&noApply, "no-apply", false, "Generate OpenTofu/Terraform files but do not run apply")

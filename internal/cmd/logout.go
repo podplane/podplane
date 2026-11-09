@@ -68,7 +68,7 @@ revoke the tokens at the issuer.`,
 				return fmt.Errorf("invalid cluster ID %q: %w", clusterID, err)
 			}
 
-			ok, err := tui.Confirm(fmt.Sprintf("Log out of Podplane cluster %q?", clusterID), logoutAutoApprove, 0)
+			ok, err := tui.Confirm(cmd.Context(), fmt.Sprintf("Log out of Podplane cluster %q?", clusterID), logoutAutoApprove, 0)
 			if err != nil {
 				return err
 			}

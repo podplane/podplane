@@ -250,7 +250,11 @@ func decodePlan(data []byte) (Plan, error) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		p.Outputs += name + "\n" + raw.Outputs[name].details() + "\n"
+		change := raw.Outputs[name]
+		before, _ := json.MarshalIndent(maskPlanValue(change.Before, change.BeforeSensitive, nil), "  ", "  ")
+		after, _ := json.MarshalIndent(maskPlanValue(change.After, change.AfterSensitive, change.AfterUnknown), "  ", "  ")
+		p.Outputs += name + " · " + strings.Join(change.Actions, " → ") + "\n" +
+			"  Before: " + string(before) + "\n  After:  " + string(after) + "\n\n"
 	}
 	p.HasChanges = len(p.Changes) > 0 || len(names) > 0
 	return p, nil

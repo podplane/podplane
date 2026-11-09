@@ -97,7 +97,7 @@ func newClusterDeleteCmd(c *config.Config) *cobra.Command {
 				ConfigPath:       path,
 				ConfirmCustom: func(message string) (bool, error) {
 					fmt.Println(message)
-					return tui.Confirm("Proceed with deletion of custom resources?", autoApprove, 1)
+					return tui.Confirm(cmd.Context(), "Proceed with deletion of custom resources?", autoApprove, 1)
 				},
 				Select: func(labels []string) (clusterdelete.Actions, error) {
 					items := make([]tui.ChecklistItem, len(labels))

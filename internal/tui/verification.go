@@ -127,14 +127,14 @@ func (m Verification) View() string {
 // run the same bounded check without offering a skip prompt.
 func RunVerification(ctx context.Context, title, detail string, check func(context.Context) error, unattended bool) error {
 	if unattended || !CanUseTUI(0, 0).OK {
-		fmt.Println(title)
+		_, _ = fmt.Fprintln(FlowOutput(ctx), title)
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		return check(ctx)
 	}
 	m := verificationProgram{NewVerification(ctx, title, detail, check)}
 	defer func() { m.Cancel() }()
-	result, err := tea.NewProgram(&m, tea.WithContext(ctx)).Run()
+	result, err := Run(ctx, &m)
 	if err != nil {
 		return err
 	}
@@ -142,6 +142,16 @@ func RunVerification(ctx context.Context, title, detail string, check func(conte
 }
 
 type verificationProgram struct{ Verification }
+
+// RunInline performs the same bounded check without interactive retry controls.
+func (m *verificationProgram) RunInline(ctx context.Context) (tea.Model, error) {
+	fmt.Println(m.title)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	m.Cancel()
+	m.Err, m.Done = m.check(ctx), true
+	return m, nil
+}
 
 func (m *verificationProgram) Init() tea.Cmd { return m.Start() }
 

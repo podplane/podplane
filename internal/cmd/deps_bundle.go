@@ -37,7 +37,7 @@ func newDepsBundleCmd(manager *deps.Manager, kind, cacheDir string) *cobra.Comma
 				}
 			}
 			if len(existing) > 0 {
-				ok, err := tui.Confirm("Delete existing bundle archives?\n"+strings.Join(existing, "\n"), false, 1)
+				ok, err := tui.Confirm(cmd.Context(), "Delete existing bundle archives?\n"+strings.Join(existing, "\n"), false, 1)
 				if err != nil {
 					return err
 				}

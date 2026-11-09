@@ -64,7 +64,7 @@ func RunConfigWizard(ctx context.Context, providerKind, seedVersion string) (*cl
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	m.ctx, m.verifyDNS = ctx, cloud.CheckRoute53Zone
-	got, err := tea.NewProgram(m, tea.WithContext(ctx)).Run()
+	got, err := tui.Run(ctx, m)
 	if err != nil {
 		return nil, fmt.Errorf("run cluster config form: %w", err)
 	}
@@ -79,6 +79,52 @@ func RunConfigWizard(ctx context.Context, providerKind, seedVersion string) (*cl
 		return nil, fmt.Errorf("cluster config creation did not complete")
 	}
 	return form.config()
+}
+
+// RunInline continues configuration from the current field with the same validation.
+func (m configForm) RunInline(ctx context.Context) (tea.Model, error) {
+	if m.verification != nil {
+		m.verification.Cancel()
+		m.verification = nil
+	}
+	for !m.complete {
+		field := m.fields[m.index]
+		label := field.label
+		validate := field.validate
+		if len(field.choices) > 0 {
+			label += " (" + strings.Join(field.choices, "/") + ")"
+			validate = func(value string) error {
+				if !slices.Contains(field.choices, value) {
+					return fmt.Errorf("choose %s", strings.Join(field.choices, ", "))
+				}
+				return nil
+			}
+		}
+		value, err := tui.Input(ctx, "New cluster config", label, m.input.Value(), validate)
+		if err != nil {
+			return nil, err
+		}
+		m.input.SetValue(value)
+		verify := m.verifyDNS
+		m.verifyDNS = nil
+		if field.label == "DNS provider" && value == "aws-route53" && verify != nil {
+			region := m.fields[indexForLabel(m.fields, "AWS region")].value
+			profile := m.fields[indexForLabel(m.fields, "AWS profile (optional)")].value
+			err = tui.RunVerification(ctx, "Checking Route53 hosted zone", m.domain, func(ctx context.Context) error {
+				return verify(ctx, region, profile, m.domain, "")
+			}, true)
+			if err != nil {
+				return nil, err
+			}
+		}
+		updated, _ := m.moveNext()
+		m = updated.(configForm)
+		m.verifyDNS = verify
+		if m.err != nil {
+			fmt.Println(m.err)
+		}
+	}
+	return m, nil
 }
 
 // newConfigForm creates the initial model for the cluster config form.

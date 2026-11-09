@@ -63,7 +63,7 @@ func newShellCmd(c *config.Config) *cobra.Command {
 		interactive := term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 		if interactive {
 			selectContainer = func(containers []string) (string, bool, error) {
-				return tui.SelectString("Open shell", "Choose a container", containers)
+				return tui.SelectString(cmd.Context(), "Open shell", "Choose a container", containers)
 			}
 		}
 		var confirmDebug deploy.ConfirmDebugFunc
@@ -71,13 +71,13 @@ func newShellCmd(c *config.Config) *cobra.Command {
 			confirmDebug = func(string) (bool, error) { return true, nil }
 		} else if interactive && len(args) == 1 && !shellNoDebug {
 			confirmDebug = func(message string) (bool, error) {
-				return tui.Confirm(message, false, 0)
+				return tui.Confirm(cmd.Context(), message, false, 0)
 			}
 		}
 		var confirmRestart deploy.ConfirmRestartFunc
 		if interactive && len(args) == 1 {
 			confirmRestart = func(message string) (bool, error) {
-				return tui.Confirm(message, false, 1)
+				return tui.Confirm(cmd.Context(), message, false, 1)
 			}
 		}
 		return deploy.Shell(deploy.ShellOptions{

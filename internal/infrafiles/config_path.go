@@ -5,6 +5,7 @@
 package infrafiles
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,12 +18,12 @@ import (
 
 // ConfirmConfigPath checks whether create would introduce files into a
 // non-empty config directory and asks the user where to generate them.
-func ConfirmConfigPath(path string, originDir string, fileSet string, defaultDirName string) (string, error) {
-	return confirmNewConfigDirectoryAt(path, originDir, fileSet, defaultDirName)
+func ConfirmConfigPath(ctx context.Context, path string, originDir string, fileSet string, defaultDirName string) (string, error) {
+	return confirmNewConfigDirectoryAt(ctx, path, originDir, fileSet, defaultDirName)
 }
 
 // confirmNewConfigDirectoryAt creates empty targets or prompts to retain or relocate non-empty targets.
-func confirmNewConfigDirectoryAt(path string, originDir string, fileSet string, defaultDirName string) (string, error) {
+func confirmNewConfigDirectoryAt(ctx context.Context, path string, originDir string, fileSet string, defaultDirName string) (string, error) {
 	dir := filepath.Dir(path)
 	empty, err := directoryEmpty(dir)
 	if err != nil {
@@ -34,8 +35,8 @@ func confirmNewConfigDirectoryAt(path string, originDir string, fileSet string, 
 		}
 		return path, nil
 	}
-	fmt.Printf("Podplane will generate %s files, but %s is not empty.\n", fileSet, dir)
-	choice, quitting, err := tui.SelectList("Choose where to generate files", "Target directory is not empty", []list.Item{
+	_, _ = fmt.Fprintf(tui.FlowOutput(ctx), "Podplane will generate %s files, but %s is not empty.\n", fileSet, dir)
+	choice, quitting, err := tui.SelectList(ctx, "Choose where to generate files", "Target directory is not empty", []list.Item{
 		tui.Item{Key: "directory", Label: "Specify a directory"},
 		tui.Item{Key: "current", Label: "Continue in this directory"},
 		tui.Item{Label: "Cancel", Cancel: true},
@@ -50,7 +51,7 @@ func confirmNewConfigDirectoryAt(path string, originDir string, fileSet string, 
 	case "current":
 		return path, nil
 	case "directory":
-		name, err := tui.Input("Output directory", "Directory path", defaultDirName, validateOutputDirectory(originDir))
+		name, err := tui.Input(ctx, "Output directory", "Directory path", defaultDirName, validateOutputDirectory(originDir))
 		if err != nil {
 			return "", err
 		}
@@ -58,7 +59,7 @@ func confirmNewConfigDirectoryAt(path string, originDir string, fileSet string, 
 		if err := os.MkdirAll(newDir, 0o755); err != nil {
 			return "", fmt.Errorf("create output directory %s: %w", newDir, err)
 		}
-		return confirmNewConfigDirectoryAt(filepath.Join(newDir, filepath.Base(path)), originDir, fileSet, defaultDirName)
+		return confirmNewConfigDirectoryAt(ctx, filepath.Join(newDir, filepath.Base(path)), originDir, fileSet, defaultDirName)
 	default:
 		return "", fmt.Errorf("creation cancelled")
 	}

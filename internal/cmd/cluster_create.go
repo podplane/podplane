@@ -55,7 +55,7 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 			var cfg *clusterconfig.ClusterConfig
 			usedWizard := false
 			if _, err := os.Stat(path); os.IsNotExist(err) {
-				providerKind, cancelled, err := infrafiles.SelectCloudProvider("Which cloud provider?")
+				providerKind, cancelled, err := infrafiles.SelectCloudProvider(cmd.Context(), "Which cloud provider?")
 				if err != nil {
 					return err
 				}
@@ -63,7 +63,8 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 					return nil
 				}
 				// Read or download the latest seed snapshots for determining cluster seed file version to use
-				seedManifest, err := depsManager.EnsureSeedSnapshotsCached(context.Background())
+				_, _ = fmt.Fprintln(tui.FlowOutput(cmd.Context()), "Preparing seed snapshots…")
+				seedManifest, err := depsManager.EnsureSeedSnapshotsCached(cmd.Context())
 				if err != nil {
 					return fmt.Errorf("failed to prepare seed snapshots: %w", err)
 				}
@@ -98,7 +99,7 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 					}
 					cfg.Cluster.Seed.Digest = snapshot.Digest
 				}
-				path, err = infrafiles.ConfirmConfigPath(path, originDir, "cluster config and OpenTofu/Terraform", cfg.Cluster.ID)
+				path, err = infrafiles.ConfirmConfigPath(cmd.Context(), path, originDir, "cluster config and OpenTofu/Terraform", cfg.Cluster.ID)
 				if err != nil {
 					return err
 				}
@@ -109,7 +110,8 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 				if noApply {
 					resume += " --no-apply"
 				}
-				fmt.Printf("Created cluster configuration based on your answers:\n  %s\n\nIf you exit this command early, resume with:\n  %s\n\n%s\n\n", path, resume, oidcNotice)
+				_, _ = fmt.Fprintf(tui.FlowOutput(cmd.Context()), "Configuration saved: %s\nResume: %s\n", path, resume)
+				tui.FlowSummary(cmd.Context(), oidcNotice)
 			} else if err != nil {
 				return err
 			} else {
@@ -129,6 +131,8 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 				}
 			}
 
+			tui.FlowResume(cmd.Context(), "podplane cluster create -f '"+strings.ReplaceAll(path, "'", "'\\''")+"'")
+			tui.FlowStage(cmd.Context(), "Podplane · Create cluster", "Init")
 			stateBackend, err := tfstate.ForCluster(cfg)
 			if err != nil {
 				return err
@@ -147,6 +151,7 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 
 			// Generate Terraform files and pinned vmconfig manifest copies.
 			dir := filepath.Dir(path)
+			_, _ = fmt.Fprintln(tui.FlowOutput(cmd.Context()), "Preparing OpenTofu/Terraform files and dependencies…")
 			clusterOptions, err := prepareClusterGeneration(cmd.Context(), c, depsManager, cfg)
 			if err != nil {
 				return err
@@ -168,24 +173,38 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 			if err := stateBackend.WriteConfig(dir); err != nil {
 				return err
 			}
-			fmt.Printf("Generated Podplane OpenTofu/Terraform files in %s\n", dir)
+			_, _ = fmt.Fprintf(tui.FlowOutput(cmd.Context()), "Generated OpenTofu/Terraform files in %s\n", dir)
 			if noApply {
+				tui.FlowSummary(cmd.Context(), "Cluster files generated\n  Config: "+path)
 				return nil
 			}
-			confirm := func(question string) (bool, error) { return tui.Confirm(question, autoApprove, 0) }
-			if err := stateBackend.Ensure(cmd.Context(), cmd.ErrOrStderr(), confirm); err != nil {
+			confirm := func(question string) (bool, error) { return tui.Confirm(cmd.Context(), question, autoApprove, 0) }
+			if err := stateBackend.Ensure(cmd.Context(), tui.FlowOutput(cmd.Context()), confirm); err != nil {
 				return err
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Hour)
 			defer cancel()
 			provider := cfg.Cluster.Providers[0]
-			return tui.RunPlanAndApply(ctx, tui.PlanAndApplyOptions{
+			if err := tui.RunPlanAndApply(ctx, tui.PlanAndApplyOptions{
 				Title: "Podplane · Create cluster", Subtitle: cfg.Cluster.ID + " · " + provider.Kind + " · " + provider.Region,
 				Resume: "podplane cluster create -f '" + strings.ReplaceAll(path, "'", "'\\''") + "'", AutoApprove: autoApprove,
 			}, func(ctx context.Context, emit func(tfexec.Event), review func(tfexec.Plan) (bool, error)) error {
 				return executor.WithCLIConfig(configuration.CLIConfigPath).PlanAndApply(ctx, dir, stateBackend.ConfigFile(), emit, review)
-			})
+			}); err != nil {
+				return err
+			}
+			tui.FlowSummary(ctx, "✓ Cluster infrastructure applied: "+cfg.Cluster.ID+"\n  Config: "+path)
+			return nil
 		},
+	}
+	run := cmd.RunE
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		parent := cmd.Context()
+		defer cmd.SetContext(parent)
+		return tui.RunFlow(parent, "Podplane · Create cluster", func(ctx context.Context) error {
+			cmd.SetContext(ctx)
+			return run(cmd, args)
+		})
 	}
 	cmd.Flags().StringVarP(&cfgPath, "cluster-config", "f", defaultClusterConfigName, "Path to the cluster config file")
 	cmd.Flags().BoolVar(&noApply, "no-apply", false, "Generate OpenTofu/Terraform files but do not run apply")
@@ -241,26 +260,28 @@ func prepareClusterGeneration(ctx context.Context, c *config.Config, depsManager
 // client for clientID; an existing issuer must already have one. It returns a
 // notice for the caller to print after the cluster config has been saved.
 func clusterCreateOIDCIssuer(cmd *cobra.Command, originDir string, provider clusterconfig.Provider, clientID string, noApply bool, autoApprove bool) (string, string, error) {
-	hasOIDC, err := tui.Confirm("Do you already have an OIDC issuer for this cluster?", false, 0)
+	hasOIDC, err := tui.Confirm(cmd.Context(), "Do you already have an OIDC issuer for this cluster?", false, 0)
 	if err != nil {
 		return "", "", err
 	}
 	if hasOIDC {
-		issuerURL, err := tui.Input("Cluster OIDC", "OIDC issuer URL", "https://auth.example.com", tui.Required("OIDC issuer URL"))
+		issuerURL, err := tui.Input(cmd.Context(), "Cluster OIDC", "OIDC issuer URL", "https://auth.example.com", tui.Required("OIDC issuer URL"))
 		return issuerURL, fmt.Sprintf("The cluster logs in with OIDC client ID %q; make sure your issuer has a client with that ID.", clientID), err
 	}
-	setUpOIDC, err := tui.Confirm("Set up a new Truster <https://truster.dev> server now?", false, 0)
+	setUpOIDC, err := tui.Confirm(cmd.Context(), "Set up a new Truster <https://truster.dev> server now?", false, 0)
 	if err != nil {
 		return "", "", err
 	}
 	if !setUpOIDC {
 		return "", "", fmt.Errorf("cluster creation requires an OIDC issuer URL; provide an existing issuer or run podplane oidc create first")
 	}
+	tui.FlowStage(cmd.Context(), "Podplane · Create OIDC server", "Questions")
+	defer tui.FlowStage(cmd.Context(), "Podplane · Create cluster", "Questions")
 	oidcPath, err := filepath.Abs(defaultOIDCConfigName)
 	if err != nil {
 		return "", "", err
 	}
-	oidcPath, err = infrafiles.ConfirmConfigPath(oidcPath, originDir, "OIDC config and OpenTofu/Terraform", "my-oidc-server")
+	oidcPath, err = infrafiles.ConfirmConfigPath(cmd.Context(), oidcPath, originDir, "OIDC config and OpenTofu/Terraform", "my-oidc-server")
 	if err != nil {
 		return "", "", err
 	}

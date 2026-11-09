@@ -5,8 +5,10 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -15,7 +17,7 @@ import (
 )
 
 // SelectList asks the user to choose one item from a terminal list.
-func SelectList(action string, title string, items []list.Item) (string, bool, error) {
+func SelectList(ctx context.Context, action string, title string, items []list.Item) (string, bool, error) {
 	l := list.New(items, itemDelegate{}, listWidth, listHeight)
 	l.Title = title
 	l.SetShowStatusBar(false)
@@ -24,7 +26,7 @@ func SelectList(action string, title string, items []list.Item) (string, bool, e
 	l.Styles.PaginationStyle = list.DefaultStyles().PaginationStyle
 	l.Styles.HelpStyle = list.DefaultStyles().HelpStyle.PaddingBottom(1)
 
-	m, err := tea.NewProgram(model{list: l, action: action}).Run()
+	m, err := Run(ctx, model{list: l, action: action})
 	if err != nil {
 		return "", false, fmt.Errorf("error running program: %w", err)
 	}
@@ -36,13 +38,39 @@ func SelectList(action string, title string, items []list.Item) (string, bool, e
 }
 
 // SelectString asks the user to choose one string value from a terminal list.
-func SelectString(action string, title string, values []string) (string, bool, error) {
+func SelectString(ctx context.Context, action string, title string, values []string) (string, bool, error) {
 	items := make([]list.Item, 0, len(values)+1)
 	for _, value := range values {
 		items = append(items, Item{Key: value, Label: value})
 	}
 	items = append(items, Item{Key: "", Label: "Cancel", Cancel: true})
-	return SelectList(action, title, items)
+	return SelectList(ctx, action, title, items)
+}
+
+// RunInline presents numbered choices without terminal control sequences.
+func (m model) RunInline(ctx context.Context) (tea.Model, error) {
+	fmt.Println(m.list.Title)
+	for i, item := range m.list.Items() {
+		fmt.Printf("%d. %s\n", i+1, item.(Item).Label)
+	}
+	for {
+		fmt.Printf("Choice [%d]: ", m.list.Index()+1)
+		line, err := ReadLine(ctx)
+		if err != nil {
+			return nil, err
+		}
+		n := m.list.Index() + 1
+		if line != "" {
+			n, err = strconv.Atoi(line)
+		}
+		if err != nil || n < 1 || n > len(m.list.Items()) {
+			fmt.Println("Choose a listed number.")
+			continue
+		}
+		item := m.list.Items()[n-1].(Item)
+		m.choice, m.quitting = item.Key, item.Cancel
+		return m, nil
+	}
 }
 
 const listWidth = 20

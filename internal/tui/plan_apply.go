@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"slices"
@@ -84,8 +85,8 @@ func copyPlanAndApplyLogs(text string) tea.Cmd {
 	}
 }
 
-// RunPlanAndApply presents the same execution in an interactive dashboard or plain
-// output. Switching renderers never restarts execution or implicitly approves it.
+// RunPlanAndApply presents the same execution in TUI or Inline mode.
+// Switching renderers never restarts execution or implicitly approves it.
 func RunPlanAndApply(ctx context.Context, opts PlanAndApplyOptions, run PlanAndApplyRun) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -106,9 +107,9 @@ func RunPlanAndApply(ctx context.Context, opts PlanAndApplyOptions, run PlanAndA
 		})
 		events <- planAndApplyDone{err}
 	}()
-	m := planAndApplyModel{opts: opts, events: events, cancel: cancel, stage: "Init", started: time.Now(), rows: map[string]*planAndApplyRow{}}
-	if CanUseTUI(0, 0).OK && term.IsTerminal(int(os.Stdin.Fd())) {
-		final, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithoutSignalHandler()).Run()
+	m := planAndApplyModel{opts: opts, events: events, cancel: cancel, stage: "Init", started: time.Now(), rows: map[string]*planAndApplyRow{}, hideCompleted: true}
+	if CanUseTUI(0, 0).OK && term.IsTerminal(int(os.Stdin.Fd())) && !flowInline(ctx) {
+		final, err := Run(ctx, m)
 		if err != nil {
 			cancel()
 			// Continue draining: the engine must finish cleanup before we return.
@@ -121,13 +122,13 @@ func RunPlanAndApply(ctx context.Context, opts PlanAndApplyOptions, run PlanAndA
 		m = final.(planAndApplyModel)
 		// Preserve diagnostics after leaving the alternate screen, including
 		// recovery instructions that must not disappear with the dashboard.
-		if m.err != nil || m.plain {
+		if m.err != nil || m.inlineMode {
 			for _, line := range m.logs {
-				fmt.Println(line)
+				FlowSummary(ctx, line)
 			}
 		} else {
 			for _, diagnostic := range m.diagnostics {
-				fmt.Println(diagnostic)
+				FlowSummary(ctx, diagnostic)
 			}
 		}
 	}
@@ -138,7 +139,7 @@ func RunPlanAndApply(ctx context.Context, opts PlanAndApplyOptions, run PlanAndA
 			fmt.Printf("%d/%d complete · %d active · %d failed\n", complete, len(m.plan.Changes), active, failed)
 		}
 		if m.review != nil {
-			m.plainReview(ctx)
+			m.inlineReview(ctx)
 		}
 		for !m.done {
 			msg := <-events
@@ -152,18 +153,18 @@ func RunPlanAndApply(ctx context.Context, opts PlanAndApplyOptions, run PlanAndA
 					fmt.Println(ansi.Strip(e.Message))
 				}
 			case planAndApplyReview:
-				m.plainReview(ctx)
+				m.inlineReview(ctx)
 			}
 		}
 	}
 	<-finished
-	fmt.Println(m.status())
+	_, _ = fmt.Fprintln(FlowOutput(ctx), m.status())
 	if m.err != nil {
-		fmt.Println("Inspect the engine diagnostics above, including any state recovery instructions.")
+		FlowSummary(ctx, "Inspect the engine diagnostics above, including any state recovery instructions.")
 		if m.stage == "Apply" {
-			fmt.Println("Applied changes have not been rolled back. Do not reuse the old plan.")
+			FlowSummary(ctx, "Applied changes have not been rolled back. Do not reuse the old plan.")
 		}
-		fmt.Println("After resolving the error, create and review a new plan with:\n  " + opts.Resume)
+		FlowSummary(ctx, "After resolving the error, create and review a new plan with:\n  "+opts.Resume)
 	}
 	return m.err
 }
@@ -179,28 +180,28 @@ type planAndApplyRow struct {
 
 // planAndApplyModel owns execution progress, review focus, and panel state.
 type planAndApplyModel struct {
-	opts                                               PlanAndApplyOptions
-	events                                             <-chan tea.Msg
-	cancel                                             context.CancelFunc
-	stage                                              string
-	started, ended                                     time.Time
-	width, height, selected, focus, scroll             int
-	tableTop                                           int
-	mouseX, mouseY                                     int
-	rows                                               map[string]*planAndApplyRow
-	plan                                               tfexec.Plan
-	review                                             *planAndApplyReview
-	logs                                               []string
-	logBytes                                           int
-	logsDiscarded                                      bool
-	diagnostics                                        []string
-	problem                                            string
-	detail, logView, outputView, plain, stopping, done bool
-	followLogs                                         bool
-	hideCompleted                                      bool
-	selection                                          *logSelection
-	copyStatus                                         string
-	err                                                error
+	opts                                                    PlanAndApplyOptions
+	events                                                  <-chan tea.Msg
+	cancel                                                  context.CancelFunc
+	stage                                                   string
+	started, ended                                          time.Time
+	width, height, selected, focus, scroll                  int
+	tableTop                                                int
+	mouseX, mouseY                                          int
+	rows                                                    map[string]*planAndApplyRow
+	plan                                                    tfexec.Plan
+	review                                                  *planAndApplyReview
+	logs                                                    []string
+	logBytes                                                int
+	logsDiscarded                                           bool
+	diagnostics                                             []string
+	problem                                                 string
+	detail, logView, outputView, inlineMode, stopping, done bool
+	followLogs                                              bool
+	hideCompleted                                           bool
+	selection                                               *logSelection
+	copyStatus                                              string
+	err                                                     error
 }
 
 // Init starts the dashboard clock without taking ownership of engine events.
@@ -286,7 +287,7 @@ func (m planAndApplyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case planAndApplyTick:
 		// Consume only in Update: an outstanding blocking tea.Cmd could steal
-		// an event when the user switches to plain output.
+		// an event when the user switches to Inline mode.
 		for i := 0; i < 64 && !m.done; i++ {
 			select {
 			case event := <-m.events:
@@ -317,8 +318,8 @@ func (m planAndApplyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.stopping = true
 			m.cancel()
-		case "p":
-			m.plain = true
+		case "ctrl+o":
+			m.inlineMode = true
 			return m, tea.Quit
 		case "esc":
 			m.detail, m.logView, m.outputView, m.scroll = false, false, false, 0
@@ -438,7 +439,10 @@ func (m *planAndApplyModel) accept(msg tea.Msg) {
 			m.addLog(e.Message)
 		}
 		if e.Type == "diagnostic" {
-			m.diagnostics = append(m.diagnostics, ansi.Strip(e.Message))
+			diagnostic := ansi.Strip(e.Message)
+			if !slices.Contains(m.diagnostics, diagnostic) {
+				m.diagnostics = append(m.diagnostics, diagnostic)
+			}
 			if strings.HasPrefix(e.Message, "error:") {
 				m.problem, _, _ = strings.Cut(ansi.Strip(e.Message), "\n")
 			}
@@ -504,8 +508,8 @@ func (m *planAndApplyModel) addLog(message string) {
 	}
 }
 
-// plainReview prints the redacted plan and answers its pending approval request.
-func (m *planAndApplyModel) plainReview(ctx context.Context) {
+// inlineReview prints the redacted plan and answers its pending approval request.
+func (m *planAndApplyModel) inlineReview(ctx context.Context) {
 	for _, c := range m.plan.Changes {
 		fmt.Printf("%-8s %s\n", c.Action(), c.Address)
 	}
@@ -517,7 +521,7 @@ func (m *planAndApplyModel) plainReview(ctx context.Context) {
 	}
 	ok := true
 	if m.plan.HasChanges && !m.opts.AutoApprove {
-		// Plain review includes redacted details before asking for approval.
+		// Inline review includes redacted details before asking for approval.
 		for _, c := range m.plan.Changes {
 			fmt.Printf("\n%s\n%s\n", c.Address, c.Details)
 		}
@@ -535,11 +539,18 @@ func (m *planAndApplyModel) plainReview(ctx context.Context) {
 // goroutine behind when Ctrl-C, SIGTERM, or a deadline cancels review.
 func planAndApplyApproval(ctx context.Context) (bool, error) {
 	fmt.Print("Apply this saved plan? Type yes to continue: ")
+	line, err := ReadLine(ctx)
+	return strings.EqualFold(strings.TrimSpace(line), "yes"), err
+}
+
+// ReadLine reads one answer without consuming the next prompt's input or leaving
+// a reader behind when cancellation interrupts an Inline-mode workflow.
+func ReadLine(ctx context.Context) (string, error) {
 	fd := int(os.Stdin.Fd())
 	var line strings.Builder
 	for {
 		if err := ctx.Err(); err != nil {
-			return false, err
+			return "", err
 		}
 		var ready unix.FdSet
 		ready.Set(fd)
@@ -549,7 +560,7 @@ func planAndApplyApproval(ctx context.Context) (bool, error) {
 			continue
 		}
 		if err != nil {
-			return false, err
+			return "", err
 		}
 		if n == 0 {
 			continue
@@ -557,13 +568,13 @@ func planAndApplyApproval(ctx context.Context) (bool, error) {
 		var b [1]byte
 		n, err = unix.Read(fd, b[:])
 		if err != nil {
-			return false, err
+			return "", err
 		}
 		if n == 0 {
-			return false, nil
+			return "", io.EOF
 		}
 		if b[0] == '\n' {
-			return strings.EqualFold(strings.TrimSpace(line.String()), "yes"), nil
+			return strings.TrimSpace(line.String()), nil
 		}
 		line.WriteByte(b[0])
 	}
@@ -701,9 +712,24 @@ func (m planAndApplyModel) detailSummary() string {
 
 // modalContent returns the active panel's title, wrapped lines, and viewport height.
 func (m planAndApplyModel) modalContent() (string, []string, int) {
+	width := max(1, min(m.width-4, 116)-8)
 	title, text := "Engine logs", strings.Join(m.logs, "\n")
 	if m.outputView {
 		title, text = "Output changes", m.plan.Outputs
+		header := lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary).
+			Background(lipgloss.AdaptiveColor{Light: "#EEEADF", Dark: "#252A32"}).Width(width)
+		bold := lipgloss.NewStyle().Bold(true)
+		lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+		for i, line := range lines {
+			if line != "" && !strings.HasPrefix(line, " ") {
+				lines[i] = header.Render(ansi.Wrap(line, width, ""))
+			} else if strings.HasPrefix(line, "  Before:") {
+				lines[i] = "  " + bold.Render("Before:") + strings.TrimPrefix(line, "  Before:")
+			} else if strings.HasPrefix(line, "  After:") {
+				lines[i] = "  " + bold.Render("After:") + strings.TrimPrefix(line, "  After:")
+			}
+		}
+		text = strings.Join(lines, "\n")
 	}
 	if m.detail && len(m.plan.Changes) > 0 {
 		r := m.rows[m.plan.Changes[m.selected].Address]
@@ -720,7 +746,6 @@ func (m planAndApplyModel) modalContent() (string, []string, int) {
 			text += "\n\nDiagnostic\n" + r.diagnostic
 		}
 	}
-	width := max(1, min(m.width-4, 116)-8)
 	n := max(1, m.height-14)
 	if m.logView && m.selection != nil {
 		return title, m.selection.lines, n
@@ -735,7 +760,7 @@ func (m planAndApplyModel) modalContent() (string, []string, int) {
 func (m planAndApplyModel) View() string {
 	statusStyle := lipgloss.NewStyle().Bold(true)
 	if m.small() {
-		return fmt.Sprintf("%s\n\n%s\n\nThis view needs at least 80 columns × 24 rows.\nCurrent terminal: %d × %d.\n\nResize to restore the dashboard.\nPress p to continue with plain output.\nCtrl-C requests a safe stop.\n", m.opts.Title, statusStyle.Render(m.status()), m.width, m.height)
+		return fmt.Sprintf("%s\n\n%s\n\nThis view needs at least 80 columns × 24 rows.\nCurrent terminal: %d × %d.\n\nResize to restore the dashboard.\nPress Ctrl+O to continue in Inline mode.\nCtrl-C requests a safe stop.\n", m.opts.Title, statusStyle.Render(m.status()), m.width, m.height)
 	}
 	w := min(m.width-4, 116)
 	primary := lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary)
@@ -789,14 +814,25 @@ func (m planAndApplyModel) View() string {
 			}
 		}
 		body += "\n\n" + ansi.Truncate(info, w-8, "…")
-		body += "\n↑↓ Line · Ctrl+B/PgUp Up · Ctrl+F/PgDn/Space Down\nHome/g Top · End/G Bottom · Esc Close · p Plain"
+		body += "\n↑↓ Line · Ctrl+B/PgUp Up · Ctrl+F/PgDn/Space Down\nHome/g Top · End/G Bottom · Esc Close · Ctrl+O Inline mode"
 		background := m
 		background.detail, background.logView, background.outputView = false, false, false
 		return planAndApplyOverlay(background.View(), card.Width(w-6).Render(body), 3, 2)
 	}
+	card = card.Height(m.height - 3)
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n%s\n\n", primary.Render(m.opts.Title), ansi.Truncate(m.opts.Subtitle, w-2, "…"))
-	fmt.Fprintln(&b, statusStyle.Render(ansi.Truncate(m.status(), w-2, "…")))
+	status := m.status()
+	warnings := 0
+	for _, diagnostic := range m.diagnostics {
+		if strings.HasPrefix(diagnostic, "warning:") {
+			warnings++
+		}
+	}
+	if warnings > 0 {
+		status += fmt.Sprintf(" · %d warnings (l Logs)", warnings)
+	}
+	fmt.Fprintln(&b, statusStyle.Render(ansi.Truncate(status, w-2, "…")))
 	if m.stage != "Review" {
 		elapsed := time.Since(m.started)
 		if m.done {
@@ -811,8 +847,9 @@ func (m planAndApplyModel) View() string {
 			latest := strings.ReplaceAll(m.logs[len(m.logs)-1], "\n", " ")
 			b.WriteString("\n" + ansi.Truncate(latest, w-2, "…"))
 		}
-		b.WriteString("\n\nl Logs  p Plain  Ctrl-C Stop")
-		return card.Render(b.String()) + "\n" + m.stages()
+		body := lipgloss.NewStyle().Height(m.height - 5).Render(strings.TrimRight(b.String(), "\n"))
+		body += "\n\nl Logs  Ctrl+O Inline mode  Ctrl-C Stop"
+		return card.Render(body) + "\n" + m.stages()
 	}
 	complete, active, failed := m.counts()
 	if m.stage == "Apply" && len(m.plan.Changes) > 0 {
@@ -887,7 +924,7 @@ func (m planAndApplyModel) View() string {
 	}
 	for i := end - start; i < n; i++ {
 		if i == 0 && m.hideCompleted && m.stage == "Apply" {
-			b.WriteString("No unfinished resources\n")
+			b.WriteString("All resources applied! Press h to show completed resources.\n")
 		} else {
 			b.WriteString("\n")
 		}
@@ -920,7 +957,7 @@ func (m planAndApplyModel) View() string {
 	} else {
 		b.WriteString("\n")
 	}
-	b.WriteString("↑↓ Select  Enter Details  Tab Actions  l Logs  o Outputs\np Plain  Ctrl-C Stop  Ctrl+B/F or PgUp/PgDn Page  Space Next")
+	b.WriteString("↑↓ Select  Enter Details  Tab Actions  l Logs  o Outputs\nCtrl+O Inline mode  Ctrl-C Stop  Ctrl+B/F/PgUp/PgDn Page  Space Next")
 	return card.Render(b.String()) + "\n" + m.stages()
 }
 

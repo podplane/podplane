@@ -22,7 +22,7 @@ const downloadProgressBarWidth = 28
 const defaultDownloadProgressVisibleItems = 8
 
 // RunDownloadProgress renders deps download progress while run executes.
-// It falls back to plain line-oriented output when stdout is not a terminal.
+// It falls back to Inline output when stdout is not a terminal.
 func RunDownloadProgress(title string, run func(func(deps.DownloadEvent)) error) error {
 	if !CanUseTUI(0, 0).OK {
 		return runTextDownloadProgress(run)

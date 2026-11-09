@@ -55,7 +55,7 @@ func newLogsCmd(c *config.Config) *cobra.Command {
 		var selectContainer deploy.SelectContainerFunc
 		if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
 			selectContainer = func(containers []string) (string, bool, error) {
-				return tui.SelectString("Tail logs", "Choose a container", containers)
+				return tui.SelectString(cmd.Context(), "Tail logs", "Choose a container", containers)
 			}
 		}
 		return deploy.Logs(deploy.LogsOptions{

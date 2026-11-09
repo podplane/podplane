@@ -45,7 +45,7 @@ request will trigger a wake so use podplane or kubectl or curl a cluster domain.
 					if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
 						return false, fmt.Errorf("noninteractive forced sleep requires --auto-approve (-y)")
 					}
-					return tui.Confirm(message, false, 1)
+					return tui.Confirm(cmd.Context(), message, false, 1)
 				},
 			})
 			if err != nil {

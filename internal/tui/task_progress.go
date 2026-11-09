@@ -168,8 +168,8 @@ func (p TaskProgress) Failed(key, name string, err error) {
 // includes an overall expected-time bar plus per-item rows; both are expectation
 // indicators, not exact work-completion percentages. It falls back to
 // line-oriented output when stdout cannot support an interactive TUI. Small
-// terminals still start the TUI so users see the resize prompt and can press p
-// to switch to plain output if desired.
+// terminals still start the TUI so users see the resize prompt and can press Ctrl+O
+// to switch to Inline mode if desired.
 func RunTaskProgress(opts TaskProgressOptions, items []TaskProgressItem, run func(TaskProgress) error) error {
 	items = includedTaskProgressItems(items)
 	if !CanUseTUI(0, 0).OK {
@@ -326,7 +326,7 @@ func (m taskProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = fmt.Errorf("task progress cancelled")
 			return m, tea.Quit
 		}
-		if msg.String() == "p" && m.tooSmall() {
+		if msg.String() == "ctrl+o" {
 			m.tui = false
 			return m, tea.Quit
 		}
@@ -512,7 +512,7 @@ func (m taskProgressModel) tooSmall() bool {
 
 // tooSmallTaskProgressView renders the compact undersized-terminal message.
 func tooSmallTaskProgressView() string {
-	return fmt.Sprintf("Podplane local start is still running.\n\nThe installer view needs at least %dx%d.\nResize your terminal to continue.\n\nPress p to disable the TUI and continue with plain output.\n", MinTUIWidth, MinTUIHeight)
+	return fmt.Sprintf("Podplane local start is still running.\n\nThe installer view needs at least %dx%d.\nResize your terminal to continue.\n\nPress Ctrl+O to continue in Inline mode.\n", MinTUIWidth, MinTUIHeight)
 }
 
 // renderRocketLaunch renders the completed-state launch animation shown while

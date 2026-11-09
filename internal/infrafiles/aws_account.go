@@ -41,6 +41,21 @@ type awsAccountResult struct {
 	err     error
 }
 
+// RunInline resolves the account, then allows explicit confirmation or correction.
+func (m awsAccountLookup) RunInline(ctx context.Context) (tea.Model, error) {
+	if !m.manual {
+		account, err := m.lookup()
+		if err != nil {
+			fmt.Println("Could not resolve AWS account; enter it manually.")
+		}
+		updated, _ := m.enterAccount(account, "")
+		m = updated.(awsAccountLookup)
+	}
+	account, err := tui.Input(ctx, "Confirm AWS account", "AWS account ID", m.input.Value(), cloud.ValidateAWSAccount)
+	m.account, m.done = account, true
+	return m, err
+}
+
 // Init starts lookup and spinner updates without blocking keyboard input.
 func (m awsAccountLookup) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {

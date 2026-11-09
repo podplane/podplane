@@ -19,9 +19,9 @@ import (
 	"github.com/podplane/podplane/internal/tfexec"
 )
 
-// TestPlanAndApplyPlainApprovalCancellation verifies that a cancelled prompt does
+// TestPlanAndApplyInlineApprovalCancellation verifies that a cancelled prompt does
 // not leave a reader consuming the next plan's approval input.
-func TestPlanAndApplyPlainApprovalCancellation(t *testing.T) {
+func TestPlanAndApplyInlineApprovalCancellation(t *testing.T) {
 	t.Setenv("CI", "true")
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -119,8 +119,12 @@ func TestPlanAndApplyReviewKeyboard(t *testing.T) {
 	default:
 	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
-	if !updated.(planAndApplyModel).plain {
-		t.Fatal("plain output escape did not work")
+	if updated.(planAndApplyModel).inlineMode {
+		t.Fatal("bare p switched modes")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	if !updated.(planAndApplyModel).inlineMode {
+		t.Fatal("Inline mode escape did not work")
 	}
 }
 
@@ -146,7 +150,7 @@ func TestPlanAndApplyProgressAndLayout(t *testing.T) {
 	if !strings.Contains(m.View(), "100%") {
 		t.Fatal("replacement did not complete")
 	}
-	for _, state := range []string{"apply", "review", "details", "logs", "outputs", "failure", "wrapped activity", "long activity"} {
+	for _, state := range []string{"apply", "review", "details", "logs", "outputs", "failure", "warnings", "wrapped activity", "long activity"} {
 		t.Run(state, func(t *testing.T) {
 			view := m
 			switch state {
@@ -161,6 +165,13 @@ func TestPlanAndApplyProgressAndLayout(t *testing.T) {
 				view.outputView = true
 			case "failure":
 				view.accept(planAndApplyDone{fmt.Errorf("engine failed")})
+			case "warnings":
+				for range 2 {
+					view.accept(tfexec.Event{Type: "diagnostic", Message: "warning: Development provider override"})
+				}
+				if !strings.Contains(view.View(), "1 warnings (l Logs)") {
+					t.Fatal("duplicate warning inflated the warning count")
+				}
 			case "wrapped activity":
 				view.accept(tfexec.Event{Message: strings.Repeat("resource_", 12) + ": Creation complete after 1s [id=rtb-123]"})
 				if !strings.Contains(view.View(), "[id=rtb-123]") {
@@ -548,17 +559,13 @@ func TestPlanAndApplyHideCompleted(t *testing.T) {
 	}
 	toggle := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}}
 	key(toggle)
-	if m.hideCompleted {
-		t.Fatal("filter should not activate in review")
+	if !m.hideCompleted || !strings.Contains(m.View(), "alpha") {
+		t.Fatal("review should show all resources without changing the filter")
 	}
 	m.stage, m.review = "Apply", nil
 	m.accept(tfexec.Event{Type: "apply_complete", Address: "alpha", Action: "create"})
 	m.accept(tfexec.Event{Type: "apply_start", Address: "beta"})
 	m.accept(tfexec.Event{Type: "apply_errored", Address: "delta"})
-	if !strings.Contains(m.View(), "alpha") {
-		t.Fatal("completed rows hidden by default")
-	}
-	key(toggle)
 	view := m.View()
 	if strings.Contains(view, "alpha") || !strings.Contains(view, "1/4 complete") || !strings.Contains(view, "1 active · 1 failed") {
 		t.Fatalf("filter changed progress or retained completed row:\n%s", view)
@@ -586,7 +593,7 @@ func TestPlanAndApplyHideCompleted(t *testing.T) {
 	}
 	m.accept(tfexec.Event{Type: "apply_complete", Address: "beta", Action: "create"})
 	m.accept(tfexec.Event{Type: "apply_complete", Address: "delta", Action: "create"})
-	if !strings.Contains(m.View(), "No unfinished resources") || !strings.Contains(m.View(), "4/4 complete") {
+	if !strings.Contains(m.View(), "All resources applied! Press h to show completed resources.") || !strings.Contains(m.View(), "4/4 complete") {
 		t.Fatal("empty filtered table lost completion state")
 	}
 	key(tea.KeyMsg{Type: tea.KeyEnter})
@@ -629,7 +636,7 @@ func TestPlanAndApplyActivityStableLayout(t *testing.T) {
 	}
 }
 
-// TestPlanAndApplyEmptyStages checks compact progress before resources are available.
+// TestPlanAndApplyEmptyStages keeps progress near the top without an empty table.
 func TestPlanAndApplyEmptyStages(t *testing.T) {
 	for _, stage := range []string{"Init", "Plan"} {
 		m := planAndApplyFixture()
@@ -641,19 +648,19 @@ func TestPlanAndApplyEmptyStages(t *testing.T) {
 				t.Fatalf("empty %s shows %q", stage, hidden)
 			}
 		}
-		if !strings.Contains(view, "Downloading provider") || lipgloss.Height(view) > 12 {
-			t.Fatalf("empty stage did not show compact progress:\n%s", view)
+		if !strings.Contains(strings.Join(strings.Split(view, "\n")[:8], "\n"), "Downloading provider") || lipgloss.Height(view) != m.height {
+			t.Fatalf("empty stage moved progress or resized the frame:\n%s", view)
 		}
 		m.logView = true
 		if !strings.Contains(m.View(), "Esc Close") || lipgloss.Height(m.View()) > 24 {
-			t.Fatal("compact stage clipped log panel controls")
+			t.Fatal("empty stage clipped log panel controls")
 		}
 	}
 }
 
 // planAndApplyFixture starts a minimum-size review with one replacement awaiting approval.
 func planAndApplyFixture() planAndApplyModel {
-	m := planAndApplyModel{opts: PlanAndApplyOptions{Title: "Podplane · Create cluster", Subtitle: "demo · AWS · ap-southeast-2"}, width: 80, height: 24, stage: "Review", started: time.Now(), rows: map[string]*planAndApplyRow{}}
+	m := planAndApplyModel{opts: PlanAndApplyOptions{Title: "Podplane · Create cluster", Subtitle: "demo · AWS · ap-southeast-2"}, width: 80, height: 24, stage: "Review", started: time.Now(), rows: map[string]*planAndApplyRow{}, hideCompleted: true}
 	m.accept(planAndApplyReview{plan: tfexec.Plan{HasChanges: true, Changes: []tfexec.Change{{Address: "module.cluster.aws_instance.server", Actions: []string{"delete", "create"}, Details: "Operation: delete → create\n\nBefore\nold\n\nAfter\nnew"}}}, answer: make(chan bool, 1)})
 	return m
 }

@@ -5,6 +5,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -28,18 +29,18 @@ type inputModel struct {
 }
 
 // Input asks the user for one text value and validates it before returning.
-func Input(title, label, value string, validate InputValidator) (string, error) {
+func Input(ctx context.Context, title, label, value string, validate InputValidator) (string, error) {
 	input := textinput.New()
 	input.Focus()
 	input.CharLimit = 256
 	input.SetValue(value)
 	input.CursorEnd()
-	got, err := tea.NewProgram(inputModel{
+	got, err := Run(ctx, inputModel{
 		title:    title,
 		label:    label,
 		input:    input,
 		validate: validate,
-	}).Run()
+	})
 	if err != nil {
 		return "", fmt.Errorf("run input prompt: %w", err)
 	}
@@ -54,6 +55,29 @@ func Input(title, label, value string, validate InputValidator) (string, error) 
 		return "", fmt.Errorf("input did not complete")
 	}
 	return strings.TrimSpace(m.input.Value()), nil
+}
+
+// RunInline collects and validates a line, preserving the current default value.
+func (m inputModel) RunInline(ctx context.Context) (tea.Model, error) {
+	for {
+		fmt.Printf("%s [%s]: ", m.label, m.input.Value())
+		value, err := ReadLine(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if value == "" {
+			value = m.input.Value()
+		}
+		if m.validate != nil {
+			if err := m.validate(value); err != nil {
+				fmt.Println(err)
+				continue
+			}
+		}
+		m.input.SetValue(value)
+		m.done = true
+		return m, nil
+	}
 }
 
 // Init starts cursor blinking for the input prompt.

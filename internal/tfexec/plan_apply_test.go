@@ -29,7 +29,7 @@ plan)
   exit 2 ;;
 show)
   if [ "$SCENARIO" = nochange ]; then echo '{"format_version":"1.2"}'; exit; fi
-  if [ "$SCENARIO" = outputs ]; then echo '{"format_version":"1.2","output_changes":{"name":{"actions":["create"],"after":"hello"}}}'; exit; fi
+  if [ "$SCENARIO" = outputs ]; then echo '{"format_version":"1.2","output_changes":{"name":{"actions":["create"],"after":"hello"},"credentials":{"actions":["update"],"before":"old-output-secret","before_sensitive":true,"after":{"token":"new-output-secret"},"after_sensitive":{"token":true},"after_unknown":{"endpoint":true}}}}'; exit; fi
   cat <<'JSON'
 {"format_version":"1.2","resource_changes":[{"address":"terraform_data.example","change":{"actions":["delete","create"],"before":{"password":"old-secret"},"before_sensitive":{"password":true},"after":{"nested":[{"token":"new-secret","visible":9007199254740993}]},"after_sensitive":{"nested":[{"token":true}]},"after_unknown":{"id":true}}}]}
 JSON
@@ -74,6 +74,16 @@ esac
 				if scenario == "outputs" {
 					if !p.HasChanges || !strings.Contains(p.Outputs, "hello") {
 						t.Fatalf("output-only plan: %+v", p)
+					}
+					for _, secret := range []string{"old-output-secret", "new-output-secret"} {
+						if strings.Contains(p.Outputs, secret) {
+							t.Fatal("output secret exposed")
+						}
+					}
+					for _, visible := range []string{"(sensitive)", "(known after apply)", "credentials", "name"} {
+						if !strings.Contains(p.Outputs, visible) {
+							t.Fatalf("missing output value %q", visible)
+						}
 					}
 					return true, nil
 				}

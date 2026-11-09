@@ -12,18 +12,26 @@ Podplane uses a few terminal UI styles for interactive commands:
 | VM boot wizard | [local start](commands/local-start.md) | Show local VM startup tasks and health checks. |
 | OpenTofu/Terraform plan-and-apply dashboard | [cluster create](commands/cluster-create.md), [cluster upgrade](commands/cluster-upgrade.md), [oidc create](commands/oidc-create.md) | Review infrastructure changes and track apply progress. |
 
-Before the style-specific controls, here's how to use plain output and stop execution safely.
+Before the style-specific controls, here's how to switch modes and stop execution safely.
 
-## Plain output and cancellation
+## TUI and Inline modes
 
-The Podplane Terminal UI (TUI) needs **80 columns × 24 rows**. Resize a
-smaller terminal or press `p` to switch to plain output. You can switch at any
-size; it does not restart execution or approve the plan, and lasts for the rest
-of that run. Non-interactive runs use plain output. Type `yes` to approve, or
-use `--auto-approve` to skip confirmation.
+TUI mode uses the terminal's alternate screen; Inline mode keeps scrolling output
+and prompts in the main screen. The TUI needs **80 columns × 24 rows**.
+Resize a smaller terminal or press **Ctrl+O** to continue in Inline mode.
+Switching preserves answers, does not restart execution or approve the plan,
+and lasts for the rest of that run. Non-interactive runs use Inline mode.
+Type `yes` to approve, or use `--auto-approve` to skip confirmation.
 
 **Ctrl-C requests a safe stop.** Wait for cleanup to finish. Cancellation and
 failure do not undo applied changes; inspect the logs before retrying.
+
+## Configuration wizard
+
+`cluster create` and `oidc create` keep questions, preparation, and plan/apply
+in one session, including OIDC setup started from cluster creation. Ctrl+L opens
+preparation logs. Exiting leaves a short result and any warnings; failures also
+preserve diagnostics and a resume command.
 
 ## OpenTofu/Terraform plan-and-apply dashboard
 
@@ -44,7 +52,8 @@ shows its plan and progress in this dashboard. The footer tracks
 - **Progress:** the status, elapsed time, and progress bar show apply activity.
   The percentage counts completed resource changes, not time remaining.
 - **Hide completed:** during apply, press `h` to hide or show completed resources.
-  The filter starts off, preserves plan order, and does not change overall progress.
+  Completed resources are hidden by default. The filter preserves plan order
+  and does not change overall progress.
 - **Details, logs, and outputs:** Enter opens resource details, `l` opens engine
   logs, and `o` opens output changes. Esc closes the panel.
 

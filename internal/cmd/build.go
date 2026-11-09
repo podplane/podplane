@@ -5,6 +5,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -115,7 +116,7 @@ func selectBuildTemplate(matches []initfile.Match) (initfile.Match, bool, error)
 		items = append(items, tui.Item{Key: match.Template.ID, Label: fmt.Sprintf("%s — %s", match.Template.Name, match.Reason)})
 	}
 	items = append(items, tui.Item{Key: "", Label: "Cancel", Cancel: true})
-	choice, quitting, err := tui.SelectList("Generate Containerfile", "Choose a Containerfile template", items)
+	choice, quitting, err := tui.SelectList(context.Background(), "Generate Containerfile", "Choose a Containerfile template", items)
 	if err != nil {
 		return initfile.Match{}, false, err
 	}

@@ -12,7 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// TestTaskProgressSmallTerminalShowsResizePrompt checks size guidance and the plain-output escape hint.
+// TestTaskProgressSmallTerminalShowsResizePrompt checks size guidance and the Inline-mode escape hint.
 func TestTaskProgressSmallTerminalShowsResizePrompt(t *testing.T) {
 	m := taskProgressModel{width: MinTUIWidth - 1, height: MinTUIHeight, tui: true}
 
@@ -23,22 +23,22 @@ func TestTaskProgressSmallTerminalShowsResizePrompt(t *testing.T) {
 	if !strings.Contains(view, "The installer view needs at least 80x24.") {
 		t.Fatalf("small terminal view missing minimum size message:\n%s", view)
 	}
-	if !strings.Contains(view, "Press p to disable the TUI and continue with plain output.") {
-		t.Fatalf("small terminal view missing plain-output hint:\n%s", view)
+	if !strings.Contains(view, "Press Ctrl+O to continue in Inline mode.") {
+		t.Fatalf("small terminal view missing Inline-mode hint:\n%s", view)
 	}
 }
 
-// TestTaskProgressSmallTerminalPDisablesTUI checks switching to plain output in an undersized terminal.
-func TestTaskProgressSmallTerminalPDisablesTUI(t *testing.T) {
+// TestTaskProgressSmallTerminalInline checks switching modes in an undersized terminal.
+func TestTaskProgressSmallTerminalInline(t *testing.T) {
 	m := taskProgressModel{width: MinTUIWidth - 1, height: MinTUIHeight, tui: true}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
 	updatedModel, ok := updated.(taskProgressModel)
 	if !ok {
 		t.Fatalf("Update returned %T, want taskProgressModel", updated)
 	}
 	if updatedModel.tui {
-		t.Fatal("pressing p in a small terminal should disable TUI")
+		t.Fatal("Ctrl+O in a small terminal should disable TUI")
 	}
 }
 

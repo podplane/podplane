@@ -5,6 +5,7 @@
 package oidccreate
 
 import (
+	"context"
 	"fmt"
 	"net/mail"
 	"strings"
@@ -47,12 +48,12 @@ type configForm struct {
 // RunConfigWizard collects Truster settings, reusing a supplied cluster
 // provider or asking for cloud settings when nil. An empty clientID prompts
 // for the first cluster ID. Login connector selection is always explicit.
-func RunConfigWizard(provider *oidcconfig.Provider, clientID string) (*oidcconfig.Config, error) {
+func RunConfigWizard(ctx context.Context, provider *oidcconfig.Provider, clientID string) (*oidcconfig.Config, error) {
 	providerKind := ""
 	if provider != nil {
 		providerKind = provider.Kind
 	} else {
-		kind, cancelled, err := infrafiles.SelectCloudProvider("Which cloud provider should host the OIDC server?")
+		kind, cancelled, err := infrafiles.SelectCloudProvider(ctx, "Which cloud provider should host the OIDC server?")
 		if err != nil {
 			return nil, err
 		}
@@ -61,7 +62,7 @@ func RunConfigWizard(provider *oidcconfig.Provider, clientID string) (*oidcconfi
 		}
 		providerKind = kind
 	}
-	connector, cancelled, err := tui.SelectList("Select login connector", "Which login provider should users sign in with?", []list.Item{
+	connector, cancelled, err := tui.SelectList(ctx, "Select login connector", "Which login provider should users sign in with?", []list.Item{
 		tui.Item{Key: "google", Label: "Google"},
 		tui.Item{Key: "github", Label: "GitHub"},
 		tui.Item{Label: "Cancel", Cancel: true},
@@ -76,7 +77,7 @@ func RunConfigWizard(provider *oidcconfig.Provider, clientID string) (*oidcconfi
 	if err != nil {
 		return nil, err
 	}
-	got, err := tea.NewProgram(m).Run()
+	got, err := tui.Run(ctx, m)
 	if err != nil {
 		return nil, fmt.Errorf("run OIDC config form: %w", err)
 	}
@@ -91,6 +92,24 @@ func RunConfigWizard(provider *oidcconfig.Provider, clientID string) (*oidcconfi
 		return nil, fmt.Errorf("OIDC config creation did not complete")
 	}
 	return form.config()
+}
+
+// RunInline continues the current form without discarding entered answers.
+func (m configForm) RunInline(ctx context.Context) (tea.Model, error) {
+	for !m.complete {
+		field := m.fields[m.index]
+		if field.description != "" {
+			fmt.Println(field.description)
+		}
+		value, err := tui.Input(ctx, "New Truster config", field.label, m.input.Value(), field.validate)
+		if err != nil {
+			return nil, err
+		}
+		m.input.SetValue(value)
+		updated, _ := m.moveNext()
+		m = updated.(configForm)
+	}
+	return m, nil
 }
 
 // newConfigForm creates the initial model for the Truster config form for

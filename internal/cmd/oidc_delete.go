@@ -66,7 +66,7 @@ func newOIDCDeleteCmd(c *config.Config) *cobra.Command {
 				Executor:    executor,
 				AutoApprove: autoApprove,
 				Confirm: func(message string) (bool, error) {
-					return tui.Confirm(message, autoApprove, 0)
+					return tui.Confirm(cmd.Context(), message, autoApprove, 0)
 				},
 			}); err != nil {
 				return err

@@ -11,7 +11,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbletea"
 
 	"github.com/podplane/podplane/internal/cloud"
 	"github.com/podplane/podplane/internal/tui"
@@ -20,8 +19,8 @@ import (
 // SelectCloudProvider asks question with the supported cloud providers,
 // returning the chosen provider kind and whether the user cancelled. The
 // first provider is highlighted initially, but the user must still choose.
-func SelectCloudProvider(question string) (string, bool, error) {
-	return tui.SelectList("Select cloud provider", question, cloudProviderItems())
+func SelectCloudProvider(ctx context.Context, question string) (string, bool, error) {
+	return tui.SelectList(ctx, "Select cloud provider", question, cloudProviderItems())
 }
 
 // cloudProviderItems returns a list item for each supported cloud provider,
@@ -43,17 +42,17 @@ func ConfirmAWSAccount(ctx context.Context, region, profile string, autoApprove 
 	defer cancel()
 	lookup := func() (string, error) { return cloud.AWSAccount(lookupCtx, region, profile) }
 	if autoApprove {
-		fmt.Println("Resolving AWS account")
+		_, _ = fmt.Fprintln(tui.FlowOutput(ctx), "Resolving AWS account")
 		account, err := lookup()
 		if err != nil {
 			return "", err
 		}
-		fmt.Printf("Selected AWS credentials resolve to account %s.\n", account)
+		_, _ = fmt.Fprintf(tui.FlowOutput(ctx), "Selected AWS credentials resolve to account %s.\n", account)
 		return account, nil
 	}
-	got, err := tea.NewProgram(awsAccountLookup{
+	got, err := tui.Run(ctx, awsAccountLookup{
 		lookup: lookup, cancel: cancel, profile: profile, spinner: spinner.New(), width: 80,
-	}, tea.WithContext(ctx)).Run()
+	})
 	if err != nil {
 		return "", fmt.Errorf("resolve AWS account: %w", err)
 	}

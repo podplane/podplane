@@ -41,7 +41,7 @@ event streams. A plan with no changes skips apply. Saved plans are kept in a
 private temporary directory and removed on exit.
 
 See the [OpenTofu/Terraform plan-and-apply dashboard](../terminal-ui.md#opentofuterraform-plan-and-apply-dashboard) for the resource table,
-approval controls, log navigation, progress display, and plain-output mode.
+approval controls, log navigation, progress display, and Inline mode.
 
 Ctrl-C requests a safe stop and waits for engine/state cleanup. Cancellation or
 failure does not roll back already-applied changes. Inspect diagnostics, including

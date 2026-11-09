@@ -38,7 +38,7 @@ type ChecklistOptions struct {
 
 // Checklist returns selections in item order after explicit confirmation.
 // Unchecking a prerequisite clears its dependents, but rechecking it does not
-// select them automatically. Dependencies apply to terminal and plain-text input.
+// select them automatically. Dependencies apply to TUI and Inline input.
 func Checklist(opts ChecklistOptions) ([]bool, error) {
 	m, err := newChecklistModel(opts)
 	if err != nil {

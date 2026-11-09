@@ -26,7 +26,7 @@ dependency versions.
 
 Upgrades use the same [OpenTofu/Terraform plan-and-apply dashboard](../terminal-ui.md#opentofuterraform-plan-and-apply-dashboard)
 as cluster creation. Review the resource changes before approving; the exact saved
-plan is then applied. Press `p` for plain output or Ctrl-C to request a safe stop.
+plan is then applied. Press Ctrl+O for Inline mode or Ctrl-C to request a safe stop.
 
 ## Options
 

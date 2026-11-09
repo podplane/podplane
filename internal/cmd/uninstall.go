@@ -71,7 +71,7 @@ first if you have not yet logged in.`,
 				return fmt.Errorf("cannot uninstall %q because it is required by: %s. Uninstall those first", name, strings.Join(dependents, ", "))
 			}
 
-			ok, err := tui.Confirm(fmt.Sprintf("Uninstall component %q?", name), uninstallAutoApprove, 0)
+			ok, err := tui.Confirm(cmd.Context(), fmt.Sprintf("Uninstall component %q?", name), uninstallAutoApprove, 0)
 			if err != nil {
 				return err
 			}
