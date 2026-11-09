@@ -31,7 +31,8 @@ Shortcut keys are bold teal; their descriptions are muted. In lists, checklists,
 resource tables, and text panels, press `/`, type a term, then Enter to search.
 Use `n` for the next matching row or line and `N` for the previous one; search
 wraps at either end. Matching is literal and case-insensitive. Esc cancels search
-entry without closing the panel. Search respects the hide-completed filter and
+entry, or clears an active search; press Esc again to close the panel.
+Search persists from Review to Apply. It respects the hide-completed filter and
 never approves or toggles an item. Searching logs pauses following; End resumes it.
 
 ## Configuration wizard

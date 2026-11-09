@@ -444,6 +444,10 @@ func (m *planAndApplyModel) searchKey(key tea.KeyMsg) (bool, tea.Cmd) {
 	if panel {
 		search = &m.panelSearch
 	}
+	if key.String() == "esc" {
+		_, handled, cmd := search.update(key, nil, 0)
+		return handled, cmd
+	}
 	if !search.editing && key.String() != "/" && key.String() != "n" && key.String() != "N" {
 		return false, nil
 	}

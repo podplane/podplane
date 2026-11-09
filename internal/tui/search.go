@@ -49,6 +49,12 @@ func (s *textSearch) update(key tea.KeyMsg, lines []string, current int) (int, b
 		}
 	} else {
 		switch key.String() {
+		case "esc":
+			if s.query == "" {
+				return -1, false, nil
+			}
+			*s = textSearch{}
+			return -1, true, nil
 		case "/":
 			s.input = textinput.New()
 			s.input.Prompt = "/"
@@ -90,6 +96,7 @@ func (s textSearch) view(width int) string {
 	if s.missing {
 		status = " · No matches"
 	}
+	status += Shortcuts(" · `Esc` Clear")
 	return ansi.Truncate("/"+s.query, max(1, width-ansi.StringWidth(status)), "…") + status
 }
 

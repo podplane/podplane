@@ -64,6 +64,35 @@ func TestDashboardSearch(t *testing.T) {
 	}
 }
 
+// TestSearchClear keeps search cancellation separate from closing the panel.
+func TestSearchClear(t *testing.T) {
+	for _, panel := range []bool{false, true} {
+		m := planAndApplyFixture()
+		m.logView, m.followLogs = panel, false
+		m.logs = []string{"server ready"}
+		var model = typeSearch(m, "server")
+		model, _ = model.Update(tfexec.Event{Stage: "Apply"})
+		if !strings.Contains(model.View(), "/server") {
+			t.Fatal("stage transition cleared the search")
+		}
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("replacement")})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if !strings.Contains(model.View(), "/server") || strings.Contains(model.View(), "replacement") {
+			t.Fatal("Esc did not cancel only the new query")
+		}
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		m = model.(planAndApplyModel)
+		if strings.Contains(m.View(), "/server") || m.tableSearch.pattern != nil || m.panelSearch.pattern != nil || m.logView != panel {
+			t.Fatal("clearing search retained highlights or closed the panel")
+		}
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if model.(planAndApplyModel).logView {
+			t.Fatal("Esc without search did not close the panel")
+		}
+	}
+}
+
 // TestPanelSearch checks wrapping, reverse navigation, and pause/resume in each text panel.
 func TestPanelSearch(t *testing.T) {
 	lines := make([]string, 30)
