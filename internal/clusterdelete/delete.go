@@ -73,6 +73,8 @@ type DeleteOptions struct {
 	AutoApprove   bool
 	Confirm       ConfirmFunc
 	Status        StatusFunc
+	// AfterDestroy runs only after all remaining managed instances have terminated.
+	AfterDestroy func(context.Context) error
 	// WaitTimeout is how long to wait for Nstance-managed instances to
 	// terminate after scale-down, and again after direct termination.
 	WaitTimeout time.Duration
@@ -168,14 +170,33 @@ func Delete(ctx context.Context, opts DeleteOptions) error {
 		return err
 	}
 	if len(dangling) == 0 {
+		if opts.AfterDestroy != nil {
+			return opts.AfterDestroy(ctx)
+		}
 		return nil
 	}
 	status(fmt.Sprintf("Found dangling Nstance-managed instances for cluster %q: %s", clusterID, formatInstances(dangling)))
 	ok, err = confirm("Terminate dangling Nstance-managed instances?")
-	if err != nil || !ok {
+	if err != nil {
 		return err
 	}
-	return opts.Provider.Terminate(ctx, dangling)
+	if !ok {
+		return fmt.Errorf("dangling instance cleanup cancelled")
+	}
+	if err := opts.Provider.Terminate(ctx, dangling); err != nil {
+		return err
+	}
+	remaining, err = wait()
+	if err != nil {
+		return err
+	}
+	if len(remaining) != 0 {
+		return fmt.Errorf("instances remain after destroy; storage was not cleaned up")
+	}
+	if opts.AfterDestroy != nil {
+		return opts.AfterDestroy(ctx)
+	}
+	return nil
 }
 
 // parseOutputs extracts the Nstance bucket and each shard's config key from
@@ -195,11 +216,12 @@ func parseOutputs(raw []byte) (string, map[string]string, error) {
 		return "", nil, fmt.Errorf("parse OpenTofu/Terraform outputs: %w", err)
 	}
 	const regenerate = "rerun podplane cluster create --no-apply to regenerate managed .tf files and apply them"
+	// A previous destroy may already have removed the shard outputs.
+	if len(outputs.Shards.Value) == 0 {
+		return outputs.Bucket.Value, map[string]string{}, nil
+	}
 	if outputs.Bucket.Value == "" {
 		return "", nil, fmt.Errorf("missing nstance_bucket output; %s", regenerate)
-	}
-	if len(outputs.Shards.Value) == 0 {
-		return "", nil, fmt.Errorf("missing nstance_shards output; %s", regenerate)
 	}
 	shards := make(map[string]string, len(outputs.Shards.Value))
 	for shard, out := range outputs.Shards.Value {

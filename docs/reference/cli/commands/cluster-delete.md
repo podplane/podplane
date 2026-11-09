@@ -8,9 +8,28 @@ aliases:
 
 ## Overview
 
-Removes deployed infrastructure. For AWS and Google Cloud clusters, Podplane first scales Nstance-managed groups to zero in the shard configs, waits for managed VM instances to terminate, falls back to confirmed direct VM termination if managed instances remain, runs OpenTofu/Terraform destroy, then offers to terminate any Nstance-managed VM instances still tagged/labelled for the cluster. Instances tagged/labelled for the cluster that Nstance does not manage are left alone.
+Starts by allowing you to choose what to remove using a list of checkboxes 
+covering: infrastructure, cluster buckets (names shown together), the
+Terraform-state bucket, generated cluster `.tf` files, and the
+cluster config. All checkboxes are checked by default. Use ↑/↓ and Space to select
+actions, then Tab to **Delete selected** and Enter to confirm. Unchecking an action
+clears dependent actions; they cannot be selected until their prerequisites are
+checked.
 
-The cluster config and generated `.tf` files are left in place.
+Podplane drains Nstance-managed VMs and destroys infrastructure while retaining
+storage. After Nstance servers and workload VMs have terminated, it empties
+selected cluster buckets—including old object versions—and lets Terraform
+delete them. Retained storage and its dependencies stay tracked in state.
+
+The state bucket is deleted only after no managed resources remain. Local files
+are removed last; failures preserve them for recovery. User-owned Terraform files
+are left alone. **Bucket deletion is permanent.**
+
+Podplane holds the OpenTofu/Terraform backend lock throughout teardown. For state
+bucket cleanup, it removes the lock last, then attempts bucket deletion. If another
+client writes to the bucket first, deletion fails without emptying it again.
+Do not bypass or force-unlock an active deletion. Cluster deletion requires the
+default Terraform workspace and a dedicated state bucket.
 
 ```
 podplane cluster delete [flags]
@@ -22,4 +41,4 @@ podplane cluster delete [flags]
 | --- | --- |
 | `-f, --cluster-config string` | Path to the cluster config file (default: `podplane.cluster.jsonc` in the current directory) |
 | `--no-apply` | Validate the config but do not run destroy |
-| `-y, --auto-approve` | Skip confirmation prompts and pass auto-approval to OpenTofu/Terraform |
+| `-y, --auto-approve` | Approve **all** actions, including bucket data, state, generated `.tf` files, and cluster config |

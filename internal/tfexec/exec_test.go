@@ -19,7 +19,7 @@ import (
 )
 
 // TestCLIInvokesTofuWithExpectedArguments verifies the CLI executor uses a tofu
-// executable found on PATH and passes expected apply/destroy/output arguments.
+// executable found on PATH and passes expected init/destroy/output arguments.
 func TestCLIInvokesTofuWithExpectedArguments(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "tofu")
@@ -36,8 +36,8 @@ func TestCLIInvokesTofuWithExpectedArguments(t *testing.T) {
 		t.Fatalf("NewCLI returned error: %v", err)
 	}
 	ctx := context.Background()
-	if err := cli.InitApply(ctx, dir, "backend.tfbackend", true); err != nil {
-		t.Fatalf("InitApply returned error: %v", err)
+	if err := cli.Init(ctx, dir, "backend.tfbackend"); err != nil {
+		t.Fatalf("Init returned error: %v", err)
 	}
 	if err := cli.Destroy(ctx, dir, true); err != nil {
 		t.Fatalf("Destroy returned error: %v", err)
@@ -50,7 +50,7 @@ func TestCLIInvokesTofuWithExpectedArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(raw)
-	for _, want := range []string{"init -backend-config=backend.tfbackend\napply -auto-approve\n", "destroy -auto-approve\n", "output -json\n"} {
+	for _, want := range []string{"init -backend-config=backend.tfbackend\n", "destroy -auto-approve\n", "output -json\n"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("fake tofu log missing %q:\n%s", want, got)
 		}
@@ -271,7 +271,7 @@ func TestCLIProcessHelper(t *testing.T) {
 		os.Exit(2)
 	}
 	if os.Getenv("TEST_PROCESS_STREAM") == "1" {
-		err = cli.InitApply(context.Background(), os.Getenv("TEST_PROCESS_DIR"), "backend.tfbackend", false)
+		err = cli.Destroy(context.Background(), os.Getenv("TEST_PROCESS_DIR"), false)
 	} else {
 		_, err = cli.OutputJSON(context.Background(), os.Getenv("TEST_PROCESS_DIR"))
 	}

@@ -7,6 +7,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"path/filepath"
 	"time"
 
@@ -52,7 +53,7 @@ func newClusterDeleteCmd(c *config.Config) *cobra.Command {
 				return err
 			}
 			cloud := cfg.Cluster.Providers[0]
-			var provider clusterdelete.Provider
+			var provider clusterdelete.CleanupProvider
 			switch cloud.Kind {
 			case "aws":
 				provider, err = aws.New(cmd.Context(), cloud)
@@ -84,30 +85,64 @@ func newClusterDeleteCmd(c *config.Config) *cobra.Command {
 			if err := executor.Init(cmd.Context(), dir, stateBackend.ConfigFile()); err != nil {
 				return err
 			}
-			err = clusterdelete.Delete(cmd.Context(), clusterdelete.DeleteOptions{
-				ClusterConfig: cfg,
-				StackDir:      dir,
-				Executor:      executor,
-				Provider:      provider,
-				AutoApprove:   autoApprove,
-				WaitTimeout:   20 * time.Minute,
-				PollInterval:  15 * time.Second,
-				Confirm: func(message string) (bool, error) {
-					return tui.Confirm(message, autoApprove, 0)
+			if err := executor.CheckDefaultWorkspace(cmd.Context(), dir); err != nil {
+				return err
+			}
+			err = clusterdelete.Teardown(cmd.Context(), clusterdelete.TeardownOptions{
+				Engine:           executor,
+				Cloud:            provider,
+				StateBucketName:  stateBackend.Bucket,
+				StateLockKey:     stateBackend.LockKey(),
+				CheckStateBucket: func(ctx context.Context) error { return stateBackend.Check(ctx, io.Discard) },
+				ConfigPath:       path,
+				Select: func(labels []string) (clusterdelete.Actions, error) {
+					items := make([]tui.ChecklistItem, len(labels))
+					for i, label := range labels {
+						items[i] = tui.ChecklistItem{Label: label, Checked: true}
+						if i > 0 {
+							items[i].Requires = []int{i - 1}
+						}
+					}
+					selected, err := tui.Checklist(tui.ChecklistOptions{
+						Title:         "Podplane · Delete cluster " + cfg.Cluster.ID,
+						Description:   "Unchecked actions keep their data and recovery files.\nDeletion is permanent. Later steps require earlier steps.",
+						Items:         items,
+						ConfirmLabel:  "Delete selected",
+						ConfirmPrompt: "Permanently perform selected actions?",
+						AutoApprove:   autoApprove,
+					})
+					if err != nil {
+						return clusterdelete.Actions{}, err
+					}
+					return clusterdelete.Actions(selected), nil
 				},
-				Status: func(message string) {
-					fmt.Println(message)
+				DeleteOptions: clusterdelete.DeleteOptions{
+					ClusterConfig: cfg,
+					StackDir:      dir,
+					Executor:      executor,
+					Provider:      provider,
+					AutoApprove:   autoApprove,
+					WaitTimeout:   20 * time.Minute,
+					PollInterval:  15 * time.Second,
+					Confirm: func(message string) (bool, error) {
+						// The checklist explicitly approved instance and infrastructure deletion.
+						fmt.Println(message)
+						return true, nil
+					},
+					Status: func(message string) {
+						fmt.Println(message)
+					},
 				},
 			})
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Cluster %q destroy completed. Config and generated .tf files were left in place.\n", cfg.Cluster.ID)
+			fmt.Printf("Selected cleanup actions for cluster %q completed.\n", cfg.Cluster.ID)
 			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "cluster-config", "f", defaultClusterConfigName, "Path to the cluster config file")
 	cmd.Flags().BoolVar(&noApply, "no-apply", false, "Validate config but do not run destroy")
-	cmd.Flags().BoolVarP(&autoApprove, "auto-approve", "y", false, "Skip confirmation prompts and pass auto-approval to OpenTofu/Terraform")
+	cmd.Flags().BoolVarP(&autoApprove, "auto-approve", "y", false, "Approve all cleanup actions, including bucket data, state, generated Terraform files, and cluster config")
 	return cmd
 }

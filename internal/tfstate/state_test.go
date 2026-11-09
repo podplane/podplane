@@ -34,6 +34,7 @@ func TestBackendWriteConfig(t *testing.T) {
 		backend    func() (Backend, error)
 		wantBucket string
 		wantFile   string
+		wantLock   string
 		wantConfig []string
 	}{
 		{
@@ -41,6 +42,7 @@ func TestBackendWriteConfig(t *testing.T) {
 			backend:    cluster(clusterconfig.Provider{Kind: "aws", Account: "123456789012", Region: "us-east-1", Profile: "prod"}),
 			wantBucket: "demo-123456789012-tfstate",
 			wantFile:   "podplane.cluster.tfbackend",
+			wantLock:   "podplane/cluster.tfstate.tflock",
 			wantConfig: []string{`bucket = "demo-123456789012-tfstate"`, `key = "podplane/cluster.tfstate"`, `region = "us-east-1"`, "encrypt = true", "use_lockfile = true", `profile = "prod"`},
 		},
 		{
@@ -48,6 +50,7 @@ func TestBackendWriteConfig(t *testing.T) {
 			backend:    cluster(clusterconfig.Provider{Kind: "google", Project: "demo-project", Region: "australia-southeast1"}),
 			wantBucket: "demo-demo-project-tfstate",
 			wantFile:   "podplane.cluster.tfbackend",
+			wantLock:   "podplane/cluster/default.tflock",
 			wantConfig: []string{`bucket = "demo-demo-project-tfstate"`, `prefix = "podplane/cluster"`},
 		},
 		{
@@ -57,6 +60,7 @@ func TestBackendWriteConfig(t *testing.T) {
 			},
 			wantBucket: "auth-example-com-123456789012-tfstate-c204c854ffe5f35a",
 			wantFile:   "podplane.oidc.tfbackend",
+			wantLock:   "podplane/oidc.tfstate.tflock",
 			wantConfig: []string{`bucket = "auth-example-com-123456789012-tfstate-c204c854ffe5f35a"`, `key = "podplane/oidc.tfstate"`, `region = "us-west-2"`, "use_lockfile = true"},
 		},
 		{
@@ -66,6 +70,7 @@ func TestBackendWriteConfig(t *testing.T) {
 			},
 			wantBucket: "auth-example-com-demo-project-tfstate-c204c854ffe5f35a",
 			wantFile:   "podplane.oidc.tfbackend",
+			wantLock:   "podplane/oidc/default.tflock",
 			wantConfig: []string{`bucket = "auth-example-com-demo-project-tfstate-c204c854ffe5f35a"`, `prefix = "podplane/oidc"`},
 		},
 	}
@@ -77,6 +82,9 @@ func TestBackendWriteConfig(t *testing.T) {
 			}
 			if backend.Bucket != tt.wantBucket {
 				t.Fatalf("Bucket = %q, want %q", backend.Bucket, tt.wantBucket)
+			}
+			if backend.LockKey() != tt.wantLock {
+				t.Fatalf("lock key = %q, want %q", backend.LockKey(), tt.wantLock)
 			}
 			dir := t.TempDir()
 			if err := backend.WriteConfig(dir); err != nil {

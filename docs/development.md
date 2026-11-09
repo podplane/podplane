@@ -25,6 +25,50 @@ workspace/
 
 The commands below assume you are in the `podplane` CLI repository and that the `../vmconfig`, `../components`, and `../templates` repository checkouts exist.
 
+## Local Infrastructure Test Targets
+
+| Target | Purpose |
+| --- | --- |
+| `make demo-cluster-create` | Try the OpenTofu/Terraform plan-and-apply dashboard with disposable local/fake resources. |
+| `make demo-cluster-create-fail` | Try the same `demo-cluster-create` demo with an apply failure. |
+| `make floci-start` | Start Floci - local AWS API emulation - with mocked EC2 (so no emulated VM containers boot). |
+| `make floci-stop` | Stop Floci, preserving its data. |
+| `make floci-destroy` | Stop and remove Floci, permanently deleting its persisted data. |
+
+The demo needs OpenTofu or Terraform, takes about 20 seconds, and cleans up on
+exit. Use `PODPLANE_TF_CMD=terraform` to select Terraform or `ARGS=-auto-approve`
+to skip review. See [TUI controls](reference/cli/terminal-ui.md).
+
+### Floci Setup
+
+Install Podman or Docker with Compose and start its engine. The targets prefer
+Podman; use `FLOCI_RUNNER=docker` on both start and stop to override. Floci listens
+on `localhost:4566`; stop any existing emulator using that port first.
+
+Add to `~/.aws/config`:
+
+```ini
+[profile floci]
+region = us-east-1
+output = json
+endpoint_url = http://localhost:4566
+aws_access_key_id = test
+aws_secret_access_key = test
+s3 =
+    addressing_style = path
+```
+
+Run `podplane cluster create`, select AWS, and use profile `floci`. 
+
+If you've made changes to the Podplane OpenTofu/Terraform Provider, and want to
+test unreleased provider changes, export `PODPLANE_TF_PROVIDER_DIR="$PWD/bin"` and
+OpenTofu/Terraform will use the binary created by `make build`.
+
+The pinned Floci image runs offline once cached. Starts reuse the container; after
+editing `scripts/compose.floci.yaml`, apply it with
+`podman compose -p podplane-floci -f scripts/compose.floci.yaml up -d --force-recreate`
+(or `docker compose`). Neither Floci nor the demo tests a working cluster.
+
 ## Local Cluster Development Flow
 
 Before the first `local start`, download dependencies using the local `components`, `vmconfig`, and `templates` manifests:

@@ -24,10 +24,14 @@ by the generated module paths and provider lock instead of upgrading them. Use
 `cluster upgrade` only when intentionally moving the cluster to newer
 dependency versions.
 
+Upgrades use the same [OpenTofu/Terraform plan-and-apply dashboard](../terminal-ui.md#opentofuterraform-plan-and-apply-dashboard)
+as cluster creation. Review the resource changes before approving; the exact saved
+plan is then applied. Press `p` for plain output or Ctrl-C to request a safe stop.
+
 ## Options
 
 | Flag | Description |
 | --- | --- |
 | `-f, --cluster-config string` | Path to the cluster config file (default: `podplane.cluster.jsonc` in the current directory) |
 | `--no-apply` | Upgrade generated files and the provider lock but do not run apply |
-| `-y, --auto-approve` | Skip confirmation and pass auto-approval to OpenTofu/Terraform |
+| `-y, --auto-approve` | Skip confirmation and approve the saved infrastructure plan |

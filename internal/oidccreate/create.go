@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/podplane/podplane/internal/oidcconfig"
@@ -74,16 +75,14 @@ func Run(ctx context.Context, opts Options) (string, error) {
 	if err := backend.Ensure(ctx, os.Stderr, confirm); err != nil {
 		return "", err
 	}
-	ok, err := confirm("Apply generated OpenTofu/Terraform changes?")
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", fmt.Errorf("apply cancelled")
-	}
 	applyCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
 	defer cancel()
-	if err := executor.InitApply(applyCtx, dir, backend.ConfigFile(), opts.AutoApprove); err != nil {
+	if err := tui.RunPlanAndApply(applyCtx, tui.PlanAndApplyOptions{
+		Title: "Podplane · Create OIDC server", Subtitle: cfg.IssuerURL(),
+		Resume: "podplane oidc create -f '" + strings.ReplaceAll(opts.ConfigPath, "'", "'\\''") + "'", AutoApprove: opts.AutoApprove,
+	}, func(ctx context.Context, emit func(tfexec.Event), review func(tfexec.Plan) (bool, error)) error {
+		return executor.PlanAndApply(ctx, dir, backend.ConfigFile(), emit, review)
+	}); err != nil {
 		return "", err
 	}
 	if cfg.OIDC.Domain.Provider.Kind == "" || cfg.OIDC.Domain.Zone == "" {

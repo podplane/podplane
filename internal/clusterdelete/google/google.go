@@ -15,6 +15,7 @@ import (
 	"cloud.google.com/go/storage"
 	compute "google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
+	"google.golang.org/api/iterator"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/clusterdelete"
@@ -51,6 +52,9 @@ func (p *Provider) Close() error {
 func (p *Provider) UpdateObject(ctx context.Context, bucket, key string, update func([]byte) ([]byte, bool, error)) error {
 	obj := p.storage.Bucket(bucket).Object(key)
 	r, err := obj.NewReader(ctx)
+	if errors.Is(err, storage.ErrObjectNotExist) || errors.Is(err, storage.ErrBucketNotExist) {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("get gs://%s/%s: %w", bucket, key, err)
 	}
@@ -78,7 +82,17 @@ func (p *Provider) UpdateObject(ctx context.Context, bucket, key string, update 
 // ManagedInstances lists Compute Engine instances in the project labelled
 // nstance-cluster-id=clusterID and nstance-managed=true.
 func (p *Provider) ManagedInstances(ctx context.Context, clusterID string) ([]clusterdelete.Instance, error) {
-	filter := fmt.Sprintf(`labels.nstance-cluster-id = "%s" AND labels.nstance-managed = "true"`, clusterID)
+	return p.instances(ctx, clusterID, "nstance-managed")
+}
+
+// ServerInstances lists surviving Terraform-managed Nstance servers.
+func (p *Provider) ServerInstances(ctx context.Context, clusterID string) ([]clusterdelete.Instance, error) {
+	return p.instances(ctx, clusterID, "nstance-tf")
+}
+
+// instances finds cluster members with the requested role label across all zones.
+func (p *Provider) instances(ctx context.Context, clusterID, label string) ([]clusterdelete.Instance, error) {
+	filter := fmt.Sprintf(`labels.nstance-cluster-id = "%s" AND labels.%s = "true"`, clusterID, label)
 	var out []clusterdelete.Instance
 	err := p.compute.Instances.AggregatedList(p.project).Filter(filter).Pages(ctx, func(page *compute.InstanceAggregatedList) error {
 		for _, scoped := range page.Items {
@@ -113,4 +127,39 @@ func (p *Provider) Terminate(ctx context.Context, instances []clusterdelete.Inst
 		}
 	}
 	return nil
+}
+
+// EmptyBucket removes all live and archived object generations, respecting holds.
+func (p *Provider) EmptyBucket(ctx context.Context, name string) error {
+	return p.emptyBucket(ctx, name, "", 0)
+}
+
+// emptyBucket removes object generations except an optional owned lock generation.
+func (p *Provider) emptyBucket(ctx context.Context, name, lockKey string, lockGeneration int64) error {
+	bucket := p.storage.Bucket(name)
+	objects := bucket.Objects(ctx, &storage.Query{Versions: true})
+	for {
+		object, err := objects.Next()
+		if err == iterator.Done || errors.Is(err, storage.ErrBucketNotExist) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("list bucket %s: %w", name, err)
+		}
+		if object.Name == lockKey && object.Generation == lockGeneration {
+			continue
+		}
+		if err := bucket.Object(object.Name).Generation(object.Generation).Delete(ctx); err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
+			return fmt.Errorf("delete gs://%s/%s: %w", name, object.Name, err)
+		}
+	}
+}
+
+// DeleteBucket removes an empty bucket; Terraform owns cluster bucket deletion.
+func (p *Provider) DeleteBucket(ctx context.Context, name string) error {
+	err := p.storage.Bucket(name).Delete(ctx)
+	if errors.Is(err, storage.ErrBucketNotExist) {
+		return nil
+	}
+	return err
 }

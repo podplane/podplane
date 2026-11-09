@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
@@ -73,20 +74,18 @@ func newClusterUpgradeCmd(c *config.Config) *cobra.Command {
 			if noApply {
 				return nil
 			}
-			ok, err := tui.Confirm("Apply upgraded OpenTofu/Terraform dependencies?", autoApprove, 0)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return fmt.Errorf("apply cancelled")
-			}
 			applyCtx, applyCancel := context.WithTimeout(cmd.Context(), 2*time.Hour)
 			defer applyCancel()
-			return executor.WithCLIConfig(configuration.CLIConfigPath).InitApply(applyCtx, dir, stateBackend.ConfigFile(), autoApprove)
+			return tui.RunPlanAndApply(applyCtx, tui.PlanAndApplyOptions{
+				Title: "Podplane · Upgrade cluster", Subtitle: cfg.Cluster.ID,
+				Resume: "podplane cluster upgrade -f '" + strings.ReplaceAll(path, "'", "'\\''") + "'", AutoApprove: autoApprove,
+			}, func(ctx context.Context, emit func(tfexec.Event), review func(tfexec.Plan) (bool, error)) error {
+				return executor.WithCLIConfig(configuration.CLIConfigPath).PlanAndApply(ctx, dir, stateBackend.ConfigFile(), emit, review)
+			})
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "cluster-config", "f", defaultClusterConfigName, "Path to the cluster config file")
 	cmd.Flags().BoolVar(&noApply, "no-apply", false, "Upgrade generated files but do not run apply")
-	cmd.Flags().BoolVarP(&autoApprove, "auto-approve", "y", false, "Skip confirmation prompts and pass auto-approval to OpenTofu/Terraform")
+	cmd.Flags().BoolVarP(&autoApprove, "auto-approve", "y", false, "Skip confirmation prompts and approve the saved infrastructure plan")
 	return cmd
 }

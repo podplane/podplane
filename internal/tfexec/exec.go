@@ -71,7 +71,7 @@ func (c *CLI) Platform(ctx context.Context) (string, error) {
 	cmd := exec.Command(c.binary, "version", "-json")
 	var out bytes.Buffer
 	cmd.Stdout = &out
-	if err := runProcess(ctx, cmd); err != nil {
+	if err := runProcess(ctx, cmd, nil); err != nil {
 		return "", fmt.Errorf("read OpenTofu/Terraform platform: %w", err)
 	}
 	var version struct {
@@ -91,19 +91,6 @@ func (c *CLI) WithCLIConfig(path string) *CLI {
 	configured := *c
 	configured.cliConfigFile = path
 	return &configured
-}
-
-// InitApply initializes the stack in dir against the remote-state backend
-// settings in the backendConfig file, then applies it.
-func (c *CLI) InitApply(ctx context.Context, dir, backendConfig string, autoApprove bool) error {
-	if err := c.Init(ctx, dir, backendConfig); err != nil {
-		return err
-	}
-	args := []string{"apply"}
-	if autoApprove {
-		args = append(args, "-auto-approve")
-	}
-	return c.run(ctx, dir, args...)
 }
 
 // Destroy runs OpenTofu/Terraform destroy in dir.
@@ -130,7 +117,7 @@ func (c *CLI) OutputJSON(ctx context.Context, dir string) ([]byte, error) {
 	}
 	var out bytes.Buffer
 	cmd.Stdout = &out
-	if err := runProcess(ctx, cmd); err != nil {
+	if err := runProcess(ctx, cmd, nil); err != nil {
 		return nil, fmt.Errorf("run OpenTofu/Terraform output -json in %s: %w", dir, err)
 	}
 	return out.Bytes(), nil
@@ -152,7 +139,7 @@ func (c *CLI) run(ctx context.Context, dir string, args ...string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := runProcess(ctx, cmd); err != nil {
+	if err := runProcess(ctx, cmd, nil); err != nil {
 		return fmt.Errorf("run OpenTofu/Terraform %v in %s: %w", args, dir, err)
 	}
 	return nil

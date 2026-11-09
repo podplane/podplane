@@ -7,6 +7,7 @@ package aws
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 
 	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/clusterdelete"
@@ -43,6 +45,10 @@ func New(ctx context.Context, provider clusterconfig.Provider) (*Provider, error
 // UpdateObject rewrites an S3 object, conditional on its ETag.
 func (p *Provider) UpdateObject(ctx context.Context, bucket, key string, update func([]byte) ([]byte, bool, error)) error {
 	got, err := p.s3.GetObject(ctx, &s3.GetObjectInput{Bucket: awssdk.String(bucket), Key: awssdk.String(key)})
+	var apiError smithy.APIError
+	if errors.As(err, &apiError) && (apiError.ErrorCode() == "NoSuchKey" || apiError.ErrorCode() == "NoSuchBucket") {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("get s3://%s/%s: %w", bucket, key, err)
 	}
@@ -71,9 +77,19 @@ func (p *Provider) UpdateObject(ctx context.Context, bucket, key string, update 
 // ManagedInstances lists EC2 instances tagged nstance:cluster-id=clusterID
 // and nstance:managed=true that have not terminated.
 func (p *Provider) ManagedInstances(ctx context.Context, clusterID string) ([]clusterdelete.Instance, error) {
+	return p.instances(ctx, clusterID, "nstance:managed", "true")
+}
+
+// ServerInstances lists surviving Terraform-managed Nstance servers.
+func (p *Provider) ServerInstances(ctx context.Context, clusterID string) ([]clusterdelete.Instance, error) {
+	return p.instances(ctx, clusterID, "nstance:component", "server")
+}
+
+// instances finds non-terminated cluster members with the requested role tag.
+func (p *Provider) instances(ctx context.Context, clusterID, tag, value string) ([]clusterdelete.Instance, error) {
 	filters := []ec2types.Filter{
 		{Name: awssdk.String("tag:nstance:cluster-id"), Values: []string{clusterID}},
-		{Name: awssdk.String("tag:nstance:managed"), Values: []string{"true"}},
+		{Name: awssdk.String("tag:" + tag), Values: []string{value}},
 		{Name: awssdk.String("instance-state-name"), Values: []string{"pending", "running", "stopping", "stopped", "shutting-down"}},
 	}
 	var out []clusterdelete.Instance

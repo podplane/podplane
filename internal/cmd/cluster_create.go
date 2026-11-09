@@ -176,21 +176,20 @@ func newClusterCreateCmd(c *config.Config) *cobra.Command {
 			if err := stateBackend.Ensure(cmd.Context(), cmd.ErrOrStderr(), confirm); err != nil {
 				return err
 			}
-			ok, err := confirm("Apply generated OpenTofu/Terraform changes?")
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return fmt.Errorf("apply cancelled")
-			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Hour)
 			defer cancel()
-			return executor.WithCLIConfig(configuration.CLIConfigPath).InitApply(ctx, dir, stateBackend.ConfigFile(), autoApprove)
+			provider := cfg.Cluster.Providers[0]
+			return tui.RunPlanAndApply(ctx, tui.PlanAndApplyOptions{
+				Title: "Podplane · Create cluster", Subtitle: cfg.Cluster.ID + " · " + provider.Kind + " · " + provider.Region,
+				Resume: "podplane cluster create -f '" + strings.ReplaceAll(path, "'", "'\\''") + "'", AutoApprove: autoApprove,
+			}, func(ctx context.Context, emit func(tfexec.Event), review func(tfexec.Plan) (bool, error)) error {
+				return executor.WithCLIConfig(configuration.CLIConfigPath).PlanAndApply(ctx, dir, stateBackend.ConfigFile(), emit, review)
+			})
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "cluster-config", "f", defaultClusterConfigName, "Path to the cluster config file")
 	cmd.Flags().BoolVar(&noApply, "no-apply", false, "Generate OpenTofu/Terraform files but do not run apply")
-	cmd.Flags().BoolVarP(&autoApprove, "auto-approve", "y", false, "Skip confirmation prompts and pass auto-approval to OpenTofu/Terraform")
+	cmd.Flags().BoolVarP(&autoApprove, "auto-approve", "y", false, "Skip confirmation prompts and approve the saved infrastructure plan")
 	return cmd
 }
 

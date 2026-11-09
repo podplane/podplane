@@ -37,10 +37,14 @@ podplane oidc create [flags]
 
 Before generating Terraform for an apply, the command performs the same read-only remote-state access check as [`cluster create`](cluster-create.md). It stops early on authentication, permission, or existing-bucket safety failures, but allows a missing bucket to be created later after confirmation. `--no-apply` skips the check. Google application-credential reauthentication failures include instructions for refreshing the credentials.
 
+OIDC creation uses the shared [OpenTofu/Terraform plan-and-apply dashboard](../terminal-ui.md#opentofuterraform-plan-and-apply-dashboard)
+for plan review, resource details, logs, and apply progress. When invoked from the cluster
+wizard, OIDC creation completes its own review/apply flow before cluster creation resumes.
+
 ## Options
 
 | Flag | Description |
 | --- | --- |
 | `-f, --oidc-config string` | Path to the OIDC config file (default: `podplane.oidc.jsonc` in the current directory) |
 | `--no-apply` | Generate OpenTofu/Terraform files but do not run apply |
-| `-y, --auto-approve` | Skip confirmation prompts and pass auto-approval to OpenTofu/Terraform |
+| `-y, --auto-approve` | Skip confirmation prompts and approve the saved infrastructure plan |

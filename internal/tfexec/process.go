@@ -26,7 +26,11 @@ const shutdownGrace = 30 * time.Second
 // handling is scoped to execution so other CLI commands retain their own signal
 // behavior. A separate group prevents a terminal interrupt from reaching the
 // engine twice (once from the terminal and once from cancellation).
-func runProcess(ctx context.Context, cmd *exec.Cmd) error {
+// A nil notice writes shutdown warnings to stderr.
+func runProcess(ctx context.Context, cmd *exec.Cmd, notice func(string)) error {
+	if notice == nil {
+		notice = func(message string) { fmt.Fprintln(os.Stderr, message) }
+	}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := ctx.Err(); err != nil {
@@ -56,7 +60,7 @@ func runProcess(ctx context.Context, cmd *exec.Cmd) error {
 	case <-ctx.Done():
 		// Signal only the engine first: it coordinates provider shutdown and
 		// releases the state lock. Killing providers here can lose state.
-		fmt.Fprintf(os.Stderr, "Stopping OpenTofu/Terraform; waiting up to %s for cleanup...\n", shutdownGrace)
+		notice(fmt.Sprintf("Stopping OpenTofu/Terraform; waiting up to %s for cleanup...", shutdownGrace))
 		_ = cmd.Process.Signal(os.Interrupt)
 	}
 	timer := time.NewTimer(shutdownGrace)
@@ -64,7 +68,7 @@ func runProcess(ctx context.Context, cmd *exec.Cmd) error {
 	select {
 	case <-done: //nolint:errcheck // Cancellation is returned instead of the engine's exit status.
 	case <-timer.C:
-		fmt.Fprintln(os.Stderr, "OpenTofu/Terraform did not stop; killing its process group. Check remote state and locks before retrying.")
+		notice("OpenTofu/Terraform did not stop; killing its process group. Check remote state and locks before retrying.")
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-done //nolint:errcheck // Reap the engine; cancellation supersedes its exit status.
 	}

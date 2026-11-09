@@ -46,7 +46,9 @@ else ifeq ($(GOOS),darwin)
 	endif
 endif
 
-.PHONY: help setup fmt lint precommit test build build-cli build-provider clean truster-schema check-truster-schema
+.PHONY: help setup fmt lint precommit test build build-cli build-provider clean truster-schema check-truster-schema demo-cluster-create demo-cluster-create-fail floci-start floci-stop floci-destroy
+
+FLOCI_RUNNER ?=
 
 help: ## Show available targets
 	@echo "Usage: make <target>"
@@ -83,6 +85,7 @@ precommit: ## Check formatting and run linters (read-only)
 	fi
 	@bash -n scripts/tf-provider-release.sh
 	@bash -n scripts/truster-schema.sh
+	@bash -n scripts/floci.sh
 	@$(MAKE) lint
 
 truster-schema: ## Update the pinned Truster config schema copy
@@ -94,6 +97,21 @@ check-truster-schema: ## Check the Truster config schema copy matches the pinned
 test: ## Run tests with race detector
 	go test -v -race ./...
 	go test -v -race -ldflags '-X $(BUILDVARS_PKG).buildVersion=v0.10.2' ./internal/tfdeps -run TestReleaseProviderSelection
+
+demo-cluster-create: ## Try the cluster creation TUI locally
+	@go run ./scripts/demo-cluster-create $(ARGS)
+
+demo-cluster-create-fail: ## Try the cluster creation TUI with an apply failure
+	@go run ./scripts/demo-cluster-create $(ARGS) -fail
+
+floci-start: ## Start local AWS emulation (Podman first; FLOCI_RUNNER=docker to override)
+	@FLOCI_RUNNER="$(FLOCI_RUNNER)" bash scripts/floci.sh start
+
+floci-stop: ## Stop local AWS emulation without deleting data
+	@FLOCI_RUNNER="$(FLOCI_RUNNER)" bash scripts/floci.sh stop
+
+floci-destroy: ## Stop and remove local AWS emulation, permanently deleting its data
+	@FLOCI_RUNNER="$(FLOCI_RUNNER)" bash scripts/floci.sh destroy
 
 build: build-cli build-provider ## Build the CLI and Terraform provider binaries
 

@@ -33,13 +33,35 @@ Before preparing dependencies or generating Terraform for an apply, the command 
 
 If Google reports expired application credentials or `invalid_rapt`, run `gcloud auth application-default login` and retry. This refreshes the application credentials used by Podplane, not just the separate `gcloud` CLI login. If `GOOGLE_APPLICATION_CREDENTIALS` is set, refresh the credentials referenced by that variable instead.
 
+## Review and apply progress
+
+Podplane initialises the stack, saves a plan, and asks you to review it before
+applying that exact plan. Both OpenTofu and Terraform use `-json`
+event streams. A plan with no changes skips apply. Saved plans are kept in a
+private temporary directory and removed on exit.
+
+See the [OpenTofu/Terraform plan-and-apply dashboard](../terminal-ui.md#opentofuterraform-plan-and-apply-dashboard) for the resource table,
+approval controls, log navigation, progress display, and plain-output mode.
+
+Ctrl-C requests a safe stop and waits for engine/state cleanup. Cancellation or
+failure does not roll back already-applied changes. Inspect diagnostics, including
+any state recovery instructions, before rerunning to generate a new plan. A state
+change by another operation between plan and apply causes the saved plan to be
+rejected; Podplane never silently replans after approval. Moves, imports, deferred
+changes, and unknown action types currently require manual engine review instead
+of being omitted from approval.
+
+If the wizard creates a new OIDC server, it has its own review and
+approval flow. Cancelling the subsequent cluster apply does not remove the
+OIDC server or an already-created state bucket. Successful apply means infrastructure was applied, not that cluster readiness checks have passed.
+
 ## Options
 
 | Flag | Description |
 | --- | --- |
 | `-f, --cluster-config string` | Path to the cluster config file (default: `podplane.cluster.jsonc` in the current directory) |
 | `--no-apply` | Generate OpenTofu/Terraform files but do not run apply |
-| `-y, --auto-approve` | Skip confirmation prompts and pass auto-approval to OpenTofu/Terraform |
+| `-y, --auto-approve` | Skip confirmation prompts and approve the saved infrastructure plan |
 
 Provider installation is restricted to the shared filesystem mirror through
 `deps/tf/podplane.tfrc` in the dependency cache. No provider, module, or CLI

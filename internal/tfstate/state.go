@@ -157,6 +157,14 @@ func (b Backend) ConfigFile() string {
 	return "podplane." + b.Name + ".tfbackend"
 }
 
+// LockKey returns the engine's lock object for this stack's default workspace.
+func (b Backend) LockKey() string {
+	if b.Kind == "gcs" {
+		return "podplane/" + b.Name + "/default.tflock"
+	}
+	return "podplane/" + b.Name + ".tfstate.tflock"
+}
+
 // WriteConfig writes the non-secret backend settings consumed by tofu init to
 // the file named by ConfigFile in dir.
 func (b Backend) WriteConfig(dir string) error {
