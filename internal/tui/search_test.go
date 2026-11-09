@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/cellbuf"
 	"github.com/muesli/termenv"
 
 	"github.com/podplane/podplane/internal/tfexec"
@@ -198,5 +199,51 @@ func TestSearchStyledText(t *testing.T) {
 	view := ansi.Strip(m.View())
 	if !strings.Contains(view, "After") || strings.Contains(view, "[1m") || strings.Contains(view, "[0m") {
 		t.Fatalf("search leaked ANSI formatting into text:\n%s", view)
+	}
+}
+
+// TestSearchRowBackground keeps selection colour across matches and trailing spaces.
+func TestSearchRowBackground(t *testing.T) {
+	profile, dark := lipgloss.ColorProfile(), lipgloss.HasDarkBackground()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	lipgloss.SetHasDarkBackground(true)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(profile)
+		lipgloss.SetHasDarkBackground(dark)
+	})
+	for _, panel := range []bool{false, true} {
+		m := planAndApplyFixture()
+		needle, width := "> module.cluster", 74
+		suffix := "Replace"
+		if panel {
+			m.logView, m.followLogs = true, false
+			m.logs = []string{"prefix server middle server suffix"}
+			needle, width = "prefix server", 68
+			suffix = "middle server suffix"
+		}
+		m = typeSearch(m, "server").(planAndApplyModel)
+		found := false
+		for _, line := range strings.Split(m.View(), "\n") {
+			start := strings.Index(ansi.Strip(line), needle)
+			if start < 0 {
+				continue
+			}
+			found = true
+			if !strings.Contains(ansi.Strip(line), suffix) {
+				t.Fatalf("panel=%t: search truncated the row: %q", panel, line)
+			}
+			x := ansi.StringWidth(ansi.Strip(line)[:start])
+			cells := cellbuf.NewBuffer(80, 1)
+			cellbuf.SetContent(cells, line)
+			for column := x; column < x+width; column++ {
+				cell := cells.Cell(column, 0)
+				if cell == nil || cell.Style.Bg == nil || cell.Style.Bg != cells.Cell(x, 0).Style.Bg {
+					t.Fatalf("panel=%t: selection background missing at column %d: %#v; %q", panel, column, cell, line)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("panel=%t: selected search result missing", panel)
+		}
 	}
 }

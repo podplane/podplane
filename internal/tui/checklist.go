@@ -250,7 +250,7 @@ func (m checklistModel) View() string {
 		if m.focus == 0 && m.selected == i {
 			line = primary.Render(line)
 		}
-		lines = append(lines, m.search.highlight(line))
+		lines = append(lines, m.search.highlight(line, lipgloss.NewStyle()))
 	}
 	cancel, proceed := "[ Cancel ]", "[ "+m.opts.ConfirmLabel+" ]"
 	if m.focus == 1 {

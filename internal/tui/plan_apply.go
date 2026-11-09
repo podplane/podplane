@@ -917,11 +917,12 @@ func (m planAndApplyModel) View() string {
 		}
 		visible := append([]string(nil), lines[start:end]...)
 		for i, line := range visible {
-			visible[i] = m.panelSearch.highlight(line)
+			rowStyle := lipgloss.NewStyle()
 			if m.panelSearch.query != "" && !m.panelSearch.missing && start+i == m.panelSearch.position {
-				visible[i] = lipgloss.NewStyle().Width(w - 8).
-					Background(lipgloss.AdaptiveColor{Light: "#DCEEEA", Dark: "#153D43"}).Render(visible[i])
+				rowStyle = rowStyle.Width(w - 8).
+					Background(lipgloss.AdaptiveColor{Light: "#DCEEEA", Dark: "#153D43"})
 			}
+			visible[i] = m.panelSearch.highlight(line, rowStyle)
 		}
 		if m.logView && m.selection != nil {
 			s := m.selection
@@ -1095,7 +1096,7 @@ func (m planAndApplyModel) View() string {
 			rowStyle = rowStyle.Foreground(ColorSecondary).Bold(true).
 				Background(lipgloss.AdaptiveColor{Light: "#DCEEEA", Dark: "#153D43"})
 		}
-		b.WriteString(rowStyle.Render(m.tableSearch.highlight(line)) + "\n")
+		b.WriteString(m.tableSearch.highlight(line, rowStyle) + "\n")
 	}
 	for i := end - start; i < n; i++ {
 		if i == 0 && m.hideCompleted && (m.stage == "Apply" || m.opts.Destroy) {

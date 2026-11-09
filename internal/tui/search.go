@@ -93,15 +93,16 @@ func (s textSearch) view(width int) string {
 	return ansi.Truncate("/"+s.query, max(1, width-ansi.StringWidth(status)), "…") + status
 }
 
-// highlight accents literal matches while preserving the line's existing ANSI styles.
-func (s textSearch) highlight(line string) string {
+// highlight accents literal matches while preserving the row style across resets.
+func (s textSearch) highlight(line string, base lipgloss.Style) string {
+	line = base.Render(line)
 	if s.pattern == nil {
 		return line
 	}
 	plain := ansi.Strip(line)
 	var b strings.Builder
 	last := 0
-	style := lipgloss.NewStyle().Bold(true).Underline(true).Foreground(ColorSecondary)
+	style := base.UnsetWidth().Inline(true).Bold(true).Underline(true).Foreground(ColorSecondary)
 	for _, match := range s.pattern.FindAllStringIndex(plain, -1) {
 		from, to := ansi.StringWidth(plain[:match[0]]), ansi.StringWidth(plain[:match[1]])
 		b.WriteString(ansi.Cut(line, last, from))
