@@ -79,7 +79,7 @@ func interpolateEnvoyIngress(records []*datafile.Record, cfg *clusterconfig.Clus
 				"metadata": map[string]any{
 					"name":      "platform-envoy-gateway-ingress-certificates",
 					"namespace": "platform-envoy-gateway",
-					"uid":       envoyResourceUID(envoySPCKey),
+					"uid":       seedResourceUID(envoySPCKey),
 					"annotations": map[string]any{
 						"meta.helm.sh/release-name":      "platform-envoy-gateway",
 						"meta.helm.sh/release-namespace": "platform-envoy-gateway",
@@ -335,7 +335,7 @@ func envoySDSSecretRecord(domain string, revision int64, leaderID string, nodeCe
 			"name":            bundle,
 			"namespace":       "platform-envoy-gateway",
 			"resourceVersion": strconv.FormatInt(revision, 10),
-			"uid":             envoyResourceUID(domain),
+			"uid":             seedResourceUID(domain),
 			"annotations": map[string]any{
 				"meta.helm.sh/release-name":      "platform-envoy-gateway",
 				"meta.helm.sh/release-namespace": "platform-envoy-gateway",
@@ -393,8 +393,8 @@ func envoyListenerSuffix(domain string) string {
 	return name + "-" + hex.EncodeToString(sum[:])[:8]
 }
 
-// envoyResourceUID returns a stable UID for a synthesized ingress resource.
-func envoyResourceUID(name string) string {
+// seedResourceUID returns a stable UID for a resource synthesized into a seed.
+func seedResourceUID(name string) string {
 	sum := sha256.Sum256([]byte("podplane-envoy-sds-secret:" + name))
 	h := hex.EncodeToString(sum[:16])
 	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]

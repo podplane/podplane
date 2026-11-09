@@ -124,6 +124,10 @@ func Prepare(opts SnapshotOptions) (*PreparedSeed, error) {
 	if err != nil {
 		return nil, err
 	}
+	records, err = interpolateSecretsProviders(records, cluster)
+	if err != nil {
+		return nil, err
+	}
 	records, err = interpolateEnvoyIngress(records, cluster, nodeCertificate)
 	if err != nil {
 		return nil, err
