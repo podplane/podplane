@@ -15,7 +15,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/google/uuid"
@@ -27,7 +27,7 @@ import (
 const cloudflareCredentialPlaceholder = "{\n  \"AccountTag\": \"<Cloudflare account ID>\",\n  \"TunnelSecret\": \"<base64-encoded tunnel secret>\",\n  \"TunnelID\": \"<tunnel UUID>\"\n}"
 
 const cloudflareTunnelDocsURL = "https://developers.cloudflare.com/tunnel/features/locally-managed-tunnels/"
-const cloudflareTunnelDescription = "Using Cloudflare Tunnels requires a \"locally managed\" tunnel, with its credentials JSON stored in a cloud secret. This lets Podplane dynamically configure different routes for running nodes and the sleep/wake proxy when cluster sleep is enabled."
+const cloudflareTunnelDescription = "Using Cloudflare Tunnels requires a \"locally managed\" tunnel, with its credentials JSON stored in a cloud secret. This lets Podplane dynamically configure different routes for running nodes and the sleep/wake proxy when cluster sleep is enabled. See:"
 
 // cloudflareCredentials is the JSON credentials file for a locally managed tunnel.
 type cloudflareCredentials struct {
@@ -259,6 +259,10 @@ func (m cloudflareForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			switch msg.String() {
+			case "esc":
+				m.editor.SetValue("")
+				m.state, m.notice = "manual", "Secret creation skipped. Enter the tunnel UUID; provision tunnel-credentials separately before the tunnel can connect."
+				return m, nil
 			case "e":
 				m.state = "edit"
 				return m, m.editor.Focus()
@@ -303,7 +307,7 @@ func (m cloudflareForm) View() string {
 	case "edit":
 		body, help = "Secret visible while editing\n"+m.editor.View(), "Ctrl-S/Esc: review · Ctrl-C: cancel"
 	case "review":
-		help = "Paste: replace · e: edit (reveals secret)\nEnter: create secret · Ctrl-C: cancel"
+		help = "Paste: replace · e: edit (reveals secret)\nEnter: create secret · Esc: skip creation · Ctrl-C: cancel"
 		if strings.TrimSpace(m.editor.Value()) == "" {
 			body = "Paste the credentials JSON from cloudflared tunnel create (not a token).\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(cloudflareCredentialPlaceholder)
 		} else if value, err := parseCloudflareCredentials(m.editor.Value()); err == nil {

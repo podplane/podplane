@@ -493,6 +493,9 @@ func TestConfigFormNetworkingSelection(t *testing.T) {
 	if form.fields[form.index].label != "NAT" {
 		t.Fatal("IP mode should be followed by NAT")
 	}
+	if form.input.Value() != "Cloud-provider NAT" {
+		t.Fatalf("default NAT selection = %q", form.input.Value())
+	}
 	press(tea.KeyEnter)
 	if form.fields[form.index].label != "VPC IPv4 CIDR" {
 		t.Fatal("yes should show advanced networking")

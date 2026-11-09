@@ -31,8 +31,11 @@ func TestWizardNetworking(t *testing.T) {
 				if choices := m.fields[indexForField(t, m, "IP mode")].choices; len(choices) != 1 || choices[0] != "Dual-stack" {
 					t.Fatalf("IP mode choices = %v", choices)
 				}
-				if managedNAT {
-					set("NAT", "Cloud-provider NAT")
+				if choices := m.fields[indexForField(t, m, "NAT")].choices; choices[0] != "Cloud-provider NAT" {
+					t.Fatalf("NAT choices = %v", choices)
+				}
+				if !managedNAT {
+					set("NAT", "Nstance NAT")
 				}
 				if tunnel {
 					m.index = indexForField(t, m, "What do you want to use for Kubernetes API access and cluster ingress?")

@@ -36,7 +36,7 @@ If Google reports expired application credentials or `invalid_rapt`, run `gcloud
 ## Networking and Cloudflare Tunnels
 
 No tunnel (the default) uses a cloud NLB for cluster ingress and Kubernetes API
-traffic. Networking defaults to dual-stack and Nstance NAT, with cloud-provider
+traffic. Networking defaults to dual-stack and cloud-provider NAT, with Nstance
 NAT available. Changing LB/tunnel, IP versions, or NAT mode requires recreating
 the cluster.
 
@@ -47,8 +47,8 @@ public TLS, so DNS and ACME questions are skipped when Cloudflare Tunnels is use
 
 The wizard reuses `tunnel-credentials` or asks for credentials JSON to save after
 confirmation, even with `--no-apply`. Review masks the secret; editing reveals it.
-If lookup is skipped or unavailable, enter the UUID and provision the secret
-separately. Cancelling does not remove saved secrets.
+Press Esc to skip lookup or creation, enter the UUID, and provision the secret
+separately before the tunnel connects. Cancelling does not remove saved secrets.
 
 ## Review and apply progress
 

@@ -13,7 +13,7 @@ func configureNetworking(cfg *clusterconfig.ClusterConfig, nat string) {
 	cfg.Cluster.Kubernetes.ClusterCIDR = []string{"100.64.0.0/10", "fd64::/48"}
 	cfg.Cluster.Kubernetes.ServiceCIDR = []string{"198.18.0.0/15", "fdc6::/108"}
 	cfg.Cluster.NAT = &clusterconfig.NAT{Mode: "provider"}
-	if nat != "Cloud-provider NAT" {
+	if nat == "Nstance NAT" {
 		arch, instance := "arm64", "t4g.small"
 		ladder := []string{"t4g.small", "t4g.medium", "t4g.large"}
 		if provider.Kind == "google" {

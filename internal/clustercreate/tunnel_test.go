@@ -35,6 +35,15 @@ func TestTunnelSelection(t *testing.T) {
 	}
 	for _, choice := range []string{m.fields[m.index].value, "Cloudflare Tunnels", "Cloud load balancer (NLB)"} {
 		m.input.SetValue(choice)
+		view := m.View()
+		for _, text := range []string{"locally managed", "developers.cloudflare.com"} {
+			if strings.Contains(view, text) != (choice == "Cloudflare Tunnels") {
+				t.Fatalf("guidance %q does not match selection %q", text, choice)
+			}
+		}
+		if !strings.Contains(view, "Changing tunnel mode later requires recreating the cluster.") || strings.Contains(view, "NAT") {
+			t.Fatal("always show the tunnel-mode warning without mentioning NAT")
+		}
 		m.storeCurrentValue()
 		cfg, err := m.config()
 		if err != nil {

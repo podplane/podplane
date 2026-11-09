@@ -144,6 +144,32 @@ func TestCloudflarePasteReviewAndSave(t *testing.T) {
 	}
 }
 
+// TestCloudflareSkipCreation allows a missing secret to be provisioned separately.
+func TestCloudflareSkipCreation(t *testing.T) {
+	store := &memoryTunnelStore{}
+	m := testCloudflareForm(t, store)
+	if !strings.Contains(m.View(), "Esc: skip creation") {
+		t.Fatal("missing secret must offer skipping creation")
+	}
+	model, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = model.(cloudflareForm)
+	if cmd != nil || m.done || m.state != "manual" {
+		t.Fatal("skipping creation must request the tunnel UUID")
+	}
+	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = model.(cloudflareForm)
+	if m.done {
+		t.Fatal("skipping creation must not bypass UUID validation")
+	}
+	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Paste: true, Runes: []rune(testTunnelID)})
+	m = model.(cloudflareForm)
+	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = model.(cloudflareForm)
+	if !m.done || m.id != testTunnelID || store.exists {
+		t.Fatal("manual UUID must complete without creating the missing secret")
+	}
+}
+
 // TestCloudflareSkipLookup ignores late lookup results and uses the manually
 // supplied UUID without creating a secret.
 func TestCloudflareSkipLookup(t *testing.T) {

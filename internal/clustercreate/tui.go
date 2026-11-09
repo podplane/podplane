@@ -93,7 +93,7 @@ func (m configForm) RunInline(ctx context.Context) (tea.Model, error) {
 		label := field.label
 		validate := field.validate
 		if field.label == "What do you want to use for Kubernetes API access and cluster ingress?" {
-			_, _ = fmt.Fprintln(tui.FlowOutput(ctx), cloudflareTunnelDescription+"\n"+cloudflareTunnelDocsURL)
+			_, _ = fmt.Fprintln(tui.FlowOutput(ctx), "Changing tunnel mode later currently requires recreating the cluster.")
 		}
 		if len(field.choices) > 0 {
 			label += " (" + strings.Join(field.choices, "/") + ")"
@@ -109,6 +109,9 @@ func (m configForm) RunInline(ctx context.Context) (tea.Model, error) {
 			return nil, err
 		}
 		m.input.SetValue(value)
+		if field.label == "What do you want to use for Kubernetes API access and cluster ingress?" && value == "Cloudflare Tunnels" {
+			_, _ = fmt.Fprintln(tui.FlowOutput(ctx), cloudflareTunnelDescription+"\n"+cloudflareTunnelDocsURL)
+		}
 		verify := m.verifyDNS
 		m.verifyDNS = nil
 		if field.label == "DNS provider" && value == "aws-route53" && verify != nil {
@@ -174,7 +177,7 @@ func newConfigForm(providerKind, seedVersion string) (configForm, error) {
 		{label: "Cluster seed", value: seeds.Agentic, choices: []string{seeds.Agentic, seeds.Platform, seeds.Minimal, seeds.None}},
 		{label: "Configure networking options?", value: "no", choices: []string{"yes", "no"}},
 		{label: "IP mode", value: "Dual-stack", choices: []string{"Dual-stack"}, visible: func(m configForm) bool { return m.showNetworking }},
-		{label: "NAT", value: "Nstance NAT", choices: []string{"Nstance NAT", "Cloud-provider NAT"}, visible: func(m configForm) bool { return m.showNetworking }},
+		{label: "NAT", value: "Cloud-provider NAT", choices: []string{"Cloud-provider NAT", "Nstance NAT"}, visible: func(m configForm) bool { return m.showNetworking }},
 		{label: "VPC IPv4 CIDR", value: provider.VPC.V4CIDR, validate: validateVPCCIDR, visible: func(m configForm) bool { return m.showNetworking }},
 		zoneField,
 		{label: "Control plane architecture", value: pool.Arch, choices: []string{"arm64", "amd64"}},
@@ -285,7 +288,10 @@ func (m configForm) View() string {
 		width = 80
 	}
 	if m.fields[m.index].label == "What do you want to use for Kubernetes API access and cluster ingress?" {
-		input += "\n\n" + cloudflareTunnelDescription + "\n" + cloudflareTunnelDocsURL + "\nChanging tunnel or NAT mode later requires recreating the cluster."
+		if m.input.Value() == "Cloudflare Tunnels" {
+			input += "\n\n" + cloudflareTunnelDescription + "\n" + cloudflareTunnelDocsURL
+		}
+		input += "\n\nChanging tunnel mode later requires recreating the cluster."
 	}
 	if m.fields[m.index].label == "IP mode" {
 		input += "\n\nApplies to cloud workload networking and Kubernetes pods/services. IPv6-only is not available yet."
