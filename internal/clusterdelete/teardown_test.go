@@ -89,13 +89,17 @@ module "cluster" { source = "./module" }
 					t.Fatal(err)
 				}
 			}
-			support := []string{".podplane/cluster-backend.hcl", ".podplane/vmconfig_nst.json", ".podplane/future/extra.json", ".terraform/providers/link", ".terraform.lock.hcl"}
+			support := []string{"podplane.cluster.backend.hcl", ".podplane/cluster-backend.hcl", ".podplane/vmconfig_nst.json", ".podplane/future/extra.json", ".terraform/providers/link", ".terraform.lock.hcl"}
 			for _, name := range append(slices.Clone(support), ".podplane/cluster-schema.json", "oidc/.podplane/oidc-schema.json") {
 				path := filepath.Join(dir, name)
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(path, []byte("support"), 0o644); err != nil {
+				content := "support"
+				if name == "podplane.cluster.backend.hcl" {
+					content = "# Podplane managed OpenTofu/Terraform file.\nbucket = \"tfstate\"\n"
+				}
+				if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}

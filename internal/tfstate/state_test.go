@@ -41,7 +41,7 @@ func TestBackendWriteConfig(t *testing.T) {
 			name:       "AWS cluster",
 			backend:    cluster(clusterconfig.Provider{Kind: "aws", Account: "123456789012", Region: "us-east-1", Profile: "prod"}),
 			wantBucket: "demo-123456789012-tfstate",
-			wantFile:   ".podplane/cluster-backend.hcl",
+			wantFile:   "podplane.cluster.backend.hcl",
 			wantLock:   "podplane/cluster.tfstate.tflock",
 			wantConfig: []string{`bucket = "demo-123456789012-tfstate"`, `key = "podplane/cluster.tfstate"`, `region = "us-east-1"`, "encrypt = true", "use_lockfile = true", `profile = "prod"`},
 		},
@@ -49,7 +49,7 @@ func TestBackendWriteConfig(t *testing.T) {
 			name:       "Google cluster",
 			backend:    cluster(clusterconfig.Provider{Kind: "google", Project: "demo-project", Region: "australia-southeast1"}),
 			wantBucket: "demo-demo-project-tfstate",
-			wantFile:   ".podplane/cluster-backend.hcl",
+			wantFile:   "podplane.cluster.backend.hcl",
 			wantLock:   "podplane/cluster/default.tflock",
 			wantConfig: []string{`bucket = "demo-demo-project-tfstate"`, `prefix = "podplane/cluster"`},
 		},
@@ -59,7 +59,7 @@ func TestBackendWriteConfig(t *testing.T) {
 				return ForOIDC(&oidcconfig.Config{OIDC: oidcconfig.OIDC{Hostname: "https://Auth.Example.com", Provider: oidcconfig.Provider{Kind: "aws", Account: "123456789012", Region: "us-west-2"}}})
 			},
 			wantBucket: "auth-example-com-123456789012-tfstate-c204c854ffe5f35a",
-			wantFile:   ".podplane/oidc-backend.hcl",
+			wantFile:   "podplane.oidc.backend.hcl",
 			wantLock:   "podplane/oidc.tfstate.tflock",
 			wantConfig: []string{`bucket = "auth-example-com-123456789012-tfstate-c204c854ffe5f35a"`, `key = "podplane/oidc.tfstate"`, `region = "us-west-2"`, "use_lockfile = true"},
 		},
@@ -69,7 +69,7 @@ func TestBackendWriteConfig(t *testing.T) {
 				return ForOIDC(&oidcconfig.Config{OIDC: oidcconfig.OIDC{Hostname: "auth.example.com", Provider: oidcconfig.Provider{Kind: "google", Project: "demo-project", Region: "us-central1", Zone: "us-central1-a"}}})
 			},
 			wantBucket: "auth-example-com-demo-project-tfstate-c204c854ffe5f35a",
-			wantFile:   ".podplane/oidc-backend.hcl",
+			wantFile:   "podplane.oidc.backend.hcl",
 			wantLock:   "podplane/oidc/default.tflock",
 			wantConfig: []string{`bucket = "auth-example-com-demo-project-tfstate-c204c854ffe5f35a"`, `prefix = "podplane/oidc"`},
 		},
@@ -93,6 +93,9 @@ func TestBackendWriteConfig(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join(dir, tt.wantFile))
 			if err != nil {
 				t.Fatal(err)
+			}
+			if !strings.HasPrefix(string(raw), "# Podplane managed OpenTofu/Terraform file.\n") {
+				t.Fatal("backend must be marked for managed-file cleanup")
 			}
 			for _, want := range tt.wantConfig {
 				if !strings.Contains(string(raw), want) {

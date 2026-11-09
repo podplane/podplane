@@ -90,8 +90,8 @@ Remote access defaults to enabled: AWS exposes `enable_ssm`; Google exposes `ena
 │   ├── podplane.cluster.jsonc              # cluster config
 │   ├── .podplane/                          # generated support files
 │   │   ├── cluster-schema.json            # local editor schema
-│   │   ├── cluster-backend.hcl            # remote state configuration
 │   │   └── vmconfig_*.json                # pinned userdata dependency manifests
+│   ├── podplane.cluster.backend.hcl        # generated - remote state configuration
 │   ├── podplane.cluster.main.tf            # generated - providers, primary locals, modules
 │   ├── podplane.cluster.buckets.tf         # generated - object-storage resources
 │   ├── podplane.cluster.roles.tf           # generated - IAM roles and policies

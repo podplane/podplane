@@ -67,7 +67,7 @@ func TestRunNoApplyGeneratesStack(t *testing.T) {
 			t.Fatalf("OIDC file %s was not generated: %v", name, err)
 		}
 	}
-	backend, err := os.ReadFile(filepath.Join(dir, ".podplane/oidc-backend.hcl"))
+	backend, err := os.ReadFile(filepath.Join(dir, "podplane.oidc.backend.hcl"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -356,11 +356,17 @@ func storageResources(state tfexec.State) (map[string]bool, []string) {
 	return keep, buckets
 }
 
-// managedFiles selects marked Terraform files and the owned support directory's
+// managedFiles selects marked Terraform and backend files and the support directory's
 // contents, retaining the schema until the config is removed.
 func managedFiles(dir string) ([]string, error) {
 	paths, err := filepath.Glob(filepath.Join(dir, "podplane.cluster.*.tf"))
 	if err != nil {
+		return nil, err
+	}
+	backend := filepath.Join(dir, "podplane.cluster.backend.hcl")
+	if _, err := os.Lstat(backend); err == nil {
+		paths = append(paths, backend)
+	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
 	for _, path := range paths {
