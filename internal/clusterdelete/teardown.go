@@ -58,14 +58,13 @@ type TeardownOptions struct {
 	CheckStateBucket func(context.Context) error
 	ConfigPath       string
 	Select           func([]string) (Actions, error)
+	ConfirmCustom    ConfirmFunc
 }
 
 // Teardown retains storage during the first destroy, waits for all writers to
 // disappear, then empties and destroys selected storage. State and local files
 // are removed only after the final state contains no managed resources.
 func Teardown(ctx context.Context, opts TeardownOptions) (retErr error) {
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, destroyTimeout)
 	defer cancel()
 	state, err := opts.Engine.ReadState(ctx, opts.StackDir)
@@ -92,6 +91,26 @@ func Teardown(ctx context.Context, opts TeardownOptions) (retErr error) {
 	if !actions[Infrastructure] {
 		return nil
 	}
+	custom, err := customResources(opts.StackDir, state)
+	if err != nil {
+		return err
+	}
+	if len(custom) != 0 {
+		if opts.ConfirmCustom == nil {
+			return fmt.Errorf("custom resources require explicit confirmation")
+		}
+		approved, err := opts.ConfirmCustom("Warning: cluster deletion also destroys these custom managed resources (unless retained with storage):\n  " + strings.Join(custom, "\n  "))
+		if err != nil {
+			return err
+		}
+		if !approved {
+			return fmt.Errorf("cluster deletion cancelled")
+		}
+	}
+	// Plain confirmation blocks on stdin. Keep default signal handling until
+	// approval; only teardown needs graceful cancellation to release its state lock.
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	status := opts.Status
 	if status == nil {
 		status = func(string) {}
@@ -129,6 +148,13 @@ func Teardown(ctx context.Context, opts TeardownOptions) (retErr error) {
 	state, err = opts.Engine.ReadState(ctx, opts.StackDir)
 	if err != nil {
 		return err
+	}
+	currentCustom, err := customResources(opts.StackDir, state)
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(custom, currentCustom) {
+		return fmt.Errorf("custom resources changed during confirmation; rerun cluster delete to review them")
 	}
 	keep, currentBuckets := storageResources(state)
 	if !slices.Equal(buckets, currentBuckets) {
@@ -302,6 +328,7 @@ func managedFiles(dir string) ([]string, error) {
 			return nil, fmt.Errorf("refusing to remove unmanaged file %s", path)
 		}
 	}
+	paths = append(paths, filepath.Join(dir, ".terraform"), filepath.Join(dir, ".terraform.lock.hcl"))
 	support := filepath.Join(dir, ".podplane")
 	info, err := os.Lstat(support)
 	if os.IsNotExist(err) {

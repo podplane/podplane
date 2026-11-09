@@ -5,10 +5,12 @@
 package clusterdelete
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -19,9 +21,57 @@ import (
 	"github.com/podplane/podplane/internal/tfexec"
 )
 
+// TestTeardownPromptInterrupt checks that SIGINT exits while plain input is blocked.
+func TestTeardownPromptInterrupt(t *testing.T) {
+	if os.Getenv("PODPLANE_TEST_DELETE_INTERRUPT") == "1" {
+		_ = Teardown(t.Context(), TeardownOptions{
+			Engine: &teardownEngine{},
+			Select: func([]string) (Actions, error) {
+				_, _ = os.Stdout.WriteString("prompt ready\n")
+				_, err := bufio.NewReader(os.Stdin).ReadString('\n')
+				return Actions{}, err
+			},
+		})
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestTeardownPromptInterrupt$")
+	cmd.Env = append(os.Environ(), "PODPLANE_TEST_DELETE_INTERRUPT=1")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = stdin.Close() }()
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil || line != "prompt ready\n" {
+		t.Fatalf("prompt not reached: %q, %v", line, err)
+	}
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("interrupted deletion exited successfully")
+		}
+	case <-time.After(3 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("SIGINT did not exit the blocked deletion prompt; forced exit: %v", <-done)
+	}
+}
+
 // TestTeardown checks cleanup ordering, retention choices, and preservation after failures.
 func TestTeardown(t *testing.T) {
-	for _, scenario := range []string{"all", "late VM", "keep buckets", "keep state", "keep config", "none", "empty failure", "destroy failure", "storage plan failure", "server remains", "cancel", "invalid selection", "lock conflict", "bucket reused", "unlock failure", "cancel cleanup"} {
+	for _, scenario := range []string{"all", "custom", "custom declined", "custom changed", "late VM", "keep buckets", "keep state", "keep config", "keep files", "none", "empty failure", "destroy failure", "storage plan failure", "server remains", "cancel", "invalid selection", "lock conflict", "bucket reused", "unlock failure", "cancel cleanup"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -29,12 +79,17 @@ func TestTeardown(t *testing.T) {
 			config := filepath.Join(dir, "cluster.jsonc")
 			generated := filepath.Join(dir, "podplane.cluster.main.tf")
 			userFile := filepath.Join(dir, "user.tf")
-			for path, content := range map[string]string{config: "{}", generated: "# Podplane managed OpenTofu/Terraform file.\n", userFile: "user content"} {
+			for path, content := range map[string]string{config: "{}", generated: `# Podplane managed OpenTofu/Terraform file.
+resource "random_id" "name" {}
+resource "aws_s3_bucket" "netsy" {}
+resource "aws_autoscaling_group" "server" {}
+module "cluster" { source = "./module" }
+`, userFile: "user content"} {
 				if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
-			support := []string{".podplane/cluster-backend.hcl", ".podplane/vmconfig_nst.json", ".podplane/future/extra.json"}
+			support := []string{".podplane/cluster-backend.hcl", ".podplane/vmconfig_nst.json", ".podplane/future/extra.json", ".terraform/providers/link", ".terraform.lock.hcl"}
 			for _, name := range append(slices.Clone(support), ".podplane/cluster-schema.json", "oidc/.podplane/oidc-schema.json") {
 				path := filepath.Join(dir, name)
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -48,7 +103,13 @@ func TestTeardown(t *testing.T) {
 				{Address: "random_id.name", Type: "random_id"},
 				{Address: "aws_s3_bucket.netsy", Type: "aws_s3_bucket", Attributes: map[string]json.RawMessage{"bucket": json.RawMessage(`"netsy"`)}, Dependencies: []string{"random_id.name"}},
 				{Address: "aws_autoscaling_group.server", Type: "aws_autoscaling_group"},
+				{Address: `module.cluster["zone.a"].module.child.aws_instance.server[0]`, Type: "aws_instance"},
 			}}}
+			if strings.HasPrefix(scenario, "custom") {
+				engine.state.Resources = append(engine.state.Resources,
+					tfexec.StateResource{Address: "random_id.name_extra[0]", Type: "random_id"},
+					tfexec.StateResource{Address: `module.cluster_extra["a.b"].aws_instance.custom`, Type: "aws_instance"})
+			}
 			cloud := &teardownCloud{engine: engine, objects: map[string]bool{"netsy": true, "tfstate": true}}
 			actions := Actions{true, true, true, true, true}
 			switch scenario {
@@ -58,6 +119,8 @@ func TestTeardown(t *testing.T) {
 				actions = Actions{true, true}
 			case "keep config":
 				actions = Actions{true, true, true, true}
+			case "keep files":
+				actions = Actions{true, true, true}
 			case "none":
 				actions = Actions{}
 			case "invalid selection":
@@ -81,11 +144,28 @@ func TestTeardown(t *testing.T) {
 			case "cancel cleanup":
 				cloud.cancel = cancel
 			}
+			warned := false
 			err := Teardown(ctx, TeardownOptions{
 				DeleteOptions: DeleteOptions{ClusterConfig: &clusterconfig.ClusterConfig{Cluster: clusterconfig.Cluster{ID: "test"}}, StackDir: dir,
 					WaitTimeout: time.Millisecond, PollInterval: time.Millisecond, Confirm: func(string) (bool, error) { return true, nil }},
 				Engine: engine, Cloud: cloud, StateBucketName: "tfstate", ConfigPath: config,
 				CheckStateBucket: func(context.Context) error { return nil },
+				ConfirmCustom: func(message string) (bool, error) {
+					warned = true
+					if !strings.HasPrefix(scenario, "custom") ||
+						!strings.Contains(message, "random_id.name_extra[0]") ||
+						!strings.Contains(message, `module.cluster_extra["a.b"].aws_instance.custom`) ||
+						strings.Contains(message, `module.cluster["zone.a"]`) {
+						t.Fatalf("unexpected custom warning: %s", message)
+					}
+					if engine.locked || !cloud.objects["netsy"] || cloud.stateDeleted {
+						t.Fatal("warning followed destructive work")
+					}
+					if scenario == "custom changed" {
+						engine.state.Resources = append(engine.state.Resources, tfexec.StateResource{Address: "random_id.new", Type: "random_id"})
+					}
+					return scenario != "custom declined", nil
+				},
 				Select: func(labels []string) (Actions, error) {
 					if len(labels) != 5 || !strings.Contains(labels[1], "{netsy}") || !strings.Contains(labels[2], "{tfstate}") {
 						t.Fatalf("checklist = %v", labels)
@@ -96,15 +176,27 @@ func TestTeardown(t *testing.T) {
 					return actions, nil
 				},
 			})
-			wantError := slices.Contains([]string{"empty failure", "destroy failure", "storage plan failure", "server remains", "cancel", "invalid selection", "lock conflict", "bucket reused", "unlock failure", "cancel cleanup"}, scenario)
+			if warned != strings.HasPrefix(scenario, "custom") {
+				t.Fatalf("custom warning shown = %t", warned)
+			}
+			wantError := slices.Contains([]string{"custom declined", "custom changed", "empty failure", "destroy failure", "storage plan failure", "server remains", "cancel", "invalid selection", "lock conflict", "bucket reused", "unlock failure", "cancel cleanup"}, scenario)
 			if (err != nil) != wantError {
 				t.Fatalf("error = %v", err)
 			}
-			if scenario == "all" || scenario == "late VM" || scenario == "keep config" {
+			if scenario == "custom declined" && len(engine.state.Resources) != 6 ||
+				scenario == "custom changed" && len(engine.state.Resources) != 7 {
+				t.Fatal("unapproved custom resources were destroyed")
+			}
+			if scenario == "all" || scenario == "custom" || scenario == "late VM" || scenario == "keep config" || scenario == "keep files" {
 				if len(engine.state.Resources) != 0 || cloud.objects["netsy"] || cloud.objects["tfstate"] || !cloud.stateDeleted {
 					t.Fatal("cleanup incomplete")
 				}
-				removed := []string{generated}
+				var removed []string
+				if actions[TerraformFiles] {
+					removed = append(removed, generated)
+				} else if _, err := os.Stat(generated); err != nil {
+					t.Fatal("unchecked Terraform cleanup removed generated files")
+				}
 				if actions[ConfigFile] {
 					removed = append(removed, config)
 				}

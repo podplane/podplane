@@ -16,6 +16,10 @@ actions, then Tab to **Delete selected** and Enter to confirm. Unchecking an act
 clears dependent actions; they cannot be selected until their prerequisites are
 checked.
 
+Custom managed resources in the same Terraform root are included in deletion.
+Podplane lists them and asks for confirmation before teardown; `--auto-approve`
+prints the warning and accepts it. Custom `.tf` files alone do not trigger a warning.
+
 Podplane drains Nstance-managed VMs and destroys infrastructure while retaining
 storage. After Nstance servers and workload VMs have terminated, it empties
 selected cluster buckets—including old object versions—and lets Terraform
@@ -24,8 +28,9 @@ delete them. Retained storage and its dependencies stay tracked in state.
 The state bucket is deleted only after no managed resources remain. Local files
 are removed last; failures preserve them for recovery. User-owned Terraform files
 are left alone. Removing generated files clears the stack's `.podplane/` except
-`cluster-schema.json`, which is removed with the cluster config. Other stack
-directories, `.terraform/`, and `.terraform.lock.hcl` are left alone.
+`cluster-schema.json`, which is removed with the cluster config. The same cleanup
+action removes `.terraform/` and `.terraform.lock.hcl`; other stack directories
+and custom `.tf` source files are left alone.
 **Bucket deletion is permanent.**
 
 Podplane holds the OpenTofu/Terraform backend lock throughout teardown. For state

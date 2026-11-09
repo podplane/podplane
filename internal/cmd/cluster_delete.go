@@ -95,6 +95,10 @@ func newClusterDeleteCmd(c *config.Config) *cobra.Command {
 				StateLockKey:     stateBackend.LockKey(),
 				CheckStateBucket: func(ctx context.Context) error { return stateBackend.Check(ctx, io.Discard) },
 				ConfigPath:       path,
+				ConfirmCustom: func(message string) (bool, error) {
+					fmt.Println(message)
+					return tui.Confirm("Proceed with deletion of custom resources?", autoApprove, 1)
+				},
 				Select: func(labels []string) (clusterdelete.Actions, error) {
 					items := make([]tui.ChecklistItem, len(labels))
 					for i, label := range labels {
