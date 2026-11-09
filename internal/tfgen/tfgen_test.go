@@ -303,9 +303,9 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		"podplane.cluster.inputs.vm.tf",
 		"podplane.cluster.inputs.infra.tf",
 		"podplane.cluster.outputs.tf",
-		"podplane.cluster.vmconfig_knc_debian-13_arm64.json",
-		"podplane.cluster.vmconfig_knd_debian-13_arm64.json",
-		"podplane.cluster.vmconfig_nst_debian-13_arm64.json",
+		".podplane/vmconfig_knc_debian-13_arm64.json",
+		".podplane/vmconfig_knd_debian-13_arm64.json",
+		".podplane/vmconfig_nst_debian-13_arm64.json",
 	} {
 		if _, ok := contents[name]; !ok {
 			t.Fatalf("generated files missing %s: %#v", name, files)
@@ -331,7 +331,7 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 		`certificates = local.certificates`,
 		`templates = local.templates`,
 		`data "podplane_userdata" "knc_arm64"`,
-		`manifest_json = file("${path.module}/podplane.cluster.vmconfig_knc_debian-13_arm64.json")`,
+		`manifest_json = file("${path.module}/.podplane/vmconfig_knc_debian-13_arm64.json")`,
 		`immutable_ssh_authorized_keys = var.immutable_ssh_authorized_keys`,
 		`enable_ssm = var.enable_ssm`,
 		`content = base64encode(data.podplane_userdata.knc_arm64.content)`,
@@ -425,8 +425,8 @@ func TestGenerateAWSClusterTerraform(t *testing.T) {
 	if strings.Contains(contents["podplane.cluster.main.tf"], "TELEMETRY_ENABLED = tostring(var.telemetry_enabled)") || !strings.Contains(contents["podplane.cluster.main.tf"], "if value != null") {
 		t.Fatalf("generated mutable env must omit unset vmconfig-owned defaults:\n%s", contents["podplane.cluster.main.tf"])
 	}
-	if !strings.Contains(contents["podplane.cluster.vmconfig_knc_debian-13_arm64.json"], `"kind": "knc"`) {
-		t.Fatalf("generated manifest copy is invalid:\n%s", contents["podplane.cluster.vmconfig_knc_debian-13_arm64.json"])
+	if !strings.Contains(contents[".podplane/vmconfig_knc_debian-13_arm64.json"], `"kind": "knc"`) {
+		t.Fatalf("generated manifest copy is invalid:\n%s", contents[".podplane/vmconfig_knc_debian-13_arm64.json"])
 	}
 
 	// CIDRs are runtime inputs. A JSON CIDR change must affect only runtime inputs.
@@ -857,6 +857,26 @@ func assertExpectedTerraform(t *testing.T, name string, got string) {
 	}
 }
 
+// TestWriteClusterSupportDirectory checks generated manifests and the editor schema.
+func TestWriteClusterSupportDirectory(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "cluster.jsonc")
+	cfg := sampleClusterConfig()
+	opts := testClusterOptions(cfg)
+	if err := WriteCluster(configPath, cfg, opts); err != nil {
+		t.Fatal(err)
+	}
+	for _, manifest := range opts.VMConfigManifests {
+		content, err := os.ReadFile(filepath.Join(dir, ".podplane", manifest.Filename))
+		if err != nil || !bytes.Equal(content, manifest.JSON) {
+			t.Fatalf("generated manifest %s: %v", manifest.Filename, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".podplane/cluster-schema.json")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestWriteFilesPreservesCustomTF verifies managed writes do not alter custom
 // Terraform files.
 func TestWriteFilesPreservesCustomTF(t *testing.T) {
@@ -867,7 +887,7 @@ func TestWriteFilesPreservesCustomTF(t *testing.T) {
 	}
 	if err := WriteFiles(dir, []File{
 		{Name: "podplane.cluster.main.tf", Content: "locals {\n  short = 1\n  longer = 2\n}\n", Type: FileTypeTerraform},
-		{Name: "podplane.cluster.vmconfig_knc_debian-13_arm64.json", Content: "{}\n", Type: FileTypeJSON},
+		{Name: ".podplane/vmconfig_knc_debian-13_arm64.json", Content: "{}\n", Type: FileTypeJSON},
 	}); err != nil {
 		t.Fatalf("WriteFiles returned error: %v", err)
 	}
@@ -885,7 +905,7 @@ func TestWriteFilesPreservesCustomTF(t *testing.T) {
 	if formatted := hclwrite.Format(terraformed); !bytes.Equal(formatted, terraformed) {
 		t.Fatalf("generated Terraform is not canonically formatted:\n%s", terraformed)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "podplane.cluster.vmconfig_knc_debian-13_arm64.json"))
+	raw, err := os.ReadFile(filepath.Join(dir, ".podplane/vmconfig_knc_debian-13_arm64.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

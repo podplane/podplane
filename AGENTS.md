@@ -38,9 +38,9 @@ Keep command behavior aligned with the command context model documented in
 ## Config Schemas
 
 - JSON Schemas for user-authored config files live in `schemas/` and are embedded by the `schemas` Go package.
-- Generated `podplane.cluster.jsonc` and `podplane.oidc.jsonc` should use local relative `$schema` references (`./podplane.cluster.schema.json`, `./podplane.oidc.schema.json`) so tools using them can work offline.
+- Generated `podplane.cluster.jsonc` and `podplane.oidc.jsonc` should use local relative `$schema` references (`./.podplane/cluster-schema.json`, `./.podplane/oidc-schema.json`) so tools using them can work offline.
 - When changing config structs, validation rules, defaults, or config docs, update the corresponding schema file and tests in `internal/clusterconfig` or `internal/oidcconfig`.
-- Generated schema copies (`podplane.*.schema.json`) are CLI-managed support files, similar to generated `podplane.*.tf` files; the source of truth is the checked-in file under `schemas/`.
+- Generated schema copies in each stack's `.podplane/` directory are CLI-managed support files; the source of truth is the checked-in file under `schemas/`.
 - `schemas/podplane.oidc.truster.schema.json` is a verbatim copy of Truster's config schema at `TrusterModuleVersion` in `internal/tfgen/oidc.go`. Do not edit it by hand: after bumping the version, run `make truster-schema`. CI runs `make check-truster-schema` to catch drift.
 
 ## TUI / Terminal UI Guidance

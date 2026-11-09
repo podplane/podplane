@@ -152,9 +152,9 @@ func newBackend(name, prefix, cloud, account, project, region, profile string) (
 }
 
 // ConfigFile returns the name of the backend configuration file WriteConfig
-// generates beside the stack's managed .tf files.
+// generates in the stack's support directory, relative to the Terraform root.
 func (b Backend) ConfigFile() string {
-	return "podplane." + b.Name + ".tfbackend"
+	return ".podplane/" + b.Name + "-backend.hcl"
 }
 
 // LockKey returns the engine's lock object for this stack's default workspace.
@@ -180,7 +180,11 @@ func (b Backend) WriteConfig(dir string) error {
 	default:
 		return fmt.Errorf("unsupported remote-state backend %q", b.Kind)
 	}
-	if err := os.WriteFile(filepath.Join(dir, b.ConfigFile()), []byte(content), 0o644); err != nil {
+	path := filepath.Join(dir, b.ConfigFile())
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create backend configuration directory: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write OpenTofu backend configuration: %w", err)
 	}
 	return nil

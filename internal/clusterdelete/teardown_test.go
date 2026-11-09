@@ -21,7 +21,7 @@ import (
 
 // TestTeardown checks cleanup ordering, retention choices, and preservation after failures.
 func TestTeardown(t *testing.T) {
-	for _, scenario := range []string{"all", "late VM", "keep buckets", "keep state", "none", "empty failure", "destroy failure", "storage plan failure", "server remains", "cancel", "invalid selection", "lock conflict", "bucket reused", "unlock failure", "cancel cleanup"} {
+	for _, scenario := range []string{"all", "late VM", "keep buckets", "keep state", "keep config", "none", "empty failure", "destroy failure", "storage plan failure", "server remains", "cancel", "invalid selection", "lock conflict", "bucket reused", "unlock failure", "cancel cleanup"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -31,6 +31,16 @@ func TestTeardown(t *testing.T) {
 			userFile := filepath.Join(dir, "user.tf")
 			for path, content := range map[string]string{config: "{}", generated: "# Podplane managed OpenTofu/Terraform file.\n", userFile: "user content"} {
 				if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			support := []string{".podplane/cluster-backend.hcl", ".podplane/vmconfig_nst.json", ".podplane/future/extra.json"}
+			for _, name := range append(slices.Clone(support), ".podplane/cluster-schema.json", "oidc/.podplane/oidc-schema.json") {
+				path := filepath.Join(dir, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("support"), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -46,6 +56,8 @@ func TestTeardown(t *testing.T) {
 				actions = Actions{true}
 			case "keep state":
 				actions = Actions{true, true}
+			case "keep config":
+				actions = Actions{true, true, true, true}
 			case "none":
 				actions = Actions{}
 			case "invalid selection":
@@ -88,11 +100,15 @@ func TestTeardown(t *testing.T) {
 			if (err != nil) != wantError {
 				t.Fatalf("error = %v", err)
 			}
-			if scenario == "all" || scenario == "late VM" {
+			if scenario == "all" || scenario == "late VM" || scenario == "keep config" {
 				if len(engine.state.Resources) != 0 || cloud.objects["netsy"] || cloud.objects["tfstate"] || !cloud.stateDeleted {
 					t.Fatal("cleanup incomplete")
 				}
-				for _, path := range []string{config, generated} {
+				removed := []string{generated}
+				if actions[ConfigFile] {
+					removed = append(removed, config)
+				}
+				for _, path := range removed {
 					if _, err := os.Stat(path); !os.IsNotExist(err) {
 						t.Fatalf("file not removed: %s", path)
 					}
@@ -112,6 +128,22 @@ func TestTeardown(t *testing.T) {
 			}
 			if engine.locked && scenario != "unlock failure" {
 				t.Fatal("teardown left its state lock behind")
+			}
+			for _, name := range support {
+				_, statErr := os.Stat(filepath.Join(dir, name))
+				wantRemoved := err == nil && actions[TerraformFiles]
+				if os.IsNotExist(statErr) != wantRemoved {
+					t.Fatalf("support file %s: %v, want removed=%t", name, statErr, wantRemoved)
+				}
+			}
+			for _, name := range []string{"cluster.jsonc", ".podplane/cluster-schema.json", ".podplane"} {
+				_, statErr := os.Stat(filepath.Join(dir, name))
+				if os.IsNotExist(statErr) != (err == nil && actions[ConfigFile]) {
+					t.Fatalf("config support %s: %v", name, statErr)
+				}
+			}
+			if data, err := os.ReadFile(filepath.Join(dir, "oidc/.podplane/oidc-schema.json")); err != nil || string(data) != "support" {
+				t.Fatal("OIDC support files modified")
 			}
 			if data, err := os.ReadFile(userFile); err != nil || string(data) != "user content" {
 				t.Fatal("user Terraform file modified")

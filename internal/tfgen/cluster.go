@@ -134,7 +134,7 @@ func WriteCluster(configPath string, cfg *clusterconfig.ClusterConfig, opts Clus
 	if err := WriteFiles(dir, files); err != nil {
 		return err
 	}
-	return clusterconfig.WriteSchema(dir)
+	return clusterconfig.WriteSchema(configPath)
 }
 
 // TerraformDependencyRoot renders a minimal root module containing all cluster
@@ -296,7 +296,7 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 		}
 		for _, zone := range zones {
 			userdata := block("data", "podplane_userdata", safeName(target.Kind, target.Arch, zone))
-			userdata.Body.Attr("manifest_json", expr("file("+quote("${path.module}/podplane.cluster."+manifest.Filename)+")"))
+			userdata.Body.Attr("manifest_json", expr("file("+quote("${path.module}/.podplane/"+manifest.Filename)+")"))
 			userdata.Body.Attr("deps_mirror_url", str(opts.DepsMirrorURL))
 			userdata.Body.Attr("provider_kind", expr("local.provider_kind"))
 			if provider.Kind == "aws" {
@@ -721,7 +721,7 @@ func renderCluster(configPath string, cfg *clusterconfig.ClusterConfig, provider
 	for _, target := range RequiredVMTargets(cfg) {
 		manifest := manifests[target]
 		files = append(files, File{
-			Name:    "podplane.cluster." + manifest.Filename,
+			Name:    ".podplane/" + manifest.Filename,
 			Content: string(manifest.JSON),
 			Type:    FileTypeJSON,
 		})

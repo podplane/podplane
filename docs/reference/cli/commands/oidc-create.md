@@ -20,7 +20,7 @@ On both AWS and Google Cloud, the Truster module uses the same hostname-derived 
 
 OpenTofu/Terraform state is stored remotely in a customer-owned object storage bucket named `<hostname-slug>-<account-id>-tfstate-<hash>` on AWS or `<hostname-slug>-<project-id>-tfstate-<hash>` on Google Cloud. The hostname is lowercased and its trailing dot removed. The slug replaces dots with hyphens and is truncated to keep the bucket name within 63 characters; the hash is the first 16 hexadecimal characters of SHA-256 of the normalized hostname, distinguishing names such as `auth.example.com` and `auth-example.com`.
 
-Before OpenTofu/Terraform initializes, Podplane checks that bucket and, if it is absent, shows its name and asks before creating it. The bucket follows the same policy as cluster state buckets: private, encrypted, versioned, with state locking, and keeping noncurrent state versions for 90 days. Podplane generates the non-secret `podplane.oidc.tfbackend` alongside the managed `.tf` files; retain it with the stack so a fresh checkout can use the remote state. `--no-apply` writes that configuration but does not contact object storage or create a bucket.
+Before OpenTofu/Terraform initializes, Podplane checks that bucket and, if it is absent, shows its name and asks before creating it. The bucket follows the same policy as cluster state buckets: private, encrypted, versioned, with state locking, and keeping noncurrent state versions for 90 days. Podplane generates the non-secret `.podplane/oidc-backend.hcl`; retain it with the stack so a fresh checkout can use the remote state. `--no-apply` writes that configuration but does not contact object storage or create a bucket.
 
 OIDC buckets also carry ownership markers, checked before apply and destroy:
 

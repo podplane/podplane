@@ -58,7 +58,7 @@ func TestRunNoApplyGeneratesStack(t *testing.T) {
 		t.Fatalf("issuer URL = %q, want https://auth.example.com", issuerURL)
 	}
 	for _, name := range []string{
-		"podplane.oidc.schema.json",
+		".podplane/oidc-schema.json",
 		"podplane.oidc.main.tf",
 		"podplane.oidc.variables.tf",
 		"podplane.oidc.outputs.tf",
@@ -67,7 +67,7 @@ func TestRunNoApplyGeneratesStack(t *testing.T) {
 			t.Fatalf("OIDC file %s was not generated: %v", name, err)
 		}
 	}
-	backend, err := os.ReadFile(filepath.Join(dir, "podplane.oidc.tfbackend"))
+	backend, err := os.ReadFile(filepath.Join(dir, ".podplane/oidc-backend.hcl"))
 	if err != nil {
 		t.Fatal(err)
 	}

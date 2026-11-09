@@ -140,7 +140,7 @@ func TestWriteAddsDefaultLocalSchemaRef(t *testing.T) {
 // TestWriteSchemaWritesLocalSchemaFile checks the generated schema's source attribution.
 func TestWriteSchemaWritesLocalSchemaFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := WriteSchema(dir); err != nil {
+	if err := WriteSchema(filepath.Join(dir, "oidc.jsonc")); err != nil {
 		t.Fatalf("WriteSchema returned error: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, SchemaFileName))
@@ -173,7 +173,7 @@ func TestWriteSchemaWritesLocalSchemaFile(t *testing.T) {
 		switch v := node.(type) {
 		case map[string]any:
 			if ref, ok := v["$ref"].(string); ok {
-				if target, ok := strings.CutPrefix(ref, trusterSchemaFileName+"#"); ok {
+				if target, ok := strings.CutPrefix(ref, filepath.Base(trusterSchemaFileName)+"#"); ok {
 					refs++
 					if resolvePointer(truster, target) == nil {
 						t.Errorf("$ref %q does not resolve in the Truster schema", ref)

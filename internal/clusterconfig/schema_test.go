@@ -79,7 +79,7 @@ func TestWriteAddsDefaultLocalSchemaRef(t *testing.T) {
 // TestWriteSchemaWritesLocalSchemaFile checks that the schema copy identifies its checked-in source.
 func TestWriteSchemaWritesLocalSchemaFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := WriteSchema(dir); err != nil {
+	if err := WriteSchema(filepath.Join(dir, "cluster.jsonc")); err != nil {
 		t.Fatalf("WriteSchema returned error: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, SchemaFileName))

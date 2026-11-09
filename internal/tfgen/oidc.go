@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -70,15 +71,15 @@ func GenerateOIDC(cfg *oidcconfig.Config) ([]File, error) {
 }
 
 // WriteOIDC writes managed Terraform files for an OIDC config.
-func WriteOIDC(dir string, cfg *oidcconfig.Config) error {
+func WriteOIDC(configPath string, cfg *oidcconfig.Config) error {
 	files, err := GenerateOIDC(cfg)
 	if err != nil {
 		return err
 	}
-	if err := WriteFiles(dir, files); err != nil {
+	if err := WriteFiles(filepath.Dir(configPath), files); err != nil {
 		return err
 	}
-	return oidcconfig.WriteSchema(dir)
+	return oidcconfig.WriteSchema(configPath)
 }
 
 // addAWSOIDC adds the AWS provider, VPC, Truster module, and optional Route 53

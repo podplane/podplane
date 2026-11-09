@@ -66,7 +66,9 @@ Podplane's configuration aims to cover ~80% of infrastructure use cases. For the
 
 The CLI generates `podplane.cluster.*.tf` files alongside the `podplane.cluster.jsonc` config file. These files are fully managed by the CLI: `podplane cluster create` generates them and `podplane cluster upgrade` regenerates them while upgrading cached infrastructure dependencies. Users should never edit generated `.tf` files directly; instead, tune the `podplane.cluster.jsonc` file, set generated variables in `terraform.tfvars` or `*.auto.tfvars`, or create additional custom `.tf` files.
 
-Generated files prefer composition of published [Nstance Terraform modules](https://github.com/nstance-dev/nstance/tree/main/deploy/tf) (`cluster`, `account`, `network`, `shard`) over defining raw cloud resources. `podplane.cluster.main.tf` contains the Terraform/provider configuration, primary derived locals, and module calls. `podplane.cluster.buckets.tf` and `podplane.cluster.roles.tf` contain the cluster's object-storage and IAM resources. Generated inputs are split by review impact: `podplane.cluster.inputs.runtime.tf` reconfigures existing VMs, `podplane.cluster.inputs.vm.tf` can roll or reconcile VMs, and `podplane.cluster.inputs.infra.tf` changes cloud infrastructure and contains generated cluster-identity locals that are not supported as in-place overrides. Re-running `cluster create` after editing JSONC changes the corresponding inputs file, making the expected impact visible in filename-based review. `podplane.cluster.outputs.tf` contains generated outputs. `podplane.cluster.vmconfig.*.json` pins the vmconfig dependency manifests used to render VM userdata. `podplane.cluster.schema.json` contains a generated local JSON Schema referenced by `podplane.cluster.jsonc` so editors can provide validation, completion, and field documentation without internet access.
+Generated files prefer composition of published [Nstance Terraform modules](https://github.com/nstance-dev/nstance/tree/main/deploy/tf) (`cluster`, `account`, `network`, `shard`) over defining raw cloud resources. `podplane.cluster.main.tf` contains the Terraform/provider configuration, primary derived locals, and module calls. `podplane.cluster.buckets.tf` and `podplane.cluster.roles.tf` contain the cluster's object-storage and IAM resources. Generated inputs are split by review impact: `podplane.cluster.inputs.runtime.tf` reconfigures existing VMs, `podplane.cluster.inputs.vm.tf` can roll or reconcile VMs, and `podplane.cluster.inputs.infra.tf` changes cloud infrastructure and contains generated cluster-identity locals that are not supported as in-place overrides. Re-running `cluster create` after editing JSONC changes the corresponding inputs file, making the expected impact visible in filename-based review. `podplane.cluster.outputs.tf` contains generated outputs. `.podplane/` contains pinned vmconfig manifests, backend configuration, and the local editor schema.
+
+Cluster and OIDC stacks need separate Terraform root directories, each with its own Podplane-owned `.podplane/`. Keep it with the stack in version control.
 
 The pinned vmconfig manifest copies are Terraform inputs and may be edited/updated before planning to audit or override package versions, URLs, and checksums. Manifest changes appear in the Terraform plan through the `podplane_userdata` data source. Manifests are selected per VM pool architecture rather than the CLI host architecture, and `podplane cluster create` automatically fetches any required manifest missing from the local cache. Re-running the command replaces the copies with the currently cached manifests; use `podplane deps download --arch <architecture>` to refresh those cached versions first.
 
@@ -86,7 +88,10 @@ Remote access defaults to enabled: AWS exposes `enable_ssm`; Google exposes `ena
 ```
 ├── internaltools-production/
 │   ├── podplane.cluster.jsonc              # cluster config
-│   ├── podplane.cluster.schema.json        # generated - local editor schema
+│   ├── .podplane/                          # generated support files
+│   │   ├── cluster-schema.json            # local editor schema
+│   │   ├── cluster-backend.hcl            # remote state configuration
+│   │   └── vmconfig_*.json                # pinned userdata dependency manifests
 │   ├── podplane.cluster.main.tf            # generated - providers, primary locals, modules
 │   ├── podplane.cluster.buckets.tf         # generated - object-storage resources
 │   ├── podplane.cluster.roles.tf           # generated - IAM roles and policies
@@ -94,12 +99,11 @@ Remote access defaults to enabled: AWS exposes `enable_ssm`; Google exposes `ena
 │   ├── podplane.cluster.inputs.vm.tf       # generated - impact level 2, reconcile or roll VMs
 │   ├── podplane.cluster.inputs.infra.tf    # generated - impact levels 3 & 4, cloud and identity
 │   ├── podplane.cluster.outputs.tf         # generated - outputs
-│   ├── podplane.cluster.vmconfig.*.json    # generated - pinned userdata dependency manifests
 │   ├── terraform.tfvars                    # user-owned variable values
 │   └── custom.tf                           # your custom infrastructure
 ```
 
-`podplane cluster upgrade` downloads the latest compatible cached Terraform modules and providers, updates `.terraform.lock.hcl`, and regenerates all `podplane.cluster.*.tf` files and `podplane.cluster.schema.json` without touching user-owned files in the directory.
+`podplane cluster upgrade` downloads the latest compatible cached Terraform modules and providers, updates `.terraform.lock.hcl`, and regenerates all `podplane.cluster.*.tf` files and `.podplane/` support files without touching user-owned files in the directory.
 
 Podplane CLI requires the Podplane OpenTofu/Terraform provider built for the
 same release version. If an existing TF configuration locks another Podplane

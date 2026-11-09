@@ -57,7 +57,7 @@ func Run(ctx context.Context, opts Options) (string, error) {
 		}
 	}
 	dir := filepath.Dir(opts.ConfigPath)
-	if err := tfgen.WriteOIDC(dir, cfg); err != nil {
+	if err := tfgen.WriteOIDC(opts.ConfigPath, cfg); err != nil {
 		return "", err
 	}
 	if err := backend.WriteConfig(dir); err != nil {

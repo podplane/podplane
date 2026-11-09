@@ -33,7 +33,7 @@ data "aws_partition" "current" {
 }
 
 data "podplane_userdata" "knc_arm64" {
-  manifest_json = file("${path.module}/podplane.cluster.vmconfig_knc_debian-13_arm64.json")
+  manifest_json = file("${path.module}/.podplane/vmconfig_knc_debian-13_arm64.json")
   deps_mirror_url = "https://deps.podplane.dev"
   provider_kind = local.provider_kind
   aws_account_id = local.aws_account_id
@@ -42,7 +42,7 @@ data "podplane_userdata" "knc_arm64" {
 }
 
 data "podplane_userdata" "knd_arm64" {
-  manifest_json = file("${path.module}/podplane.cluster.vmconfig_knd_debian-13_arm64.json")
+  manifest_json = file("${path.module}/.podplane/vmconfig_knd_debian-13_arm64.json")
   deps_mirror_url = "https://deps.podplane.dev"
   provider_kind = local.provider_kind
   aws_account_id = local.aws_account_id
@@ -51,7 +51,7 @@ data "podplane_userdata" "knd_arm64" {
 }
 
 data "podplane_userdata" "nst_arm64_us_east_1a" {
-  manifest_json = file("${path.module}/podplane.cluster.vmconfig_nst_debian-13_arm64.json")
+  manifest_json = file("${path.module}/.podplane/vmconfig_nst_debian-13_arm64.json")
   deps_mirror_url = "https://deps.podplane.dev"
   provider_kind = local.provider_kind
   aws_account_id = local.aws_account_id

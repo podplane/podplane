@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/podplane/podplane/internal/clusterconfig"
 	"github.com/podplane/podplane/internal/tfexec"
 )
 
@@ -216,13 +217,16 @@ func Teardown(ctx context.Context, opts TeardownOptions) (retErr error) {
 			}
 		}
 		for _, file := range files {
-			if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
+			if err := os.RemoveAll(file); err != nil {
 				return fmt.Errorf("infrastructure deleted; remove local file %s manually: %w", file, err)
 			}
 		}
 		if actions[ConfigFile] {
 			if err := os.Remove(opts.ConfigPath); err != nil {
 				return fmt.Errorf("infrastructure deleted; remove config manually: %w", err)
+			}
+			if err := os.RemoveAll(filepath.Join(opts.StackDir, ".podplane")); err != nil {
+				return fmt.Errorf("remove cluster support directory: %w", err)
 			}
 		}
 		return nil
@@ -275,7 +279,8 @@ func storageResources(state tfexec.State) (map[string]bool, []string) {
 	return keep, buckets
 }
 
-// managedFiles permits cleanup only of regular files bearing Podplane's generated header.
+// managedFiles selects marked Terraform files and the owned support directory's
+// contents, retaining the schema until the config is removed.
 func managedFiles(dir string) ([]string, error) {
 	paths, err := filepath.Glob(filepath.Join(dir, "podplane.cluster.*.tf"))
 	if err != nil {
@@ -295,6 +300,27 @@ func managedFiles(dir string) ([]string, error) {
 		}
 		if !strings.HasPrefix(string(data), "# Podplane managed OpenTofu/Terraform file.\n") {
 			return nil, fmt.Errorf("refusing to remove unmanaged file %s", path)
+		}
+	}
+	support := filepath.Join(dir, ".podplane")
+	info, err := os.Lstat(support)
+	if os.IsNotExist(err) {
+		return paths, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("refusing to clean non-directory support path %s", support)
+	}
+	entries, err := os.ReadDir(support)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		path := filepath.Join(support, entry.Name())
+		if path != filepath.Join(dir, clusterconfig.SchemaFileName) {
+			paths = append(paths, path)
 		}
 	}
 	return paths, nil

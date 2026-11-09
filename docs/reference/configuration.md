@@ -14,7 +14,7 @@ Podplane uses JSONC (JSON with comments) configuration files to store cluster an
 
 This file is the user-facing projection of cluster configuration. It is created in the current directory by `podplane cluster create` and is required by many CLI commands such as `podplane login` and `podplane install`.
 
-New cluster configs include a relative `$schema` reference to `./podplane.cluster.schema.json`. Podplane writes that schema file next to the config so editors such as VS Code can provide offline validation, completion, and hover documentation in shared infrastructure repositories. The source schema is checked into the Podplane repository at `schemas/podplane.cluster.schema.json`.
+New cluster configs reference `./.podplane/cluster-schema.json` for offline editor validation, completion, and hover documentation. The source schema is checked into the Podplane repository at `schemas/podplane.cluster.schema.json`.
 
 ### Example
 
@@ -22,7 +22,7 @@ This example uses an existing user-managed tunnel and Nstance-managed NAT.
 
 ```jsonc
 {
-  "$schema": "./podplane.cluster.schema.json",
+  "$schema": "./.podplane/cluster-schema.json",
   "cluster": {
     "id": "internaltools-production",
     "name": "Internal Tools (Production)",
@@ -344,13 +344,13 @@ claim.
 
 This file stores configuration for a [Truster](https://truster.dev) server deployment. It is created in the current directory by `podplane oidc create` and is required by `podplane oidc delete`.
 
-New OIDC configs include a relative `$schema` reference to `./podplane.oidc.schema.json`. Podplane writes that schema file next to the config so editors such as VS Code can provide offline validation, completion, and hover documentation in shared infrastructure repositories. The source schema is checked into the Podplane repository at `schemas/podplane.oidc.schema.json`.
+New OIDC configs reference `./.podplane/oidc-schema.json` for offline editor validation, completion, and hover documentation. The source schema is checked into the Podplane repository at `schemas/podplane.oidc.schema.json`.
 
 ### Example
 
 ```jsonc
 {
-  "$schema": "./podplane.oidc.schema.json",
+  "$schema": "./.podplane/oidc-schema.json",
   "oidc": {
     "provider": {
       "kind": "aws",
@@ -422,7 +422,7 @@ Podplane owns the deployment, so these Truster settings are derived from the res
 | `serving_certificate` | The deployment module |
 | `secrets.provider` | The deployment module, for `oidc.provider.kind` |
 
-The generated `podplane.oidc.schema.json` references a pinned copy of Truster's schema, written next to it as `podplane.oidc.truster.schema.json`, so editors validate and complete `oidc.truster` too. Podplane deploys the Truster module at the same pinned version.
+The generated `.podplane/oidc-schema.json` references a pinned `truster-schema.json` in the same directory, so editors validate and complete `oidc.truster` too. Podplane deploys the Truster module at the same pinned version.
 
 ## File Location
 

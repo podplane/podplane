@@ -44,6 +44,9 @@ func WriteFiles(dir string, files []File) error {
 		case FileTypeTerraform:
 			content = string(hclwrite.Format([]byte(header + content)))
 		case FileTypeJSON:
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return fmt.Errorf("create generated file directory: %w", err)
+			}
 		default:
 			return fmt.Errorf("generated file %s has unsupported type %d", file.Name, file.Type)
 		}

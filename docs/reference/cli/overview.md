@@ -68,12 +68,12 @@ We recommend setting up a Git repository for storing all of your cluster and OID
 │   │
 │   ├── auth-production/                          # example Truster server
 │   │   ├── podplane.oidc.jsonc                   # config file
-│   │   ├── podplane.oidc.schema.json             # generated local editor schema
+│   │   ├── .podplane/                            # generated support files
 │   │   └── podplane.*.tf                         # generated .tf files
 │   │
 │   └── internaltools-production/                 # example cluster
 │       ├── podplane.cluster.jsonc                # config file
-│       ├── podplane.cluster.schema.json          # generated local editor schema
+│       ├── .podplane/                            # generated support files
 │       ├── podplane.*.tf                         # generated .tf files
 │       └── custom.tf                             # optional custom infrastructure
 ```

@@ -10,7 +10,7 @@ aliases:
 
 Starts by allowing you to choose what to remove using a list of checkboxes 
 covering: infrastructure, cluster buckets (names shown together), the
-Terraform-state bucket, generated cluster `.tf` files, and the
+Terraform-state bucket, generated cluster Terraform and support files, and the
 cluster config. All checkboxes are checked by default. Use ↑/↓ and Space to select
 actions, then Tab to **Delete selected** and Enter to confirm. Unchecking an action
 clears dependent actions; they cannot be selected until their prerequisites are
@@ -23,7 +23,10 @@ delete them. Retained storage and its dependencies stay tracked in state.
 
 The state bucket is deleted only after no managed resources remain. Local files
 are removed last; failures preserve them for recovery. User-owned Terraform files
-are left alone. **Bucket deletion is permanent.**
+are left alone. Removing generated files clears the stack's `.podplane/` except
+`cluster-schema.json`, which is removed with the cluster config. Other stack
+directories, `.terraform/`, and `.terraform.lock.hcl` are left alone.
+**Bucket deletion is permanent.**
 
 Podplane holds the OpenTofu/Terraform backend lock throughout teardown. For state
 bucket cleanup, it removes the lock last, then attempts bucket deletion. If another
